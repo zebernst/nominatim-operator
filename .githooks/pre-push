@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Pre-push quality checks for nominatim-operator (Go / kubebuilder).
+# Enable with: git config core.hooksPath .githooks
+# Or copy to .git/hooks/pre-push and chmod +x
+set -euo pipefail
+
+echo "▶ Running pre-push checks..."
+
+echo "  ✓ Format (go fmt dry-run)"
+unformatted="$(gofmt -l . | grep -v '^vendor/' || true)"
+if [ -n "$unformatted" ]; then
+  echo "    ✗ gofmt needed on:"
+  echo "$unformatted"
+  exit 1
+fi
+
+echo "  ✓ Vet"
+go vet ./...
+
+echo "  ✓ Lint"
+if command -v golangci-lint &>/dev/null; then
+  golangci-lint run
+elif [ -f Makefile ]; then
+  make lint
+else
+  echo "    ⚠ golangci-lint not found — skipping"
+fi
+
+echo "  ✓ Coverage enforcement"
+if [ -f .coverage-thresholds.json ]; then
+  if command -v jq &>/dev/null; then
+    CMD=$(jq -r '.enforcement.command' .coverage-thresholds.json)
+  else
+    CMD='go test $(go list ./... | grep -v /e2e) -coverprofile=coverage.out'
+  fi
+  echo "    Running: $CMD"
+  eval "$CMD"
+else
+  echo "    · No .coverage-thresholds.json — running make test"
+  make test
+fi
+
+echo "▶ Pre-push checks passed."

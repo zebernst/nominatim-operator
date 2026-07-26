@@ -47,6 +47,18 @@ cp -rf source dest          # NOT: cp -r source dest
 - `apt-get` - use `-y` flag
 - `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
 
+## Git hooks
+
+Pre-push quality checks live in `.githooks/pre-push` (fmt, vet, lint, coverage).
+
+Enable in a clone (one-time):
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Alternatively, copy to `.git/hooks/pre-push` and `chmod +x` that file.
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:970c3bf2 -->
 ## Beads Issue Tracker
 
@@ -126,3 +138,69 @@ bd prime                # Refresh Beads context
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 <!-- END BEADS CODEX SETUP -->
+
+## Build & Test
+
+- Test command: `make test`
+- Coverage command: `go test $(go list ./... | grep -v /e2e) -coverprofile=coverage.out` (or `make test`, which writes `cover.out`)
+- Lint command: `make lint`
+- Format command: `make fmt`
+- Type check: `make vet`
+
+## Architecture Overview
+
+Kubernetes operator (controller-runtime) that manages Nominatim geocoding deployments via custom resources.
+
+## Conventions & Patterns
+
+- Go idioms, `go vet` clean, exported types documented
+- golangci-lint (`.golangci.yml`) + `go fmt`
+- Coverage target 100% for unit-tested packages; e2e, generated DeepCopy, and thin wiring may be exempted when documented
+
+## metaswarm
+
+This project uses the [metaswarm](https://github.com/dsifry/metaswarm) Cursor plugin for multi-agent orchestration with quality gates (TDD, coverage thresholds, spec-driven development).
+
+### Workflow
+
+- **Most tasks**: `metaswarm-start-task` (or `/start-task`) — primes context, guides scoping, picks the right level of process
+- **Complex features** (multi-file, spec-driven): Describe what you want built with a Definition of Done, then say: `Use the full metaswarm orchestration workflow.`
+
+### Available Skills / Commands
+
+On Cursor, prefer plugin commands (`metaswarm-start-task`, …) or `.cursor/commands/` shims. Skills may also be invoked by name.
+
+| Invoke | Purpose |
+|---|---|
+| `metaswarm-start-task` / `$start` | Begin tracked work on a task |
+| `metaswarm-setup` / `$setup` | Interactive guided setup |
+| `metaswarm-prime` / `/prime` | Load relevant knowledge before starting |
+| `metaswarm-review-design` / `$design-review-gate` | Trigger design review gate |
+| `metaswarm-pr-shepherd` / `$pr-shepherd` | Monitor a PR through to merge |
+| `metaswarm-self-reflect` / `/self-reflect` | Extract learnings after a PR merge |
+| `metaswarm-brainstorm` / `$brainstorming-extension` | Refine an idea with design review gate |
+| `$handling-pr-comments` | Handle PR review comments |
+| `$create-issue` | Create a well-structured GitHub Issue |
+| `$plan-review-gate` | Adversarial plan review |
+
+Project shims live in `.cursor/commands/` (ignored by git). Do not use `.claude/commands/` or `CLAUDE.md` for this project — `AGENTS.md` is the single agent instruction file.
+
+### Quality Gates
+
+- **Design Review Gate** — review after design is drafted
+- **Plan Review Gate** — adversarial reviewers — ALL must PASS before presenting
+- **Coverage Gate** — `.coverage-thresholds.json` defines thresholds. BLOCKING gate before PR creation
+
+### Testing & Quality
+
+- **TDD is mandatory** — Write tests first, watch them fail, then implement
+- **100% test coverage required** for unit-tested packages — Enforced via `.coverage-thresholds.json` (e2e / generated / thin wiring may be exempted when documented)
+- **Coverage source of truth** — `.coverage-thresholds.json`
+
+### Workflow Enforcement (MANDATORY)
+
+- **After brainstorming** → MUST run design review gate before planning or implementation
+- **After any plan is created** → MUST run plan review gate before presenting to user
+- **Coverage** → `.coverage-thresholds.json` is the single source of truth
+- **Agent discipline** → NEVER use `--no-verify`, NEVER `git push --force` without approval, NEVER self-certify, ALWAYS follow TDD, STAY within file scope
+- **Context recovery** → Approved plans persist to `.beads/`. After compaction, run `bd prime --work-type recovery`.

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Coverage thresholds for orchestrator agents and CI. Go coverprofile excludes e2e; generated/wiring packages may be exempted via //go:build or coverage ignore patterns as needed.",
+  "thresholds": {
+    "lines": 100,
+    "branches": 100,
+    "functions": 100,
+    "statements": 100
+  },
+  "enforcement": {
+    "command": "go test $(go list ./... | grep -v /e2e) -coverprofile=coverage.out",
+    "blockPRCreation": true,
+    "blockTaskCompletion": true,
+    "description": "Orchestrator agents MUST check coverage against these thresholds before marking any task complete or creating a PR. If coverage drops below any threshold, the task fails. Prefer make test when envtest assets are required. Exemptions for generated CRD wiring and pure bootstrap main are acceptable when documented."
+  },
+  "exemptions": {
+    "notes": "Generated DeepCopy/zz_generated code, e2e packages, and thin main/cmd wiring may be excluded from the denominator when they are not meaningful unit-test targets."
+  }
+}

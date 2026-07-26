@@ -1,0 +1,37 @@
+{
+  "metaswarm_version": "0.12.0-cursor.2",
+  "distribution": "plugin",
+  "installed_at": "2026-07-26T21:26:00Z",
+  "updated_at": "2026-07-26T21:35:00Z",
+  "detection": {
+    "language": "go",
+    "framework": null,
+    "test_runner": "go test",
+    "linter": "golangci-lint",
+    "formatter": null,
+    "package_manager": null,
+    "type_checker": null,
+    "ci": "GitHub Actions",
+    "git_hooks": ".githooks/pre-push",
+    "platform": "cursor"
+  },
+  "choices": {
+    "coverage_threshold": 100,
+    "external_tools": false,
+    "visual_review": false,
+    "git_hooks": true,
+    "coverage_exemptions_ok": true
+  },
+  "commands": {
+    "test": "make test",
+    "coverage": "go test $(go list ./... | grep -v /e2e) -coverprofile=coverage.out",
+    "lint": "make lint",
+    "typecheck": "make vet",
+    "format_check": "gofmt -l ."
+  },
+  "notes": {
+    "bd": "Activated via mise (github:steveyegge/beads@1.1.2). Use `mise x -- bd` if not on PATH.",
+    "coverage": "100% target for unit packages; e2e, generated DeepCopy, and thin wiring may be exempted when documented. Prefer `make test` when envtest assets are required.",
+    "commands": "Project shims in .cursor/commands/; plugin commands under ~/.cursor/plugins/local/metaswarm"
+  }
+}

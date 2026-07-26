@@ -22,12 +22,39 @@ go.work
 # editor and IDE paraphernalia
 .idea
 .vscode
+.cursor/
 *.swp
 *.swo
 *~
 
 # Beads / Dolt files (added by bd init)
+# Do NOT ignore all of .beads/ — bd tracks config.yaml, metadata.json, and hooks in git.
+# Issue data syncs via Dolt (bd dolt push/pull), not by committing the DB.
 .dolt/
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Common / metaswarm
+.DS_Store
+*.log
+.env
+.env.local
+.env.*.local
+vendor/
+coverage/
+coverage.out
+cover.out
+
+# BEADS runtime / local-only (see also .beads/.gitignore)
+.beads/beads.db
+.beads/daemon.lock
+.beads/daemon.pid
+.beads/daemon.log
+.beads/temp/
+.beads/context/
+.beads/plans/
+.beads/knowledge/
+.beads/metrics/
+.beads/agents/
+.beads/interactions.jsonl
