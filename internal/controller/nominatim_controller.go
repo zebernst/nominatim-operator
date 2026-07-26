@@ -49,7 +49,7 @@ type NominatimReconciler struct {
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatims/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatims/finalizers,verbs=update
-// +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatimoperations,verbs=get;list;watch
+// +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatimoperations,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
@@ -81,6 +81,11 @@ func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	if err := r.reconcileWorkloads(ctx, nom); err != nil {
 		log.Error(err, "failed to reconcile Nominatim workloads")
+		return ctrl.Result{}, err
+	}
+
+	if err := r.reconcileBootstrap(ctx, nom); err != nil {
+		log.Error(err, "failed to reconcile Nominatim bootstrap")
 		return ctrl.Result{}, err
 	}
 

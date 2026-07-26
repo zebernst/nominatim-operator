@@ -45,6 +45,8 @@ func kindOf(obj client.Object) string {
 		return "Service"
 	case *corev1.PersistentVolumeClaim:
 		return "PersistentVolumeClaim"
+	case *nominatimv1alpha1.NominatimOperation:
+		return "NominatimOperation"
 	case *unstructured.Unstructured:
 		return o.GetKind()
 	}

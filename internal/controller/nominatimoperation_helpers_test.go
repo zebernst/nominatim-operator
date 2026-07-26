@@ -224,6 +224,96 @@ func TestBuildOperationJob(t *testing.T) {
 	g.Expect(envValue(job.Spec.Template.Spec.Containers[0].Env, "NOMINATIM_REGIONS")).To(Equal("africa/morocco"))
 }
 
+func TestBuildOperationJob_IncludesDBEnvAndPBFURLForBootstrap(t *testing.T) {
+	g := NewWithT(t)
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "boot-1", Namespace: "ns"},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
+			Regions:      []string{"europe/monaco", "africa/morocco"},
+		},
+	}
+	parent := &nominatimv1alpha1.Nominatim{
+		ObjectMeta: metav1.ObjectMeta{Name: "mynom", Namespace: "ns"},
+		Spec: nominatimv1alpha1.NominatimSpec{
+			Project: nominatimv1alpha1.ProjectSpec{
+				Volume: nominatimv1alpha1.VolumeSource{ClaimName: "project-pvc"},
+			},
+		},
+		Status: nominatimv1alpha1.NominatimStatus{
+			Database: nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: "pg-secret"},
+		},
+	}
+	job := buildOperationJob(op, parent, "staging-pvc", defaultWorkerImage)
+	c := job.Spec.Template.Spec.Containers[0]
+
+	g.Expect(envValue(c.Env, "PBF_URL")).To(Equal("https://download.geofabrik.de/europe/monaco-latest.osm.pbf"))
+
+	dsn := findEnvVar(c.Env, "NOMINATIM_DATABASE_DSN")
+	g.Expect(dsn).NotTo(BeNil())
+	g.Expect(dsn.ValueFrom).NotTo(BeNil())
+	g.Expect(dsn.ValueFrom.SecretKeyRef).NotTo(BeNil())
+	g.Expect(dsn.ValueFrom.SecretKeyRef.Name).To(Equal("pg-secret"))
+
+	for _, name := range []string{"PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"} {
+		e := findEnvVar(c.Env, name)
+		g.Expect(e).NotTo(BeNil(), "missing env %s", name)
+		g.Expect(e.ValueFrom).NotTo(BeNil())
+		g.Expect(e.ValueFrom.SecretKeyRef.Name).To(Equal("pg-secret"))
+	}
+}
+
+func TestBuildOperationJob_NoPBFURLForNonWriteHeavyOperation(t *testing.T) {
+	g := NewWithT(t)
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "update-1", Namespace: "ns"},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
+			Regions:      []string{"europe/monaco"},
+		},
+	}
+	parent := &nominatimv1alpha1.Nominatim{
+		ObjectMeta: metav1.ObjectMeta{Name: "mynom", Namespace: "ns"},
+		Spec: nominatimv1alpha1.NominatimSpec{
+			Project: nominatimv1alpha1.ProjectSpec{
+				Volume: nominatimv1alpha1.VolumeSource{ClaimName: "project-pvc"},
+			},
+		},
+	}
+	job := buildOperationJob(op, parent, "staging-pvc", defaultWorkerImage)
+	c := job.Spec.Template.Spec.Containers[0]
+	g.Expect(findEnvVar(c.Env, "PBF_URL")).To(BeNil())
+}
+
+func TestBuildOperationJob_NoDBEnvWhenConnectionSecretNameEmpty(t *testing.T) {
+	g := NewWithT(t)
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "boot-nosecret", Namespace: "ns"},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
+		},
+	}
+	parent := &nominatimv1alpha1.Nominatim{
+		ObjectMeta: metav1.ObjectMeta{Name: "mynom", Namespace: "ns"},
+		Spec: nominatimv1alpha1.NominatimSpec{
+			Project: nominatimv1alpha1.ProjectSpec{
+				Volume: nominatimv1alpha1.VolumeSource{ClaimName: "project-pvc"},
+			},
+		},
+	}
+	job := buildOperationJob(op, parent, "staging-pvc", defaultWorkerImage)
+	c := job.Spec.Template.Spec.Containers[0]
+	g.Expect(findEnvVar(c.Env, "NOMINATIM_DATABASE_DSN")).To(BeNil())
+}
+
+func TestPBFURLForRegion(t *testing.T) {
+	g := NewWithT(t)
+	g.Expect(pbfURLForRegion("europe/monaco")).To(Equal("https://download.geofabrik.de/europe/monaco-latest.osm.pbf"))
+}
+
 func TestIsTerminalOperationPhase(t *testing.T) {
 	g := NewWithT(t)
 	g.Expect(isTerminalOperationPhase(nominatimv1alpha1.NominatimOperationPhaseSucceeded)).To(BeTrue())
@@ -249,4 +339,15 @@ func envValue(env []corev1.EnvVar, name string) string {
 		}
 	}
 	return ""
+}
+
+// findEnvVar returns a pointer to the named EnvVar (including ValueFrom-sourced vars,
+// unlike envValue which only reads the literal Value field), or nil if absent.
+func findEnvVar(env []corev1.EnvVar, name string) *corev1.EnvVar {
+	for i := range env {
+		if env[i].Name == name {
+			return &env[i]
+		}
+	}
+	return nil
 }

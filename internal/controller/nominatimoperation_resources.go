@@ -217,10 +217,22 @@ func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominat
 		{Name: "PROJECT_DIR", Value: projectMountPath},
 		{Name: "IMPORT_STAGING", Value: stagingMountPath},
 	}
-	if len(op.Spec.Regions) > 0 {
-		env = append(env, corev1.EnvVar{Name: "NOMINATIM_REGIONS", Value: strings.Join(op.Spec.Regions, ",")})
-	} else if len(parent.Spec.Regions) > 0 {
-		env = append(env, corev1.EnvVar{Name: "NOMINATIM_REGIONS", Value: strings.Join(parent.Spec.Regions, ",")})
+
+	regions := op.Spec.Regions
+	if len(regions) == 0 {
+		regions = parent.Spec.Regions
+	}
+	if len(regions) > 0 {
+		env = append(env, corev1.EnvVar{Name: "NOMINATIM_REGIONS", Value: strings.Join(regions, ",")})
+		if isWriteHeavyOperation(op.Spec.Type) {
+			// First region drives the initial PBF download; multi-region imports add the
+			// rest via NOMINATIM_REGIONS (already set above).
+			env = append(env, corev1.EnvVar{Name: "PBF_URL", Value: pbfURLForRegion(regions[0])})
+		}
+	}
+
+	if parent.Status.Database.ConnectionSecretName != "" {
+		env = append(env, dbEnvVars(parent.Status.Database.ConnectionSecretName)...)
 	}
 
 	if parent.Spec.Flatnode != nil {
@@ -261,6 +273,13 @@ func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominat
 			},
 		},
 	}
+}
+
+// pbfURLForRegion builds the Geofabrik download URL for a single region path. Only the
+// first region drives the initial PBF download; additional regions are imported via
+// NOMINATIM_REGIONS (worker-side), not additional PBF_URL values.
+func pbfURLForRegion(region string) string {
+	return fmt.Sprintf("https://download.geofabrik.de/%s-latest.osm.pbf", region)
 }
 
 func conflictMessage(peer *nominatimv1alpha1.NominatimOperation) string {
