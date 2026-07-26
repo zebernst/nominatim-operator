@@ -322,6 +322,35 @@ type RegionStatus struct {
 	Message string `json:"message,omitempty"`
 }
 
+// DatabaseMode identifies how Nominatim is attached to Postgres.
+const (
+	// DatabaseModeClusterManaged means the operator owns a CNPG Cluster (spec.database.cluster).
+	DatabaseModeClusterManaged = "ClusterManaged"
+	// DatabaseModeClusterAttached means the operator watches an existing CNPG Cluster (spec.database.clusterRef).
+	DatabaseModeClusterAttached = "ClusterAttached"
+	// DatabaseModeConnectionSecret means degraded mode via an arbitrary connection Secret.
+	DatabaseModeConnectionSecret = "ConnectionSecret"
+)
+
+// DatabaseStatus reports observed database attachment for API/worker wiring.
+type DatabaseStatus struct {
+	// Mode is ClusterManaged, ClusterAttached, or ConnectionSecret.
+	// +optional
+	Mode string `json:"mode,omitempty"`
+
+	// ConnectionSecretName is the Secret name API/worker should use for Postgres credentials.
+	// +optional
+	ConnectionSecretName string `json:"connectionSecretName,omitempty"`
+
+	// ClusterName is the CNPG Cluster name when managing or attached (empty in degraded mode).
+	// +optional
+	ClusterName string `json:"clusterName,omitempty"`
+
+	// Degraded is true when using connectionSecretRef (no Cluster manage, no profiles, no backup pause).
+	// +optional
+	Degraded bool `json:"degraded,omitempty"`
+}
+
 // NominatimStatus defines the observed state of Nominatim.
 type NominatimStatus struct {
 	// Conditions represent the latest available observations of the instance.
@@ -333,6 +362,10 @@ type NominatimStatus struct {
 	// Regions is the source of truth for imported regions (replaces imported-regions.txt).
 	// +optional
 	Regions []RegionStatus `json:"regions,omitempty"`
+
+	// Database reports connection secret and CNPG attachment mode.
+	// +optional
+	Database DatabaseStatus `json:"database,omitempty"`
 
 	// ObservedGeneration is the last reconciled generation.
 	// +optional

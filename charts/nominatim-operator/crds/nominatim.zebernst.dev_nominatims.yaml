@@ -1083,6 +1083,26 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              database:
+                description: Database reports connection secret and CNPG attachment
+                  mode.
+                properties:
+                  clusterName:
+                    description: ClusterName is the CNPG Cluster name when managing
+                      or attached (empty in degraded mode).
+                    type: string
+                  connectionSecretName:
+                    description: ConnectionSecretName is the Secret name API/worker
+                      should use for Postgres credentials.
+                    type: string
+                  degraded:
+                    description: Degraded is true when using connectionSecretRef (no
+                      Cluster manage, no profiles, no backup pause).
+                    type: boolean
+                  mode:
+                    description: Mode is ClusterManaged, ClusterAttached, or ConnectionSecret.
+                    type: string
+                type: object
               observedGeneration:
                 description: ObservedGeneration is the last reconciled generation.
                 format: int64
