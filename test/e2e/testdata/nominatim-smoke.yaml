@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nominatim-e2e
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nominatim-pg-app
+  namespace: nominatim-e2e
+type: Opaque
+stringData:
+  # Fake CNPG-shaped keys so the operator can wire API env (no real Postgres required).
+  host: "localhost"
+  port: "5432"
+  dbname: "nominatim"
+  user: "nominatim"
+  password: "not-a-real-password"
+  uri: "postgresql://nominatim:not-a-real-password@localhost:5432/nominatim"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nominatim-project
+  namespace: nominatim-e2e
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: nominatim.zebernst.dev/v1alpha1
+kind: Nominatim
+metadata:
+  name: smoke
+  namespace: nominatim-e2e
+spec:
+  # Empty regions: avoid auto-Bootstrap Jobs that need a live database / Geofabrik download.
+  project:
+    volume:
+      claimName: nominatim-project
+  database:
+    connectionSecretRef:
+      name: nominatim-pg-app
+  api:
+    replicas: 1
+    suspendDuringOperations: Never

@@ -257,15 +257,115 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 
 		// +kubebuilder:scaffold:e2e-webhooks-checks
+	})
 
-		// TODO: Customize the e2e test suite with scenarios specific to your project.
-		// Consider applying sample/CR(s) and check their status and/or verifying
-		// the reconciliation by using the metrics, i.e.:
-		// metricsOutput := getMetricsOutput()
-		// Expect(metricsOutput).To(ContainSubstring(
-		//    fmt.Sprintf(`controller_runtime_reconcile_total{controller="%s",result="success"} 1`,
-		//    strings.ToLower(<Kind>),
-		// ))
+	Context("Nominatim reconcile smoke", func() {
+		const (
+			appNamespace = "nominatim-e2e"
+			nomName      = "smoke"
+		)
+
+		BeforeAll(func() {
+			By("applying Nominatim smoke fixtures (secret, PVC, CR with connectionSecretRef)")
+			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-smoke.yaml")
+			cmd := exec.Command("kubectl", "apply", "-f", fixture)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply Nominatim smoke fixtures")
+		})
+
+		AfterAll(func() {
+			By("deleting Nominatim smoke fixtures")
+			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-smoke.yaml")
+			cmd := exec.Command("kubectl", "delete", "-f", fixture, "--ignore-not-found=true")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "ns", appNamespace, "--ignore-not-found=true", "--wait=false")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("installs Nominatim CRDs", func() {
+			cmd := exec.Command("kubectl", "get", "crd", "nominatims.nominatim.zebernst.dev")
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Nominatim CRD should be installed")
+			cmd = exec.Command("kubectl", "get", "crd", "nominatimoperations.nominatim.zebernst.dev")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "NominatimOperation CRD should be installed")
+		})
+
+		It("reconciles API Deployment and Service for the smoke Nominatim", func() {
+			By("waiting for the Nominatim controller to become ready")
+			verifyNominatimController := func(g Gomega) {
+				cmd := exec.Command("kubectl", "logs",
+					"-l", "control-plane=controller-manager",
+					"-n", namespace,
+					"--tail=200",
+				)
+				out, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(out).To(ContainSubstring(`"controller": "nominatim"`), "Nominatim controller should start")
+				g.Expect(out).To(ContainSubstring(`Starting workers`), "Nominatim controller workers should start")
+				g.Expect(out).NotTo(ContainSubstring(`no matches for kind "HTTPRoute"`))
+			}
+			Eventually(verifyNominatimController).Should(Succeed())
+
+			By("waiting for the Nominatim API Deployment")
+			verifyAPIDeployment := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "nominatim", nomName,
+					"-n", appNamespace, "-o", "yaml")
+				nomYAML, _ := utils.Run(cmd)
+				_, _ = fmt.Fprintf(GinkgoWriter, "Nominatim CR:\n%s\n", nomYAML)
+
+				cmd = exec.Command("kubectl", "get", "deploy", nomName+"-api",
+					"-n", appNamespace, "-o", "jsonpath={.metadata.name}")
+				out, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred(), "API Deployment should exist")
+				g.Expect(out).To(Equal(nomName + "-api"))
+
+				cmd = exec.Command("kubectl", "get", "deploy", nomName+"-api",
+					"-n", appNamespace, "-o", "jsonpath={.spec.replicas}")
+				replicas, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(replicas).To(Equal("1"))
+			}
+			Eventually(verifyAPIDeployment).Should(Succeed())
+
+			By("waiting for the Nominatim API Service")
+			verifyAPIService := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "svc", nomName+"-api",
+					"-n", appNamespace, "-o", "jsonpath={.metadata.name}")
+				out, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred(), "API Service should exist")
+				g.Expect(out).To(Equal(nomName + "-api"))
+			}
+			Eventually(verifyAPIService).Should(Succeed())
+
+			By("confirming degraded database mode is recorded on status")
+			verifyDatabaseStatus := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "nominatim", nomName,
+					"-n", appNamespace,
+					"-o", "jsonpath={.status.database.connectionSecretName}")
+				out, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(out).To(Equal("nominatim-pg-app"))
+
+				cmd = exec.Command("kubectl", "get", "nominatim", nomName,
+					"-n", appNamespace,
+					"-o", "jsonpath={.status.database.mode}")
+				mode, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(mode).To(Equal("ConnectionSecret"))
+			}
+			Eventually(verifyDatabaseStatus).Should(Succeed())
+		})
+
+		It("keeps the controller-manager Running after Nominatim reconcile", func() {
+			cmd := exec.Command("kubectl", "get", "pods",
+				"-l", "control-plane=controller-manager",
+				"-n", namespace,
+				"-o", "jsonpath={.items[0].status.phase}")
+			out, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(out).To(Equal("Running"))
+		})
 	})
 })
 

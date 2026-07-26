@@ -61,21 +61,23 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-# TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
-# The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
-# CertManager is installed by default; skip with:
-# - CERT_MANAGER_INSTALL_SKIP=true
+# E2E assumes Kind. Creates a local 'kind' cluster when none exists (CI creates it explicitly).
+# CertManager is installed by default; skip with CERT_MANAGER_INSTALL_SKIP=true.
 .PHONY: test-e2e
-test-e2e: manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
+test-e2e: manifests generate fmt vet ## Run e2e on Kind: build/load image, install operator, reconcile smoke.
 	@command -v $(KIND) >/dev/null 2>&1 || { \
-		echo "Kind is not installed. Please install Kind manually."; \
+		echo "Kind is not installed. Please install Kind (https://kind.sigs.k8s.io/)."; \
 		exit 1; \
 	}
-	@$(KIND) get clusters | grep -q 'kind' || { \
-		echo "No Kind cluster is running. Please start a Kind cluster before running the e2e tests."; \
+	@command -v $(KUBECTL) >/dev/null 2>&1 || { \
+		echo "kubectl is not installed."; \
 		exit 1; \
 	}
-	go test ./test/e2e/ -v -ginkgo.v
+	@$(KIND) get clusters 2>/dev/null | grep -qx 'kind' || { \
+		echo "No Kind cluster named 'kind'; creating one..."; \
+		$(KIND) create cluster --name kind --wait 120s; \
+	}
+	go test ./test/e2e/ -v -ginkgo.v -timeout 40m
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
