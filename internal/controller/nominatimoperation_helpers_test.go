@@ -1,0 +1,252 @@
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+    10|Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package controller
+
+import (
+	"testing"
+
+	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	nominatimv1alpha1 "github.com/zebernst/nominatim-operator/api/v1alpha1"
+)
+
+func TestIsWriteHeavyOperation(t *testing.T) {
+	g := NewWithT(t)
+	g.Expect(isWriteHeavyOperation(nominatimv1alpha1.NominatimOperationBootstrap)).To(BeTrue())
+	g.Expect(isWriteHeavyOperation(nominatimv1alpha1.NominatimOperationAddRegions)).To(BeTrue())
+	g.Expect(isWriteHeavyOperation(nominatimv1alpha1.NominatimOperationReimport)).To(BeTrue())
+	g.Expect(isWriteHeavyOperation(nominatimv1alpha1.NominatimOperationUpdate)).To(BeFalse())
+	g.Expect(isWriteHeavyOperation(nominatimv1alpha1.NominatimOperationCatchUp)).To(BeFalse())
+	g.Expect(isWriteHeavyOperation(nominatimv1alpha1.NominatimOperationRefresh)).To(BeFalse())
+}
+
+func TestIsActiveOperationPhase(t *testing.T) {
+	g := NewWithT(t)
+	g.Expect(isActiveOperationPhase("")).To(BeTrue())
+	g.Expect(isActiveOperationPhase(nominatimv1alpha1.NominatimOperationPhasePending)).To(BeTrue())
+	g.Expect(isActiveOperationPhase(nominatimv1alpha1.NominatimOperationPhaseRunning)).To(BeTrue())
+	g.Expect(isActiveOperationPhase(nominatimv1alpha1.NominatimOperationPhaseSucceeded)).To(BeFalse())
+	g.Expect(isActiveOperationPhase(nominatimv1alpha1.NominatimOperationPhaseFailed)).To(BeFalse())
+}
+
+func TestFindConflictingOperation(t *testing.T) {
+	g := NewWithT(t)
+
+	bootstrap := nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "bootstrap-1"},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
+		},
+		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseRunning},
+	}
+	update := nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "update-1"},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
+		},
+		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhasePending},
+	}
+	otherNom := nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "other"},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "other-nom"},
+		},
+		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseRunning},
+	}
+	done := nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "done"},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
+		},
+		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
+	}
+
+	// Write-heavy vs write-heavy.
+	conflict := findConflictingOperation(&nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "bootstrap-2"},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationReimport,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
+		},
+	}, []nominatimv1alpha1.NominatimOperation{bootstrap, otherNom, done})
+	g.Expect(conflict).NotTo(BeNil())
+	g.Expect(conflict.Name).To(Equal("bootstrap-1"))
+
+	// Update conflicts with active write-heavy.
+	conflict = findConflictingOperation(&update, []nominatimv1alpha1.NominatimOperation{bootstrap})
+	g.Expect(conflict).NotTo(BeNil())
+	g.Expect(conflict.Name).To(Equal("bootstrap-1"))
+
+	// Write-heavy conflicts with active Update.
+	conflict = findConflictingOperation(&bootstrap, []nominatimv1alpha1.NominatimOperation{update})
+	g.Expect(conflict).NotTo(BeNil())
+	g.Expect(conflict.Name).To(Equal("update-1"))
+
+	// Two Updates with no write-heavy are allowed.
+	update2 := update
+	update2.Name = "update-2"
+	conflict = findConflictingOperation(&update2, []nominatimv1alpha1.NominatimOperation{update, done, otherNom})
+	g.Expect(conflict).To(BeNil())
+}
+
+func TestResolveStagingSpec(t *testing.T) {
+	g := NewWithT(t)
+	sc := "fast"
+
+	opOnly := &nominatimv1alpha1.NominatimOperation{
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Staging: &nominatimv1alpha1.StagingSpec{Size: "100Gi", StorageClassName: &sc},
+		},
+	}
+	parent := &nominatimv1alpha1.Nominatim{
+		Spec: nominatimv1alpha1.NominatimSpec{
+			Staging: &nominatimv1alpha1.StagingSpec{Size: "20Gi"},
+		},
+	}
+	resolved := resolveStagingSpec(opOnly, parent)
+	g.Expect(resolved.Size).To(Equal("100Gi"))
+	g.Expect(resolved.StorageClassName).NotTo(BeNil())
+	g.Expect(*resolved.StorageClassName).To(Equal("fast"))
+
+	// Parent defaults when Operation.staging unset.
+	resolved = resolveStagingSpec(&nominatimv1alpha1.NominatimOperation{}, parent)
+	g.Expect(resolved.Size).To(Equal("20Gi"))
+
+	// Built-in default when neither sets size.
+	resolved = resolveStagingSpec(&nominatimv1alpha1.NominatimOperation{}, &nominatimv1alpha1.Nominatim{})
+	g.Expect(resolved.Size).To(Equal(defaultStagingSize))
+}
+
+func TestVolumeClaimName(t *testing.T) {
+	g := NewWithT(t)
+	g.Expect(volumeClaimName(nominatimv1alpha1.VolumeSource{ClaimName: "proj"}, "fallback")).To(Equal("proj"))
+	g.Expect(volumeClaimName(nominatimv1alpha1.VolumeSource{
+		VolumeClaimTemplate: &nominatimv1alpha1.VolumeClaimTemplate{
+			Metadata: metav1.ObjectMeta{Name: "from-template"},
+		},
+	}, "fallback")).To(Equal("from-template"))
+	g.Expect(volumeClaimName(nominatimv1alpha1.VolumeSource{}, "fallback")).To(Equal("fallback"))
+}
+
+func TestWorkerImageForOperation(t *testing.T) {
+	g := NewWithT(t)
+	g.Expect(workerImageForOperation(&nominatimv1alpha1.NominatimOperation{})).To(Equal(defaultWorkerImage))
+	g.Expect(workerImageForOperation(&nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{workerImageAnnotation: "example.com/worker:v1"},
+		},
+	})).To(Equal("example.com/worker:v1"))
+}
+
+func TestPhaseFromJob(t *testing.T) {
+	g := NewWithT(t)
+	g.Expect(phaseFromJob(1, 0, 0)).To(Equal(nominatimv1alpha1.NominatimOperationPhaseSucceeded))
+	g.Expect(phaseFromJob(0, 1, 0)).To(Equal(nominatimv1alpha1.NominatimOperationPhaseFailed))
+	g.Expect(phaseFromJob(0, 0, 1)).To(Equal(nominatimv1alpha1.NominatimOperationPhaseRunning))
+	g.Expect(phaseFromJob(0, 0, 0)).To(Equal(nominatimv1alpha1.NominatimOperationPhasePending))
+}
+
+func TestBuildStagingPVC(t *testing.T) {
+	g := NewWithT(t)
+	sc := "ssd"
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "op1", Namespace: "default"},
+	}
+	pvc := buildStagingPVC(op, nominatimv1alpha1.StagingSpec{Size: "50Gi", StorageClassName: &sc})
+	g.Expect(pvc.Name).To(Equal("op1-staging"))
+	g.Expect(pvc.Spec.AccessModes).To(ContainElement(corev1.ReadWriteOnce))
+	g.Expect(pvc.Spec.Resources.Requests[corev1.ResourceStorage]).To(Equal(resource.MustParse("50Gi")))
+	g.Expect(pvc.Spec.StorageClassName).NotTo(BeNil())
+	g.Expect(*pvc.Spec.StorageClassName).To(Equal("ssd"))
+	// Must be a real PVC request — never emptyDir.
+	g.Expect(pvc.Spec.VolumeMode).To(BeNil())
+}
+
+func TestBuildOperationJob(t *testing.T) {
+	g := NewWithT(t)
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "boot-1", Namespace: "ns"},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
+			Regions:      []string{"europe/monaco"},
+		},
+	}
+	parent := &nominatimv1alpha1.Nominatim{
+		ObjectMeta: metav1.ObjectMeta{Name: "mynom", Namespace: "ns"},
+		Spec: nominatimv1alpha1.NominatimSpec{
+			Project: nominatimv1alpha1.ProjectSpec{
+				Volume: nominatimv1alpha1.VolumeSource{ClaimName: "project-pvc"},
+			},
+			Flatnode: &nominatimv1alpha1.FlatnodeSpec{
+				Volume: nominatimv1alpha1.VolumeSource{ClaimName: "flatnode-pvc"},
+			},
+		},
+	}
+	job := buildOperationJob(op, parent, "staging-pvc", defaultWorkerImage)
+	g.Expect(job.Name).To(Equal("boot-1"))
+	g.Expect(job.Spec.Template.Spec.RestartPolicy).To(Equal(corev1.RestartPolicyNever))
+	g.Expect(job.Spec.Template.Spec.Containers).To(HaveLen(1))
+	c := job.Spec.Template.Spec.Containers[0]
+	g.Expect(c.Image).To(Equal(defaultWorkerImage))
+	g.Expect(envValue(c.Env, "OPERATION_TYPE")).To(Equal("Bootstrap"))
+	g.Expect(envValue(c.Env, "NOMINATIM_REGIONS")).To(Equal("europe/monaco"))
+	g.Expect(envValue(c.Env, "NOMINATIM_FLATNODE_FILE")).To(Equal(flatnodeFilePath))
+	g.Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(3))
+	g.Expect(c.VolumeMounts).To(HaveLen(3))
+
+	// Fall back to parent regions when Operation.regions is empty.
+	opNoRegions := op.DeepCopy()
+	opNoRegions.Spec.Regions = nil
+	parent.Spec.Regions = []string{"africa/morocco"}
+	job = buildOperationJob(opNoRegions, parent, "staging-pvc", defaultWorkerImage)
+	g.Expect(envValue(job.Spec.Template.Spec.Containers[0].Env, "NOMINATIM_REGIONS")).To(Equal("africa/morocco"))
+}
+
+func TestIsTerminalOperationPhase(t *testing.T) {
+	g := NewWithT(t)
+	g.Expect(isTerminalOperationPhase(nominatimv1alpha1.NominatimOperationPhaseSucceeded)).To(BeTrue())
+	g.Expect(isTerminalOperationPhase(nominatimv1alpha1.NominatimOperationPhaseFailed)).To(BeTrue())
+	g.Expect(isTerminalOperationPhase(nominatimv1alpha1.NominatimOperationPhaseRunning)).To(BeFalse())
+}
+
+func TestConflictMessage(t *testing.T) {
+	g := NewWithT(t)
+	peer := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "peer"},
+		Spec:       nominatimv1alpha1.NominatimOperationSpec{Type: nominatimv1alpha1.NominatimOperationBootstrap},
+		Status:     nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseRunning},
+	}
+	g.Expect(conflictMessage(peer)).To(ContainSubstring("Conflict"))
+	g.Expect(conflictMessage(peer)).To(ContainSubstring("peer"))
+}
+
+func envValue(env []corev1.EnvVar, name string) string {
+	for _, e := range env {
+		if e.Name == name {
+			return e.Value
+		}
+	}
+	return ""
+}
