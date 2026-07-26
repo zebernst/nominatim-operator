@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "nominatim",
+  "project_id": "c61a0a50-62af-4c7f-a62c-e7edf7000730"
+}
