@@ -6,4 +6,14 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: nominatimoperation-sample
 spec:
-  # TODO(user): Add fields here
+  # Imperative finite workflow — do NOT manage via Flux/GitOps Kustomizations.
+  type: Update
+  nominatimRef:
+    name: nominatim-sample
+  # Optional: regions for AddRegions / Reimport
+  # regions:
+  #   - north-america/us-west
+  # Optional: override Nominatim.spec.staging for this operation's PVC
+  # staging:
+  #   size: 50Gi
+  #   storageClassName: fast

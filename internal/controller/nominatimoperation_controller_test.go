@@ -51,7 +51,12 @@ var _ = Describe("NominatimOperation Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: nominatimv1alpha1.NominatimOperationSpec{
+						Type: nominatimv1alpha1.NominatimOperationUpdate,
+						NominatimRef: nominatimv1alpha1.LocalObjectReference{
+							Name: "test-nominatim",
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}

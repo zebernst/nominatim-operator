@@ -11,14 +11,32 @@ spec:
     kind: NominatimOperation
     listKind: NominatimOperationList
     plural: nominatimoperations
+    shortNames:
+    - nomop
     singular: nominatimoperation
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.type
+      name: Type
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: NominatimOperation is the Schema for the nominatimoperations
-          API.
+        description: |-
+          NominatimOperation is a finite, controller- or kubectl-created workflow against a Nominatim
+          instance (bootstrap, region changes, updates, etc.). It wraps batch Jobs and optional
+          operation-scoped staging PVCs.
+
+          NominatimOperation is NOT intended for Flux/GitOps continuous reconciliation. Treat it like
+          a Job: create it to kick work, observe status until Succeeded/Failed, then leave or delete.
+          Desired long-lived state belongs on the Nominatim CR; consequential ops use NominatimOperation.
         properties:
           apiVersion:
             description: |-
@@ -38,15 +56,161 @@ spec:
           metadata:
             type: object
           spec:
-            description: NominatimOperationSpec defines the desired state of NominatimOperation.
+            description: |-
+              NominatimOperationSpec defines the desired state of NominatimOperation.
+
+              NominatimOperation is an imperative, finite workflow — NOT a GitOps desired-state surface.
+              Do not manage NominatimOperation objects via Flux Kustomizations or similar continuous apply;
+              create them with kubectl (or let the Nominatim controller create them) and let them complete.
             properties:
-              foo:
-                description: Foo is an example field of NominatimOperation. Edit nominatimoperation_types.go
-                  to remove/update
+              nominatimRef:
+                description: |-
+                  NominatimRef names the Nominatim instance in the same namespace.
+                  The operation controller will set an ownerReference to that Nominatim when reconciling
+                  (callers need not set metadata.ownerReferences).
+                properties:
+                  name:
+                    description: Name of the referent.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              regions:
+                description: |-
+                  Regions are Geofabrik-style region paths targeted by AddRegions or Reimport.
+                  Ignored for other operation types unless documented otherwise by the controller.
+                items:
+                  type: string
+                type: array
+              staging:
+                description: |-
+                  Staging overrides Nominatim.spec.staging for this operation's download PVC
+                  (size and/or storageClass). When unset, the parent Nominatim staging defaults apply.
+                properties:
+                  size:
+                    description: Size is the default staging PVC size (e.g. 50Gi).
+                    type: string
+                  storageClassName:
+                    description: StorageClassName for staging PVCs.
+                    type: string
+                type: object
+              type:
+                description: Type selects the workflow to run.
+                enum:
+                - Bootstrap
+                - AddRegions
+                - Reimport
+                - Update
+                - CatchUp
+                - Refresh
+                - Migrate
+                - Freeze
                 type: string
+            required:
+            - nominatimRef
+            - type
             type: object
           status:
             description: NominatimOperationStatus defines the observed state of NominatimOperation.
+            properties:
+              completionTime:
+                description: CompletionTime is when the operation reached a terminal
+                  phase (Succeeded or Failed).
+                format: date-time
+                type: string
+              conditions:
+                description: Conditions represent the latest available observations
+                  of the operation.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              jobRef:
+                description: JobRef names the batch Job owned by this operation, when
+                  created.
+                properties:
+                  name:
+                    description: Name of the referent.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              message:
+                description: Message is a human-readable summary of the current state.
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the last reconciled generation.
+                format: int64
+                type: integer
+              phase:
+                description: Phase is the high-level operation progress (Pending,
+                  Running, Succeeded, Failed).
+                enum:
+                - Pending
+                - Running
+                - Succeeded
+                - Failed
+                type: string
+              startTime:
+                description: StartTime is when the operation began running.
+                format: date-time
+                type: string
             type: object
         type: object
     served: true
