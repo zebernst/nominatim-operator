@@ -1,0 +1,506 @@
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package controller
+
+import (
+	"context"
+	"fmt"
+
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
+	nominatimv1alpha1 "github.com/zebernst/nominatim-operator/api/v1alpha1"
+)
+
+// HTTPRouteGVK is the Gateway API HTTPRoute resource. Referenced as unstructured so the
+// operator does not add a go.mod dependency on sigs.k8s.io/gateway-api.
+var HTTPRouteGVK = schema.GroupVersionKind{
+	Group:   "gateway.networking.k8s.io",
+	Version: "v1",
+	Kind:    "HTTPRoute",
+}
+
+// Default image coordinates and workload component labels.
+// Mount paths / volume names share package consts with Operation Jobs (nominatimoperation_resources.go).
+const (
+	DefaultAPIRepository = "ghcr.io/zebernst/nominatim-api"
+	DefaultUIRepository  = "ghcr.io/zebernst/nominatim-ui"
+	DefaultImageTag      = "latest"
+
+	ComponentAPI      = "api"
+	ComponentUI       = "ui"
+	ComponentProject  = "project"
+	ComponentFlatnode = "flatnode"
+
+	flatnodeFileEnv = "NOMINATIM_FLATNODE_FILE"
+
+	workloadContainerPort = 8080
+	workloadServicePort   = 80
+)
+
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
+
+// APIName is the owned API Deployment/Service name for a Nominatim instance.
+func APIName(nom *nominatimv1alpha1.Nominatim) string { return nom.Name + "-api" }
+
+// UIName is the owned UI Deployment/Service name for a Nominatim instance.
+func UIName(nom *nominatimv1alpha1.Nominatim) string { return nom.Name + "-ui" }
+
+// ProjectPVCName is the default project PVC name when the template omits metadata.name.
+func ProjectPVCName(nom *nominatimv1alpha1.Nominatim) string { return nom.Name + "-project" }
+
+// FlatnodePVCName is the default flatnode PVC name when the template omits metadata.name.
+func FlatnodePVCName(nom *nominatimv1alpha1.Nominatim) string { return nom.Name + "-flatnode" }
+
+// commonLabels returns the standard label set for owned Nominatim workload objects.
+func commonLabels(nom *nominatimv1alpha1.Nominatim, component string) map[string]string {
+	labels := map[string]string{
+		"app.kubernetes.io/name":     "nominatim",
+		"app.kubernetes.io/instance": nom.Name,
+	}
+	if component != "" {
+		labels["app.kubernetes.io/component"] = component
+	}
+	return labels
+}
+
+// reconcileWorkloads reconciles the project/flatnode PVCs and the API/UI serving plane.
+// It must run after reconcileDatabase, which populates nom.Status.Database.
+func (r *NominatimReconciler) reconcileWorkloads(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
+	projectClaim, err := r.reconcilePVC(ctx, nom, nom.Spec.Project.Volume, ProjectPVCName(nom), ComponentProject)
+	if err != nil {
+		return fmt.Errorf("reconcile project volume: %w", err)
+	}
+
+	var flatnodeClaim string
+	if nom.Spec.Flatnode != nil {
+		flatnodeClaim, err = r.reconcilePVC(ctx, nom, nom.Spec.Flatnode.Volume, FlatnodePVCName(nom), ComponentFlatnode)
+		if err != nil {
+			return fmt.Errorf("reconcile flatnode volume: %w", err)
+		}
+	}
+
+	if err := r.reconcileAPI(ctx, nom, projectClaim, flatnodeClaim); err != nil {
+		return err
+	}
+
+	return r.reconcileUI(ctx, nom)
+}
+
+// reconcilePVC resolves a VolumeSource into a claim name usable by a Pod spec: it passes
+// through an existing ClaimName untouched, or creates (and owns) a PVC from
+// VolumeClaimTemplate when ClaimName is empty. Storage size/class are passed through
+// verbatim from spec — never hardcoded here.
+func (r *NominatimReconciler) reconcilePVC(ctx context.Context, nom *nominatimv1alpha1.Nominatim, vs nominatimv1alpha1.VolumeSource, defaultName, component string) (string, error) {
+	if vs.ClaimName != "" {
+		return vs.ClaimName, nil
+	}
+	if vs.VolumeClaimTemplate == nil {
+		return "", fmt.Errorf("volume requires claimName and/or volumeClaimTemplate")
+	}
+
+	name := vs.VolumeClaimTemplate.Metadata.Name
+	if name == "" {
+		name = defaultName
+	}
+
+	existing := &corev1.PersistentVolumeClaim{}
+	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: nom.Namespace}, existing)
+	if err == nil {
+		return name, nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return "", fmt.Errorf("get PVC %q: %w", name, err)
+	}
+
+	labels := commonLabels(nom, component)
+	for k, v := range vs.VolumeClaimTemplate.Metadata.Labels {
+		labels[k] = v
+	}
+
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   nom.Namespace,
+			Labels:      labels,
+			Annotations: vs.VolumeClaimTemplate.Metadata.Annotations,
+		},
+		Spec: vs.VolumeClaimTemplate.Spec,
+	}
+	if err := controllerutil.SetControllerReference(nom, pvc, r.Scheme); err != nil {
+		return "", fmt.Errorf("set controller reference on PVC %q: %w", name, err)
+	}
+	if err := r.Create(ctx, pvc); err != nil {
+		return "", fmt.Errorf("create PVC %q: %w", name, err)
+	}
+	return name, nil
+}
+
+// resolveImage applies the repository default and DefaultImageTag for an optional ImageSpec.
+func resolveImage(spec *nominatimv1alpha1.ImageSpec, defaultRepository string) string {
+	repo := defaultRepository
+	tag := DefaultImageTag
+	if spec != nil {
+		if spec.Repository != "" {
+			repo = spec.Repository
+		}
+		if spec.Tag != "" {
+			tag = spec.Tag
+		}
+	}
+	return repo + ":" + tag
+}
+
+// resolvePullPolicy returns the configured pull policy, leaving it empty (API-server
+// defaulted) when unset.
+func resolvePullPolicy(spec *nominatimv1alpha1.ImageSpec) corev1.PullPolicy {
+	if spec != nil {
+		return spec.PullPolicy
+	}
+	return ""
+}
+
+// dbEnvVars maps the CNPG/connection-secret conventional keys onto the environment
+// variables consumed by the Nominatim API image. Keys are marked optional since
+// connectionSecretRef (degraded) secrets are not schema-validated by this operator.
+func dbEnvVars(secretName string) []corev1.EnvVar {
+	optional := true
+	fromKey := func(envName, key string) corev1.EnvVar {
+		return corev1.EnvVar{
+			Name: envName,
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
+					Key:                  key,
+					Optional:             &optional,
+				},
+			},
+		}
+	}
+	return []corev1.EnvVar{
+		fromKey("NOMINATIM_DATABASE_DSN", "uri"),
+		fromKey("PGHOST", "host"),
+		fromKey("PGPORT", "port"),
+		fromKey("PGDATABASE", "dbname"),
+		fromKey("PGUSER", "user"),
+		fromKey("PGPASSWORD", "password"),
+	}
+}
+
+// apiVolumes builds the project (+ optional flatnode) volumes, mounts, and env vars for
+// the API container.
+func apiVolumes(nom *nominatimv1alpha1.Nominatim, projectClaim, flatnodeClaim string) ([]corev1.Volume, []corev1.VolumeMount, []corev1.EnvVar) {
+	volumes := []corev1.Volume{
+		{
+			Name: projectVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: projectClaim},
+			},
+		},
+	}
+	mounts := []corev1.VolumeMount{
+		{Name: projectVolumeName, MountPath: projectMountPath},
+	}
+	var env []corev1.EnvVar
+
+	if nom.Spec.Flatnode != nil && flatnodeClaim != "" {
+		volumes = append(volumes, corev1.Volume{
+			Name: flatnodeVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: flatnodeClaim},
+			},
+		})
+		mounts = append(mounts, corev1.VolumeMount{Name: flatnodeVolumeName, MountPath: flatnodeMountPath})
+		env = append(env, corev1.EnvVar{Name: flatnodeFileEnv, Value: flatnodeFilePath})
+	}
+
+	return volumes, mounts, env
+}
+
+// operationImpactMatches reports whether a NominatimOperation of the given type should
+// trigger the side effect selected by impact.
+func operationImpactMatches(impact nominatimv1alpha1.OperationImpact, opType nominatimv1alpha1.NominatimOperationType) bool {
+	switch impact {
+	case nominatimv1alpha1.OperationImpactAll:
+		return true
+	case nominatimv1alpha1.OperationImpactWriteHeavy:
+		return isWriteHeavyOperation(opType)
+	case nominatimv1alpha1.OperationImpactBootstrapReimport:
+		return opType == nominatimv1alpha1.NominatimOperationBootstrap ||
+			opType == nominatimv1alpha1.NominatimOperationReimport
+	case nominatimv1alpha1.OperationImpactNever, "":
+		return false
+	default:
+		return false
+	}
+}
+
+// shouldSuspendAPI checks the parent's active operation refs against impact, fetching
+// each NominatimOperation to inspect its Type. Missing operations (already completed and
+// pruned) are skipped rather than treated as errors.
+func (r *NominatimReconciler) shouldSuspendAPI(ctx context.Context, nom *nominatimv1alpha1.Nominatim, impact nominatimv1alpha1.OperationImpact) (bool, error) {
+	if impact == "" {
+		impact = nominatimv1alpha1.OperationImpactNever
+	}
+	if impact == nominatimv1alpha1.OperationImpactNever {
+		return false, nil
+	}
+	for _, ref := range nom.Status.ActiveOperationRefs {
+		op := &nominatimv1alpha1.NominatimOperation{}
+		err := r.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: nom.Namespace}, op)
+		if apierrors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return false, fmt.Errorf("get active operation %q: %w", ref.Name, err)
+		}
+		if operationImpactMatches(impact, op.Spec.Type) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// reconcileAPI reconciles the API Deployment, Service, and optional HTTPRoute. The API
+// workload is always created (with sensible defaults) once the database connection
+// secret is known; it is never skipped merely because spec.api is unset.
+func (r *NominatimReconciler) reconcileAPI(ctx context.Context, nom *nominatimv1alpha1.Nominatim, projectClaim, flatnodeClaim string) error {
+	if nom.Status.Database.ConnectionSecretName == "" {
+		return fmt.Errorf("cannot reconcile API workload: status.database.connectionSecretName is empty")
+	}
+
+	apiSpec := nom.Spec.API
+	if apiSpec == nil {
+		apiSpec = &nominatimv1alpha1.APISpec{}
+	}
+
+	suspend, err := r.shouldSuspendAPI(ctx, nom, apiSpec.SuspendDuringOperations)
+	if err != nil {
+		return fmt.Errorf("evaluate suspendDuringOperations: %w", err)
+	}
+
+	replicas := int32(1)
+	if apiSpec.Replicas != nil {
+		replicas = *apiSpec.Replicas
+	}
+	if suspend {
+		replicas = 0
+	}
+
+	name := APIName(nom)
+	labels := commonLabels(nom, ComponentAPI)
+	volumes, mounts, env := apiVolumes(nom, projectClaim, flatnodeClaim)
+	env = append(env, dbEnvVars(nom.Status.Database.ConnectionSecretName)...)
+
+	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: nom.Namespace}}
+	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, deploy, func() error {
+		if err := controllerutil.SetControllerReference(nom, deploy, r.Scheme); err != nil {
+			return err
+		}
+		deploy.Labels = labels
+		deploy.Spec.Replicas = &replicas
+		deploy.Spec.Selector = &metav1.LabelSelector{MatchLabels: labels}
+		deploy.Spec.Template = corev1.PodTemplateSpec{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{
+						Name:            "api",
+						Image:           resolveImage(apiSpec.Image, DefaultAPIRepository),
+						ImagePullPolicy: resolvePullPolicy(apiSpec.Image),
+						Ports: []corev1.ContainerPort{
+							{Name: "http", ContainerPort: workloadContainerPort},
+						},
+						Env:          env,
+						VolumeMounts: mounts,
+					},
+				},
+				Volumes: volumes,
+			},
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("reconcile API deployment: %w", err)
+	}
+
+	if err := r.reconcileService(ctx, nom, name, labels, ComponentAPI); err != nil {
+		return fmt.Errorf("reconcile API service: %w", err)
+	}
+
+	if apiSpec.Route != nil {
+		if err := r.reconcileHTTPRoute(ctx, nom, name, name, apiSpec.Route, ComponentAPI); err != nil {
+			return fmt.Errorf("reconcile API HTTPRoute: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// reconcileUI reconciles the optional UI Deployment, Service, and HTTPRoute. It is a
+// no-op when spec.ui is unset.
+func (r *NominatimReconciler) reconcileUI(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
+	uiSpec := nom.Spec.UI
+	if uiSpec == nil {
+		return nil
+	}
+
+	replicas := int32(1)
+	if uiSpec.Replicas != nil {
+		replicas = *uiSpec.Replicas
+	}
+
+	name := UIName(nom)
+	labels := commonLabels(nom, ComponentUI)
+
+	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: nom.Namespace}}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, deploy, func() error {
+		if err := controllerutil.SetControllerReference(nom, deploy, r.Scheme); err != nil {
+			return err
+		}
+		deploy.Labels = labels
+		deploy.Spec.Replicas = &replicas
+		deploy.Spec.Selector = &metav1.LabelSelector{MatchLabels: labels}
+		deploy.Spec.Template = corev1.PodTemplateSpec{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{
+						Name:            "ui",
+						Image:           resolveImage(uiSpec.Image, DefaultUIRepository),
+						ImagePullPolicy: resolvePullPolicy(uiSpec.Image),
+						Ports: []corev1.ContainerPort{
+							{Name: "http", ContainerPort: workloadContainerPort},
+						},
+					},
+				},
+			},
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("reconcile UI deployment: %w", err)
+	}
+
+	if err := r.reconcileService(ctx, nom, name, labels, ComponentUI); err != nil {
+		return fmt.Errorf("reconcile UI service: %w", err)
+	}
+
+	if uiSpec.Route != nil {
+		if err := r.reconcileHTTPRoute(ctx, nom, name, name, uiSpec.Route, ComponentUI); err != nil {
+			return fmt.Errorf("reconcile UI HTTPRoute: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// reconcileService reconciles a ClusterIP Service fronting a workload Deployment on
+// workloadServicePort (80) -> workloadContainerPort (8080).
+func (r *NominatimReconciler) reconcileService(ctx context.Context, nom *nominatimv1alpha1.Nominatim, name string, selector map[string]string, component string) error {
+	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: nom.Namespace}}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
+		if err := controllerutil.SetControllerReference(nom, svc, r.Scheme); err != nil {
+			return err
+		}
+		svc.Labels = commonLabels(nom, component)
+		svc.Spec.Selector = selector
+		svc.Spec.Ports = []corev1.ServicePort{
+			{
+				Name:       "http",
+				Protocol:   corev1.ProtocolTCP,
+				Port:       workloadServicePort,
+				TargetPort: intstr.FromInt32(workloadContainerPort),
+			},
+		}
+		return nil
+	})
+	return err
+}
+
+// reconcileHTTPRoute reconciles an unstructured gateway.networking.k8s.io/v1 HTTPRoute
+// attaching to route.ParentRefs/Hostnames and backending to serviceName on
+// workloadServicePort.
+func (r *NominatimReconciler) reconcileHTTPRoute(ctx context.Context, nom *nominatimv1alpha1.Nominatim, name, serviceName string, route *nominatimv1alpha1.RouteSpec, component string) error {
+	httpRoute := &unstructured.Unstructured{}
+	httpRoute.SetGroupVersionKind(HTTPRouteGVK)
+	httpRoute.SetName(name)
+	httpRoute.SetNamespace(nom.Namespace)
+
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, httpRoute, func() error {
+		if err := controllerutil.SetControllerReference(nom, httpRoute, r.Scheme); err != nil {
+			return err
+		}
+		httpRoute.SetLabels(commonLabels(nom, component))
+
+		parentRefs := make([]interface{}, 0, len(route.ParentRefs))
+		for _, ref := range route.ParentRefs {
+			pr := map[string]interface{}{"name": ref.Name}
+			if ref.Group != nil {
+				pr["group"] = *ref.Group
+			}
+			if ref.Kind != nil {
+				pr["kind"] = *ref.Kind
+			}
+			if ref.Namespace != nil {
+				pr["namespace"] = *ref.Namespace
+			}
+			if ref.SectionName != nil {
+				pr["sectionName"] = *ref.SectionName
+			}
+			parentRefs = append(parentRefs, pr)
+		}
+		if err := unstructured.SetNestedSlice(httpRoute.Object, parentRefs, "spec", "parentRefs"); err != nil {
+			return err
+		}
+
+		if len(route.Hostnames) > 0 {
+			hostnames := make([]interface{}, len(route.Hostnames))
+			for i, h := range route.Hostnames {
+				hostnames[i] = h
+			}
+			// "spec" is already a validated map from the parentRefs write above, so this
+			// cannot fail (mirrors the equivalent pattern in nominatim_database.go).
+			_ = unstructured.SetNestedSlice(httpRoute.Object, hostnames, "spec", "hostnames")
+		} else {
+			unstructured.RemoveNestedField(httpRoute.Object, "spec", "hostnames")
+		}
+
+		rules := []interface{}{
+			map[string]interface{}{
+				"backendRefs": []interface{}{
+					map[string]interface{}{
+						"name": serviceName,
+						"port": int64(workloadServicePort),
+					},
+				},
+			},
+		}
+		return unstructured.SetNestedSlice(httpRoute.Object, rules, "spec", "rules")
+	})
+	return err
+}
