@@ -374,6 +374,12 @@ type NominatimStatus struct {
 	// ActiveOperationRefs references NominatimOperation(s) currently in progress.
 	// +optional
 	ActiveOperationRefs []corev1.ObjectReference `json:"activeOperationRefs,omitempty"`
+
+	// LastUpdateScheduleTime is the last cron fire time for which the controller created
+	// (or intentionally skipped) a scheduled Update NominatimOperation. Used as the schedule
+	// cursor so fires are not double-created across reconciles.
+	// +optional
+	LastUpdateScheduleTime *metav1.Time `json:"lastUpdateScheduleTime,omitempty"`
 }
 
 // +kubebuilder:object:root=true
