@@ -23,6 +23,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -39,12 +40,16 @@ import (
 type NominatimReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	// CNPGEffects optional override for tests; defaults to no-op stubs until Operations wire patches.
+	CNPGEffects CNPGEffects
 }
 
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatims/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatims/finalizers,verbs=update
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatimoperations,verbs=get;list;watch
+// +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 // Reconcile updates Nominatim status conditions and honors annotation nudges.
 // Workload/Operation creation is deferred to later beads; this loop is the level-based entrypoint.
@@ -66,6 +71,11 @@ func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
+	}
+
+	if err := r.reconcileDatabase(ctx, nom); err != nil {
+		log.Error(err, "failed to reconcile Nominatim database")
+		return ctrl.Result{}, err
 	}
 
 	if err := r.syncStatus(ctx, nom); err != nil {
@@ -216,13 +226,58 @@ func mapOperationToNominatim(_ context.Context, obj client.Object) []reconcile.R
 	}}
 }
 
+// mapCNPGClusterToNominatim enqueues owning Nominatim resources and same-namespace clusterRef users.
+func mapCNPGClusterToNominatim(c client.Client) handler.MapFunc {
+	return func(ctx context.Context, obj client.Object) []reconcile.Request {
+		u, ok := obj.(*unstructured.Unstructured)
+		if !ok {
+			return nil
+		}
+		var reqs []reconcile.Request
+		seen := map[types.NamespacedName]struct{}{}
+		add := func(nn types.NamespacedName) {
+			if _, ok := seen[nn]; ok {
+				return
+			}
+			seen[nn] = struct{}{}
+			reqs = append(reqs, reconcile.Request{NamespacedName: nn})
+		}
+		for _, ref := range u.GetOwnerReferences() {
+			if ref.Kind == "Nominatim" && ref.APIVersion == nominatimv1alpha1.GroupVersion.String() {
+				add(types.NamespacedName{Name: ref.Name, Namespace: u.GetNamespace()})
+			}
+		}
+		if c == nil {
+			return reqs
+		}
+		list := &nominatimv1alpha1.NominatimList{}
+		if err := c.List(ctx, list, client.InNamespace(u.GetNamespace())); err != nil {
+			return reqs
+		}
+		for i := range list.Items {
+			nom := &list.Items[i]
+			if nom.Spec.Database.ClusterRef != nil && nom.Spec.Database.ClusterRef.Name == u.GetName() {
+				add(types.NamespacedName{Name: nom.Name, Namespace: nom.Namespace})
+			}
+		}
+		return reqs
+	}
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *NominatimReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	cnpgCluster := &unstructured.Unstructured{}
+	cnpgCluster.SetGroupVersionKind(CNPGClusterGVK)
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&nominatimv1alpha1.Nominatim{}).
 		Watches(
 			&nominatimv1alpha1.NominatimOperation{},
 			handler.EnqueueRequestsFromMapFunc(mapOperationToNominatim),
+		).
+		Watches(
+			cnpgCluster,
+			handler.EnqueueRequestsFromMapFunc(mapCNPGClusterToNominatim(r.Client)),
 		).
 		Named("nominatim").
 		Complete(r)
