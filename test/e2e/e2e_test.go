@@ -292,9 +292,29 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 
 		It("reconciles API Deployment and Service for the smoke Nominatim", func() {
+			By("waiting for the Nominatim controller to become ready")
+			verifyNominatimController := func(g Gomega) {
+				cmd := exec.Command("kubectl", "logs",
+					"-l", "control-plane=controller-manager",
+					"-n", namespace,
+					"--tail=200",
+				)
+				out, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(out).To(ContainSubstring(`"controller": "nominatim"`), "Nominatim controller should start")
+				g.Expect(out).To(ContainSubstring(`Starting workers`), "Nominatim controller workers should start")
+				g.Expect(out).NotTo(ContainSubstring(`no matches for kind "HTTPRoute"`))
+			}
+			Eventually(verifyNominatimController).Should(Succeed())
+
 			By("waiting for the Nominatim API Deployment")
 			verifyAPIDeployment := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "deploy", nomName+"-api",
+				cmd := exec.Command("kubectl", "get", "nominatim", nomName,
+					"-n", appNamespace, "-o", "yaml")
+				nomYAML, _ := utils.Run(cmd)
+				_, _ = fmt.Fprintf(GinkgoWriter, "Nominatim CR:\n%s\n", nomYAML)
+
+				cmd = exec.Command("kubectl", "get", "deploy", nomName+"-api",
 					"-n", appNamespace, "-o", "jsonpath={.metadata.name}")
 				out, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred(), "API Deployment should exist")

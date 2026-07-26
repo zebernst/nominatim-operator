@@ -27,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -44,6 +45,8 @@ type NominatimReconciler struct {
 	Scheme *runtime.Scheme
 	// CNPGEffects optional override for tests; defaults to no-op stubs until Operations wire patches.
 	CNPGEffects CNPGEffects
+	// ControllerName overrides the controller-runtime name (tests only).
+	ControllerName string
 }
 
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatims,verbs=get;list;watch;create;update;patch;delete
@@ -271,27 +274,58 @@ func mapCNPGClusterToNominatim(c client.Client) handler.MapFunc {
 }
 
 // SetupWithManager sets up the controller with the Manager.
+// Optional GVKs (Gateway API HTTPRoute, CNPG Cluster) are registered only when their
+// CRDs exist so the manager can start on clusters that omit those APIs (e.g. CI kind smoke).
 func (r *NominatimReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	cnpgCluster := &unstructured.Unstructured{}
-	cnpgCluster.SetGroupVersionKind(CNPGClusterGVK)
+	return r.setupWithManager(mgr, mgr.GetRESTMapper())
+}
 
-	httpRoute := &unstructured.Unstructured{}
-	httpRoute.SetGroupVersionKind(HTTPRouteGVK)
-
-	return ctrl.NewControllerManagedBy(mgr).
+func (r *NominatimReconciler) setupWithManager(mgr ctrl.Manager, mapper meta.RESTMapper) error {
+	name := "nominatim"
+	if r.ControllerName != "" {
+		name = r.ControllerName
+	}
+	b := ctrl.NewControllerManagedBy(mgr).
 		For(&nominatimv1alpha1.Nominatim{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.PersistentVolumeClaim{}).
-		Owns(httpRoute).
 		Watches(
 			&nominatimv1alpha1.NominatimOperation{},
 			handler.EnqueueRequestsFromMapFunc(mapOperationToNominatim),
 		).
-		Watches(
+		Named(name)
+
+	if ok, err := gvkAvailableFromMapper(mapper, HTTPRouteGVK); err != nil {
+		return err
+	} else if ok {
+		httpRoute := &unstructured.Unstructured{}
+		httpRoute.SetGroupVersionKind(HTTPRouteGVK)
+		b = b.Owns(httpRoute)
+	}
+
+	if ok, err := gvkAvailableFromMapper(mapper, CNPGClusterGVK); err != nil {
+		return err
+	} else if ok {
+		cnpgCluster := &unstructured.Unstructured{}
+		cnpgCluster.SetGroupVersionKind(CNPGClusterGVK)
+		b = b.Watches(
 			cnpgCluster,
 			handler.EnqueueRequestsFromMapFunc(mapCNPGClusterToNominatim(r.Client)),
-		).
-		Named("nominatim").
-		Complete(r)
+		)
+	}
+
+	return b.Complete(r)
+}
+
+// gvkAvailableFromMapper reports whether mapper knows about gvk.
+func gvkAvailableFromMapper(mapper meta.RESTMapper, gvk schema.GroupVersionKind) (bool, error) {
+	_, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	if err != nil {
+		if meta.IsNoMatchError(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
