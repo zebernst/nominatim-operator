@@ -6,4 +6,18 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: nominatim-sample
 spec:
-  # TODO(user): Add fields here
+  project:
+    volume:
+      claimName: nominatim-project
+  regions:
+    - north-america/us
+  regionChangePolicy: AddData
+  database:
+    clusterRef:
+      name: nominatim-pg
+  updates:
+    enabled: true
+    schedule: "0 3 * * *"
+  api:
+    replicas: 1
+    suspendDuringOperations: Never
