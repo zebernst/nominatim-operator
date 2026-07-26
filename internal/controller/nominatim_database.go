@@ -203,6 +203,10 @@ func (r *NominatimReconciler) ApplyPostgresProfile(ctx context.Context, nom *nom
 
 // applyPostgresProfile is the shared implementation behind NominatimReconciler.ApplyPostgresProfile,
 // reused by the NominatimOperation reconciler (nominatimoperation_effects.go).
+//
+// Profile-managed keys are the union of import ∪ runtime. When switching profiles, keys that
+// belong to that union but are absent from the target profile are removed so import-only knobs
+// (e.g. work_mem) do not leak into "runtime" forever. Keys outside the union are left alone.
 func applyPostgresProfile(ctx context.Context, c client.Client, effects CNPGEffects, nom *nominatimv1alpha1.Nominatim, which string) error {
 	if nom.Status.Database.Degraded || nom.Status.Database.Mode == nominatimv1alpha1.DatabaseModeConnectionSecret {
 		return nil
@@ -221,7 +225,8 @@ func applyPostgresProfile(ctx context.Context, c client.Client, effects CNPGEffe
 	default:
 		return fmt.Errorf("unknown postgres profile %q (want import or runtime)", which)
 	}
-	if len(params) == 0 {
+	removeKeys := profileKeysToRemove(profiles, params)
+	if len(params) == 0 && len(removeKeys) == 0 {
 		return nil
 	}
 	clusterName := nom.Status.Database.ClusterName
@@ -232,5 +237,27 @@ func applyPostgresProfile(ctx context.Context, c client.Client, effects CNPGEffe
 	if err != nil {
 		return err
 	}
-	return effects.ApplyParameters(ctx, cluster, params)
+	return effects.ApplyParameters(ctx, cluster, params, removeKeys)
+}
+
+// profileKeysToRemove returns profile-managed keys (import ∪ runtime) that are not present in
+// the target profile map, so ApplyParameters can delete them when switching profiles.
+func profileKeysToRemove(profiles *nominatimv1alpha1.PostgresProfiles, target map[string]string) []string {
+	if profiles == nil {
+		return nil
+	}
+	managed := map[string]struct{}{}
+	for k := range profiles.Import {
+		managed[k] = struct{}{}
+	}
+	for k := range profiles.Runtime {
+		managed[k] = struct{}{}
+	}
+	var remove []string
+	for k := range managed {
+		if _, ok := target[k]; !ok {
+			remove = append(remove, k)
+		}
+	}
+	return remove
 }

@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	nominatimv1alpha1 "github.com/zebernst/nominatim-operator/api/v1alpha1"
@@ -108,7 +109,7 @@ func (e *pauseOKProfileErrEffects) ResumeBackups(context.Context, *unstructured.
 	return nil
 }
 
-func (e *pauseOKProfileErrEffects) ApplyParameters(context.Context, *unstructured.Unstructured, map[string]string) error {
+func (e *pauseOKProfileErrEffects) ApplyParameters(context.Context, *unstructured.Unstructured, map[string]string, []string) error {
 	e.profileCalls++
 	return fmt.Errorf("apply boom")
 }
@@ -199,7 +200,7 @@ func TestDefaultCNPGEffects_ApplyParametersMerges(t *testing.T) {
 	if err := c.Get(ctx, key, live); err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if err := effects.ApplyParameters(ctx, live, map[string]string{"shared_buffers": "2GB"}); err != nil {
+	if err := effects.ApplyParameters(ctx, live, map[string]string{"shared_buffers": "2GB"}, nil); err != nil {
 		t.Fatalf("ApplyParameters: %v", err)
 	}
 
@@ -220,9 +221,59 @@ func TestDefaultCNPGEffects_ApplyParametersMerges(t *testing.T) {
 	}
 }
 
+func TestDefaultCNPGEffects_ApplyParametersRemovesKeys(t *testing.T) {
+	scheme := testScheme(t)
+	cluster := &unstructured.Unstructured{Object: map[string]interface{}{
+		"spec": map[string]interface{}{
+			"postgresql": map[string]interface{}{
+				"parameters": map[string]interface{}{
+					"max_connections": "100",
+					"work_mem":        "64MB",
+					"shared_buffers":  "2GB",
+				},
+			},
+		},
+	}}
+	cluster.SetGroupVersionKind(CNPGClusterGVK)
+	cluster.SetName("pg-rm")
+	cluster.SetNamespace("default")
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cluster).Build()
+	effects := defaultCNPGEffects{Client: c}
+	ctx := context.Background()
+	key := types.NamespacedName{Name: "pg-rm", Namespace: "default"}
+
+	live := &unstructured.Unstructured{}
+	live.SetGroupVersionKind(CNPGClusterGVK)
+	if err := c.Get(ctx, key, live); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if err := effects.ApplyParameters(ctx, live, map[string]string{"shared_buffers": "256MB"}, []string{"work_mem"}); err != nil {
+		t.Fatalf("ApplyParameters: %v", err)
+	}
+
+	got := &unstructured.Unstructured{}
+	got.SetGroupVersionKind(CNPGClusterGVK)
+	if err := c.Get(ctx, key, got); err != nil {
+		t.Fatalf("get after apply: %v", err)
+	}
+	params, _, err := unstructured.NestedStringMap(got.Object, "spec", "postgresql", "parameters")
+	if err != nil {
+		t.Fatalf("params: %v", err)
+	}
+	if params["max_connections"] != "100" {
+		t.Fatalf("expected unrelated param preserved, got %#v", params)
+	}
+	if params["shared_buffers"] != "256MB" {
+		t.Fatalf("expected updated param, got %#v", params)
+	}
+	if _, ok := params["work_mem"]; ok {
+		t.Fatalf("expected work_mem removed, got %#v", params)
+	}
+}
+
 func TestDefaultCNPGEffects_ApplyParametersEmptyIsNoop(t *testing.T) {
 	effects := defaultCNPGEffects{}
-	if err := effects.ApplyParameters(context.Background(), &unstructured.Unstructured{}, nil); err != nil {
+	if err := effects.ApplyParameters(context.Background(), &unstructured.Unstructured{}, nil, nil); err != nil {
 		t.Fatalf("expected no-op for empty params, got %v", err)
 	}
 }
@@ -403,7 +454,9 @@ func TestApplyTerminalCNPGEffects_ResumesAndAppliesRuntime(t *testing.T) {
 }
 
 func TestApplyTerminalCNPGEffects_ResumeErrorPropagates(t *testing.T) {
-	r := &NominatimOperationReconciler{}
+	scheme := testScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 	parent := baseNominatim("tc-resumeerr")
 	parent.Spec.Database.PauseBackupsDuringOperations = nominatimv1alpha1.OperationImpactAll
 	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{Mode: nominatimv1alpha1.DatabaseModeClusterAttached}
@@ -956,6 +1009,17 @@ func TestOperationReconcile_ConflictFailure_SyncsParentSideEffectsWithoutError(t
 	ctx := context.Background()
 
 	parent := baseNominatim("vzw-conflict")
+	parent.Spec.Database = nominatimv1alpha1.DatabaseSpec{
+		ClusterRef:                   &nominatimv1alpha1.LocalObjectReference{Name: "pg"},
+		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactWriteHeavy,
+		PostgresProfiles: &nominatimv1alpha1.PostgresProfiles{
+			Import:  map[string]string{"shared_buffers": "2GB", "work_mem": "64MB"},
+			Runtime: map[string]string{"shared_buffers": "256MB"},
+		},
+	}
+	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{
+		Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg",
+	}
 	running := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "op-running", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
@@ -964,8 +1028,9 @@ func TestOperationReconcile_ConflictFailure_SyncsParentSideEffectsWithoutError(t
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseRunning},
 	}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent, running).WithObjects(parent).Build()
-	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
+	effects := &recordingCNPGEffects{}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent, running).WithObjects(parent, newCNPGCluster("pg")).Build()
+	r := &NominatimOperationReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
 
 	if err := c.Create(ctx, running); err != nil {
 		t.Fatalf("create running op: %v", err)
@@ -1005,5 +1070,142 @@ func TestOperationReconcile_ConflictFailure_SyncsParentSideEffectsWithoutError(t
 	}
 	if len(gotParent.Status.ActiveOperationRefs) != 0 {
 		t.Fatalf("a Conflict-failed Operation that never went active must not leave a ref, got %#v", gotParent.Status.ActiveOperationRefs)
+	}
+	if effects.resumeCalls != 0 || effects.profileCalls != 0 {
+		t.Fatalf("conflict failure must not resume/restore while a write-heavy sibling is Running; resume=%d profile=%d",
+			effects.resumeCalls, effects.profileCalls)
+	}
+}
+
+func TestApplyPostgresProfile_RemovesImportOnlyKeysOnRuntime(t *testing.T) {
+	scheme := testScheme(t)
+	ctx := context.Background()
+	cluster := &unstructured.Unstructured{Object: map[string]interface{}{
+		"spec": map[string]interface{}{
+			"postgresql": map[string]interface{}{
+				"parameters": map[string]interface{}{
+					"shared_buffers":  "2GB",
+					"work_mem":        "64MB",
+					"max_connections": "100",
+				},
+			},
+		},
+	}}
+	cluster.SetGroupVersionKind(CNPGClusterGVK)
+	cluster.SetName("pg-profile-rm")
+	cluster.SetNamespace("default")
+
+	nom := baseNominatim("profile-rm")
+	nom.Spec.Database = nominatimv1alpha1.DatabaseSpec{
+		PostgresProfiles: &nominatimv1alpha1.PostgresProfiles{
+			Import:  map[string]string{"shared_buffers": "2GB", "work_mem": "64MB"},
+			Runtime: map[string]string{"shared_buffers": "256MB"},
+		},
+	}
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{
+		Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg-profile-rm",
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, cluster).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+
+	if err := r.ApplyPostgresProfile(ctx, nom, "runtime"); err != nil {
+		t.Fatalf("ApplyPostgresProfile: %v", err)
+	}
+
+	got := &unstructured.Unstructured{}
+	got.SetGroupVersionKind(CNPGClusterGVK)
+	if err := c.Get(ctx, types.NamespacedName{Name: "pg-profile-rm", Namespace: "default"}, got); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	params, _, err := unstructured.NestedStringMap(got.Object, "spec", "postgresql", "parameters")
+	if err != nil {
+		t.Fatalf("params: %v", err)
+	}
+	if params["shared_buffers"] != "256MB" {
+		t.Fatalf("expected runtime shared_buffers, got %#v", params)
+	}
+	if _, ok := params["work_mem"]; ok {
+		t.Fatalf("import-only work_mem must be removed on runtime apply, got %#v", params)
+	}
+	if params["max_connections"] != "100" {
+		t.Fatalf("unrelated param must be preserved, got %#v", params)
+	}
+}
+
+func TestOperationReconcile_DeleteMidFlight_ClearsRefAndResumes(t *testing.T) {
+	scheme := testScheme(t)
+	ctx := context.Background()
+
+	parent := baseNominatim("vzw-delete")
+	parent.Spec.Database = nominatimv1alpha1.DatabaseSpec{
+		ClusterRef:                   &nominatimv1alpha1.LocalObjectReference{Name: "pg"},
+		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactWriteHeavy,
+		PostgresProfiles: &nominatimv1alpha1.PostgresProfiles{
+			Import:  map[string]string{"shared_buffers": "2GB"},
+			Runtime: map[string]string{"shared_buffers": "256MB"},
+		},
+	}
+	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{
+		Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg",
+	}
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "boot-del", Namespace: "default"},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
+		},
+	}
+	effects := &recordingCNPGEffects{}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent, op).WithObjects(parent, newCNPGCluster("pg"), op).Build()
+	r := &NominatimOperationReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
+
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: op.Name, Namespace: "default"}}
+	if _, err := r.Reconcile(ctx, req); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if effects.pauseCalls != 1 {
+		t.Fatalf("expected pause before delete, got %d", effects.pauseCalls)
+	}
+
+	gotOp := &nominatimv1alpha1.NominatimOperation{}
+	if err := c.Get(ctx, req.NamespacedName, gotOp); err != nil {
+		t.Fatalf("get op: %v", err)
+	}
+	if !controllerutil.ContainsFinalizer(gotOp, nominatimv1alpha1.NominatimOperationFinalizer) {
+		t.Fatal("expected operation finalizer after first reconcile")
+	}
+
+	now := metav1.Now()
+	gotOp.DeletionTimestamp = &now
+	if err := c.Update(ctx, gotOp); err != nil {
+		// fake client may require Delete to set DeletionTimestamp
+		if err := c.Delete(ctx, gotOp); err != nil {
+			t.Fatalf("delete op: %v", err)
+		}
+	}
+
+	if _, err := r.Reconcile(ctx, req); err != nil {
+		t.Fatalf("reconcile delete: %v", err)
+	}
+
+	gotParent := &nominatimv1alpha1.Nominatim{}
+	if err := c.Get(ctx, types.NamespacedName{Name: parent.Name, Namespace: "default"}, gotParent); err != nil {
+		t.Fatalf("get parent: %v", err)
+	}
+	if len(gotParent.Status.ActiveOperationRefs) != 0 {
+		t.Fatalf("expected ActiveOperationRefs cleared on delete, got %#v", gotParent.Status.ActiveOperationRefs)
+	}
+	if effects.resumeCalls != 1 {
+		t.Fatalf("expected resume on delete with no siblings, got %d", effects.resumeCalls)
+	}
+	if effects.profileCalls < 2 || effects.lastParams["shared_buffers"] != "256MB" {
+		t.Fatalf("expected runtime profile on delete, calls=%d params=%v", effects.profileCalls, effects.lastParams)
+	}
+
+	// Finalizer removed → object can finish deletion (Gone or no finalizer).
+	remaining := &nominatimv1alpha1.NominatimOperation{}
+	err := c.Get(ctx, req.NamespacedName, remaining)
+	if err == nil && controllerutil.ContainsFinalizer(remaining, nominatimv1alpha1.NominatimOperationFinalizer) {
+		t.Fatal("expected finalizer removed after delete reconcile")
 	}
 }

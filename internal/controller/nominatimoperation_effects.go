@@ -19,6 +19,8 @@ package controller
 import (
 	"context"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	nominatimv1alpha1 "github.com/zebernst/nominatim-operator/api/v1alpha1"
 )
 
@@ -59,15 +61,56 @@ func (r *NominatimOperationReconciler) applyPreJobCNPGEffects(ctx context.Contex
 }
 
 // applyTerminalCNPGEffects resumes backups and switches back to the runtime postgres profile
-// once this Operation reaches Succeeded or Failed. It mirrors applyPreJobCNPGEffects's policy
-// check so an Operation that never paused anything (impact policy didn't match its type)
-// doesn't spuriously "resume" backups it never paused.
+// once this Operation reaches Succeeded or Failed — but only when no other still-active
+// Operation on the same parent matches the pause policy. Without that sibling check, a
+// Conflict-failed peer would resume backups / revert the postgres profile while a Running
+// Bootstrap is still importing.
 func (r *NominatimOperationReconciler) applyTerminalCNPGEffects(ctx context.Context, op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim) error {
-	if !operationImpactMatches(parent.Spec.Database.PauseBackupsDuringOperations, op.Spec.Type) {
+	impact := parent.Spec.Database.PauseBackupsDuringOperations
+	if !operationImpactMatches(impact, op.Spec.Type) {
+		return nil
+	}
+	stillPaused, err := r.hasOtherActiveMatchingImpactOps(ctx, parent, impact, op.Name)
+	if err != nil {
+		return err
+	}
+	if stillPaused {
 		return nil
 	}
 	if err := r.setParentBackupPaused(ctx, parent, false); err != nil {
 		return err
 	}
 	return r.applyParentPostgresProfile(ctx, parent, "runtime")
+}
+
+// hasOtherActiveMatchingImpactOps reports whether another Pending/Running Operation against
+// the same parent still matches impact (and therefore should keep backups paused / import
+// profile applied). excludeName is this Operation (the one that just went terminal or is
+// being deleted).
+func (r *NominatimOperationReconciler) hasOtherActiveMatchingImpactOps(
+	ctx context.Context,
+	parent *nominatimv1alpha1.Nominatim,
+	impact nominatimv1alpha1.OperationImpact,
+	excludeName string,
+) (bool, error) {
+	peers := &nominatimv1alpha1.NominatimOperationList{}
+	if err := r.List(ctx, peers, client.InNamespace(parent.Namespace)); err != nil {
+		return false, err
+	}
+	for i := range peers.Items {
+		peer := &peers.Items[i]
+		if peer.Name == excludeName {
+			continue
+		}
+		if peer.Spec.NominatimRef.Name != parent.Name {
+			continue
+		}
+		if !isActiveOperationPhase(peer.Status.Phase) {
+			continue
+		}
+		if operationImpactMatches(impact, peer.Spec.Type) {
+			return true, nil
+		}
+	}
+	return false, nil
 }

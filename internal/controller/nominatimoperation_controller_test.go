@@ -375,6 +375,8 @@ func cleanupOperation(ctx context.Context, name string) {
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: name + "-staging", Namespace: "default"}, pvc); err == nil {
 		_ = k8sClient.Delete(ctx, pvc)
 	}
+	controllerutil.RemoveFinalizer(op, nominatimv1alpha1.NominatimOperationFinalizer)
+	_ = k8sClient.Update(ctx, op)
 	_ = k8sClient.Delete(ctx, op)
 	Eventually(func() bool {
 		err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &nominatimv1alpha1.NominatimOperation{})

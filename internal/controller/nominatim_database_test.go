@@ -61,7 +61,7 @@ func (r *recordingCNPGEffects) ResumeBackups(_ context.Context, cluster *unstruc
 	return nil
 }
 
-func (r *recordingCNPGEffects) ApplyParameters(_ context.Context, cluster *unstructured.Unstructured, params map[string]string) error {
+func (r *recordingCNPGEffects) ApplyParameters(_ context.Context, cluster *unstructured.Unstructured, params map[string]string, _ []string) error {
 	r.profileCalls++
 	r.lastParams = params
 	r.lastCluster = cluster.GetName()
@@ -546,17 +546,20 @@ func TestApplyPostgresProfile_Branches(t *testing.T) {
 	if effects.profileCalls != 1 || effects.lastParams["work_mem"] != "64MB" {
 		t.Fatalf("import profile not applied: %#v", effects)
 	}
-	// empty runtime profile is no-op
+	// empty runtime still clears import-only managed keys (work_mem)
 	if err := r.ApplyPostgresProfile(context.Background(), nom, "runtime"); err != nil {
 		t.Fatal(err)
 	}
-	if effects.profileCalls != 1 {
-		t.Fatalf("empty runtime should not call effects, got %d", effects.profileCalls)
+	if effects.profileCalls != 2 {
+		t.Fatalf("empty runtime should still clear import-only keys, got %d calls", effects.profileCalls)
 	}
 	// nil profiles + import
 	nom.Spec.Database.PostgresProfiles = nil
 	if err := r.ApplyPostgresProfile(context.Background(), nom, "import"); err != nil {
 		t.Fatal(err)
+	}
+	if effects.profileCalls != 2 {
+		t.Fatalf("nil profiles must be a no-op, got %d", effects.profileCalls)
 	}
 }
 

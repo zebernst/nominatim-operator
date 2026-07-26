@@ -26,3 +26,7 @@ const (
 
 // NominatimFinalizer is added while the operator manages the instance.
 const NominatimFinalizer = "nominatim.zebernst.dev/finalizer"
+
+// NominatimOperationFinalizer ensures ActiveOperationRefs / CNPG pause-state are cleaned up
+// when a NominatimOperation is deleted mid-flight (before its Job reaches a terminal phase).
+const NominatimOperationFinalizer = "nominatim.zebernst.dev/operation-finalizer"

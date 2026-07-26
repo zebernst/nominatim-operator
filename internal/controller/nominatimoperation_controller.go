@@ -60,6 +60,18 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	if !op.DeletionTimestamp.IsZero() {
+		return r.reconcileOperationDelete(ctx, op)
+	}
+
+	if !controllerutil.ContainsFinalizer(op, nominatimv1alpha1.NominatimOperationFinalizer) {
+		controllerutil.AddFinalizer(op, nominatimv1alpha1.NominatimOperationFinalizer)
+		if err := r.Update(ctx, op); err != nil {
+			return ctrl.Result{}, err
+		}
+		// Continue in the same pass so callers/tests that reconcile once still progress.
+	}
+
 	if isTerminalOperationPhase(op.Status.Phase) {
 		// Keep Job-derived status fresh for Succeeded/Failed Jobs; Conflict failures have no Job.
 		if op.Status.JobRef != nil {
@@ -119,6 +131,37 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return ctrl.Result{}, err
 	}
 
+	return ctrl.Result{}, nil
+}
+
+// reconcileOperationDelete clears parent ActiveOperationRefs and resumes CNPG side-effects
+// (when no matching sibling remains) before removing the Operation finalizer. Without this,
+// kubectl-delete of a Running Bootstrap permanently orphans pause-state and suspends the API.
+func (r *NominatimOperationReconciler) reconcileOperationDelete(ctx context.Context, op *nominatimv1alpha1.NominatimOperation) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(op, nominatimv1alpha1.NominatimOperationFinalizer) {
+		return ctrl.Result{}, nil
+	}
+
+	if err := r.syncParentActiveOperationRef(ctx, op, false); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if op.Spec.NominatimRef.Name != "" {
+		parent := &nominatimv1alpha1.Nominatim{}
+		key := types.NamespacedName{Name: op.Spec.NominatimRef.Name, Namespace: op.Namespace}
+		if err := r.Get(ctx, key, parent); err != nil {
+			if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+		} else if err := r.applyTerminalCNPGEffects(ctx, op, parent); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	controllerutil.RemoveFinalizer(op, nominatimv1alpha1.NominatimOperationFinalizer)
+	if err := r.Update(ctx, op); err != nil {
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{}, nil
 }
 

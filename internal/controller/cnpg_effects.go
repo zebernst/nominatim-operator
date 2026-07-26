@@ -41,7 +41,10 @@ const CNPGBackupPausedAnnotation = "nominatim.zebernst.dev/backup-paused"
 type CNPGEffects interface {
 	PauseBackups(ctx context.Context, cluster *unstructured.Unstructured) error
 	ResumeBackups(ctx context.Context, cluster *unstructured.Unstructured) error
-	ApplyParameters(ctx context.Context, cluster *unstructured.Unstructured, params map[string]string) error
+	// ApplyParameters merges params into spec.postgresql.parameters, then deletes removeKeys.
+	// removeKeys clears stale profile-managed knobs (e.g. import-only work_mem) when switching
+	// to a profile that does not redefine them. Non-managed / unrelated keys are preserved.
+	ApplyParameters(ctx context.Context, cluster *unstructured.Unstructured, params map[string]string, removeKeys []string) error
 }
 
 // defaultCNPGEffects is the real CNPGEffects implementation: PauseBackups/ResumeBackups
@@ -73,11 +76,10 @@ func (e defaultCNPGEffects) setBackupPausedAnnotation(ctx context.Context, clust
 	return e.Client.Update(ctx, cluster)
 }
 
-// ApplyParameters merges params into spec.postgresql.parameters (creating the map if absent)
-// and patches the Cluster. A nil/empty params map is a no-op — callers (ApplyPostgresProfile)
-// already skip the CNPG round-trip in that case, but this stays safe if called directly.
-func (e defaultCNPGEffects) ApplyParameters(ctx context.Context, cluster *unstructured.Unstructured, params map[string]string) error {
-	if len(params) == 0 {
+// ApplyParameters merges params into spec.postgresql.parameters (creating the map if absent),
+// deletes removeKeys, and patches the Cluster. A no-op when both params and removeKeys are empty.
+func (e defaultCNPGEffects) ApplyParameters(ctx context.Context, cluster *unstructured.Unstructured, params map[string]string, removeKeys []string) error {
+	if len(params) == 0 && len(removeKeys) == 0 {
 		return nil
 	}
 	merged, _, err := unstructured.NestedStringMap(cluster.Object, "spec", "postgresql", "parameters")
@@ -86,6 +88,9 @@ func (e defaultCNPGEffects) ApplyParameters(ctx context.Context, cluster *unstru
 	}
 	if merged == nil {
 		merged = map[string]string{}
+	}
+	for _, k := range removeKeys {
+		delete(merged, k)
 	}
 	for k, v := range params {
 		merged[k] = v
