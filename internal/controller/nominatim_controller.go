@@ -18,11 +18,19 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"slices"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	nominatimv1alpha1 "github.com/zebernst/nominatim-operator/api/v1alpha1"
 )
@@ -36,28 +44,186 @@ type NominatimReconciler struct {
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatims/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatims/finalizers,verbs=update
+// +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatimoperations,verbs=get;list;watch
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the Nominatim object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.20.4/pkg/reconcile
+// Reconcile updates Nominatim status conditions and honors annotation nudges.
+// Workload/Operation creation is deferred to later beads; this loop is the level-based entrypoint.
 func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+	log := logf.FromContext(ctx)
 
-	// TODO(user): your logic here
+	nom := &nominatimv1alpha1.Nominatim{}
+	if err := r.Get(ctx, req.NamespacedName, nom); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	if !nom.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, nom)
+	}
+
+	if !controllerutil.ContainsFinalizer(nom, nominatimv1alpha1.NominatimFinalizer) {
+		controllerutil.AddFinalizer(nom, nominatimv1alpha1.NominatimFinalizer)
+		if err := r.Update(ctx, nom); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
+	if err := r.syncStatus(ctx, nom); err != nil {
+		log.Error(err, "failed to update Nominatim status")
+		return ctrl.Result{}, err
+	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *NominatimReconciler) reconcileDelete(ctx context.Context, nom *nominatimv1alpha1.Nominatim) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(nom, nominatimv1alpha1.NominatimFinalizer) {
+		return ctrl.Result{}, nil
+	}
+	// Stub: block deletion while active operations are referenced; later tasks drain Jobs.
+	if len(nom.Status.ActiveOperationRefs) > 0 {
+		return ctrl.Result{}, fmt.Errorf("cannot remove finalizer while %d active operation(s) remain", len(nom.Status.ActiveOperationRefs))
+	}
+	controllerutil.RemoveFinalizer(nom, nominatimv1alpha1.NominatimFinalizer)
+	if err := r.Update(ctx, nom); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+func (r *NominatimReconciler) syncStatus(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
+	desired := append([]string(nil), nom.Spec.Regions...)
+	observed := make([]string, 0, len(nom.Status.Regions))
+	for _, rs := range nom.Status.Regions {
+		observed = append(observed, rs.Name)
+	}
+
+	missing := difference(desired, observed)
+	removed := difference(observed, desired)
+
+	now := metav1.Now()
+	conds := slices.Clone(nom.Status.Conditions)
+
+	if len(removed) > 0 {
+		meta.SetStatusCondition(&conds, metav1.Condition{
+			Type:               nominatimv1alpha1.ConditionRegionRemovalUnsupported,
+			Status:             metav1.ConditionTrue,
+			Reason:             "RegionsRemovedFromSpec",
+			Message:            fmt.Sprintf("regions removed from spec but still present in status (DB data is not deleted): %v", removed),
+			ObservedGeneration: nom.Generation,
+			LastTransitionTime: now,
+		})
+	} else {
+		meta.SetStatusCondition(&conds, metav1.Condition{
+			Type:               nominatimv1alpha1.ConditionRegionRemovalUnsupported,
+			Status:             metav1.ConditionFalse,
+			Reason:             "NoUnsupportedRemovals",
+			Message:            "no observed regions are missing from spec",
+			ObservedGeneration: nom.Generation,
+			LastTransitionTime: now,
+		})
+	}
+
+	if len(missing) > 0 {
+		meta.SetStatusCondition(&conds, metav1.Condition{
+			Type:               nominatimv1alpha1.ConditionRegionsDrift,
+			Status:             metav1.ConditionTrue,
+			Reason:             "DesiredRegionsNotImported",
+			Message:            fmt.Sprintf("desired regions not yet in status.regions: %v", missing),
+			ObservedGeneration: nom.Generation,
+			LastTransitionTime: now,
+		})
+	} else {
+		meta.SetStatusCondition(&conds, metav1.Condition{
+			Type:               nominatimv1alpha1.ConditionRegionsDrift,
+			Status:             metav1.ConditionFalse,
+			Reason:             "RegionsAligned",
+			Message:            "desired regions are present in status.regions",
+			ObservedGeneration: nom.Generation,
+			LastTransitionTime: now,
+		})
+	}
+
+	// Stub readiness: Progressing while bootstrap/import needed; Ready when desired==observed (incl. both empty).
+	needsImport := len(desired) > 0 && len(missing) > 0
+	if needsImport || len(removed) > 0 {
+		meta.SetStatusCondition(&conds, metav1.Condition{
+			Type:               nominatimv1alpha1.ConditionProgressing,
+			Status:             metav1.ConditionTrue,
+			Reason:             "ReconcilingRegions",
+			Message:            "instance is progressing toward desired region set (operations wired in later tasks)",
+			ObservedGeneration: nom.Generation,
+			LastTransitionTime: now,
+		})
+		meta.SetStatusCondition(&conds, metav1.Condition{
+			Type:               nominatimv1alpha1.ConditionReady,
+			Status:             metav1.ConditionFalse,
+			Reason:             "NotReady",
+			Message:            "desired regions are not fully reflected in status",
+			ObservedGeneration: nom.Generation,
+			LastTransitionTime: now,
+		})
+	} else {
+		meta.SetStatusCondition(&conds, metav1.Condition{
+			Type:               nominatimv1alpha1.ConditionProgressing,
+			Status:             metav1.ConditionFalse,
+			Reason:             "Idle",
+			Message:            "no region import work pending from status comparison",
+			ObservedGeneration: nom.Generation,
+			LastTransitionTime: now,
+		})
+		meta.SetStatusCondition(&conds, metav1.Condition{
+			Type:               nominatimv1alpha1.ConditionReady,
+			Status:             metav1.ConditionTrue,
+			Reason:             "RegionsSynced",
+			Message:            "desired and observed region sets match (workload readiness deferred)",
+			ObservedGeneration: nom.Generation,
+			LastTransitionTime: now,
+		})
+	}
+
+	nom.Status.Conditions = conds
+	nom.Status.ObservedGeneration = nom.Generation
+	return r.Status().Update(ctx, nom)
+}
+
+// difference returns elements in a that are not in b.
+func difference(a, b []string) []string {
+	set := make(map[string]struct{}, len(b))
+	for _, x := range b {
+		set[x] = struct{}{}
+	}
+	var out []string
+	for _, x := range a {
+		if _, ok := set[x]; !ok {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+// mapOperationToNominatim enqueues the parent Nominatim named by nominatimRef.
+func mapOperationToNominatim(_ context.Context, obj client.Object) []reconcile.Request {
+	op, ok := obj.(*nominatimv1alpha1.NominatimOperation)
+	if !ok || op.Spec.NominatimRef.Name == "" {
+		return nil
+	}
+	return []reconcile.Request{{
+		NamespacedName: types.NamespacedName{
+			Name:      op.Spec.NominatimRef.Name,
+			Namespace: op.Namespace,
+		},
+	}}
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NominatimReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&nominatimv1alpha1.Nominatim{}).
+		Watches(
+			&nominatimv1alpha1.NominatimOperation{},
+			handler.EnqueueRequestsFromMapFunc(mapOperationToNominatim),
+		).
 		Named("nominatim").
 		Complete(r)
 }
