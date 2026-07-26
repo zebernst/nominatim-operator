@@ -1,0 +1,9 @@
+apiVersion: nominatim.zebernst.dev/v1alpha1
+kind: NominatimOperation
+metadata:
+  labels:
+    app.kubernetes.io/name: nominatim-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: nominatimoperation-sample
+spec:
+  # TODO(user): Add fields here
