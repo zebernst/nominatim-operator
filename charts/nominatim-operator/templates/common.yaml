@@ -1,0 +1,24 @@
+{{- include "bjw-s.common.loader.init" . }}
+
+{{- /* Build defaults from convenience keys, then deep-merge user common overrides. */ -}}
+{{- $generated := include "nominatim-operator.commonValues" . | fromYaml -}}
+{{- if .Values.defaultPodOptions -}}
+  {{- $_ := set $generated "defaultPodOptions" (mergeOverwrite (default (dict) $generated.defaultPodOptions) .Values.defaultPodOptions) -}}
+{{- end -}}
+{{- if .Values.controllers -}}
+  {{- $_ := set $generated "controllers" (mergeOverwrite (default (dict) $generated.controllers) .Values.controllers) -}}
+{{- end -}}
+{{- if .Values.serviceAccount -}}
+  {{- $_ := set $generated "serviceAccount" (mergeOverwrite (default (dict) $generated.serviceAccount) .Values.serviceAccount) -}}
+{{- end -}}
+{{- if .Values.rbac -}}
+  {{- $_ := set $generated "rbac" (mergeOverwrite (default (dict) $generated.rbac) .Values.rbac) -}}
+{{- end -}}
+{{- if .Values.global -}}
+  {{- $_ := set $generated "global" (mergeOverwrite (default (dict) $generated.global) .Values.global) -}}
+{{- end -}}
+
+{{- /* Replace Values with generated common-compatible structure (drop convenience-only keys). */ -}}
+{{- $_ := set . "Values" $generated -}}
+
+{{- include "bjw-s.common.loader.generate" . -}}

@@ -1,0 +1,24 @@
+apiVersion: v2
+name: nominatim-operator
+description: Helm chart for the Nominatim Kubernetes operator
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.32.0-0"
+home: https://github.com/zebernst/nominatim-operator
+sources:
+  - https://github.com/zebernst/nominatim-operator
+maintainers:
+  - name: zebernst
+keywords:
+  - nominatim
+  - geocoding
+  - operator
+dependencies:
+  # common v5 is published on the HTTP chart repo. OCI
+  # (oci://ghcr.io/bjw-s-labs/helm/common) currently returns 403 for the
+  # library chart — use HTTP until OCI publishes common.
+  # https://github.com/bjw-s-labs/helm-charts/tree/main/charts/library/common
+  - name: common
+    version: 5.0.1
+    repository: https://bjw-s-labs.github.io/helm-charts/

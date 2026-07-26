@@ -1,0 +1,54 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/common-5.0.1/charts/library/common/values.schema.json
+#
+# Values for nominatim-operator (bjw-s common library v5).
+#
+# Convenience mapping (see README for details):
+#   image.repository/tag/pullPolicy  → controllers.manager.containers.manager.image.*
+#   resources                        → controllers.manager.containers.manager.resources
+#   replicaCount                     → controllers.manager.replicas
+#   leaderElection                   → --leader-elect in container args
+#   watchNamespaces                  → reserved (operator currently watches all namespaces)
+
+global:
+  nameOverride: nominatim-operator
+
+# --- Convenience keys (consumed by templates/common.yaml; not passed to common as-is) ---
+
+image:
+  repository: ghcr.io/zebernst/nominatim-operator
+  # Empty uses Chart.AppVersion
+  tag: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 128Mi
+  requests:
+    cpu: 10m
+    memory: 64Mi
+
+leaderElection:
+  enabled: true
+
+# Empty = cluster-wide (current operator behavior). Reserved for future namespace scoping;
+# not passed to the binary until the manager supports --namespaces / Cache options.
+watchNamespaces: []
+
+# --- bjw-s common library values (merged/overwritten by convenience keys above) ---
+
+defaultPodOptions:
+  automountServiceAccountToken: true
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  terminationGracePeriodSeconds: 10
+
+# Controllers, serviceAccount, and rbac are generated from convenience keys in
+# templates/common.yaml. Set these to deep-merge overrides after generation.
+controllers: {}
+serviceAccount: {}
+rbac: {}
