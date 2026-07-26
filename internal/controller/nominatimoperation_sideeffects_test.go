@@ -34,6 +34,13 @@ import (
 	nominatimv1alpha1 "github.com/zebernst/nominatim-operator/api/v1alpha1"
 )
 
+// Shared postgres profile values used across side-effects tests (goconst).
+const (
+	testImportSharedBuffers  = "2GB"
+	testRuntimeSharedBuffers = "256MB"
+	testImportWorkMem        = "64MB"
+)
+
 // stubGetClient injects a fixed Get error (or, with n>0, fails only on the nth Get call);
 // used to exercise error-propagation branches that fake.Client can't trigger on its own.
 type stubGetClient struct {
@@ -200,7 +207,7 @@ func TestDefaultCNPGEffects_ApplyParametersMerges(t *testing.T) {
 	if err := c.Get(ctx, key, live); err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if err := effects.ApplyParameters(ctx, live, map[string]string{"shared_buffers": "2GB"}, nil); err != nil {
+	if err := effects.ApplyParameters(ctx, live, map[string]string{"shared_buffers": testImportSharedBuffers}, nil); err != nil {
 		t.Fatalf("ApplyParameters: %v", err)
 	}
 
@@ -216,7 +223,7 @@ func TestDefaultCNPGEffects_ApplyParametersMerges(t *testing.T) {
 	if params["max_connections"] != "100" {
 		t.Fatalf("expected pre-existing param preserved, got %#v", params)
 	}
-	if params["shared_buffers"] != "2GB" {
+	if params["shared_buffers"] != testImportSharedBuffers {
 		t.Fatalf("expected new param merged, got %#v", params)
 	}
 }
@@ -228,8 +235,8 @@ func TestDefaultCNPGEffects_ApplyParametersRemovesKeys(t *testing.T) {
 			"postgresql": map[string]interface{}{
 				"parameters": map[string]interface{}{
 					"max_connections": "100",
-					"work_mem":        "64MB",
-					"shared_buffers":  "2GB",
+					"work_mem":        testImportWorkMem,
+					"shared_buffers":  testImportSharedBuffers,
 				},
 			},
 		},
@@ -247,7 +254,7 @@ func TestDefaultCNPGEffects_ApplyParametersRemovesKeys(t *testing.T) {
 	if err := c.Get(ctx, key, live); err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if err := effects.ApplyParameters(ctx, live, map[string]string{"shared_buffers": "256MB"}, []string{"work_mem"}); err != nil {
+	if err := effects.ApplyParameters(ctx, live, map[string]string{"shared_buffers": testRuntimeSharedBuffers}, []string{"work_mem"}); err != nil {
 		t.Fatalf("ApplyParameters: %v", err)
 	}
 
@@ -263,7 +270,7 @@ func TestDefaultCNPGEffects_ApplyParametersRemovesKeys(t *testing.T) {
 	if params["max_connections"] != "100" {
 		t.Fatalf("expected unrelated param preserved, got %#v", params)
 	}
-	if params["shared_buffers"] != "256MB" {
+	if params["shared_buffers"] != testRuntimeSharedBuffers {
 		t.Fatalf("expected updated param, got %#v", params)
 	}
 	if _, ok := params["work_mem"]; ok {
@@ -341,7 +348,7 @@ func TestApplyParentPostgresProfile_Attached(t *testing.T) {
 	effects := &recordingCNPGEffects{}
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
 	parent := baseNominatim("app-attached")
-	parent.Spec.Database.PostgresProfiles = &nominatimv1alpha1.PostgresProfiles{Import: map[string]string{"work_mem": "64MB"}}
+	parent.Spec.Database.PostgresProfiles = &nominatimv1alpha1.PostgresProfiles{Import: map[string]string{"work_mem": testImportWorkMem}}
 	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{
 		Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg",
 	}
@@ -349,7 +356,7 @@ func TestApplyParentPostgresProfile_Attached(t *testing.T) {
 	if err := r.applyParentPostgresProfile(context.Background(), parent, "import"); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
-	if effects.profileCalls != 1 || effects.lastParams["work_mem"] != "64MB" {
+	if effects.profileCalls != 1 || effects.lastParams["work_mem"] != testImportWorkMem {
 		t.Fatalf("expected profile applied, got calls=%d params=%v", effects.profileCalls, effects.lastParams)
 	}
 }
@@ -674,8 +681,8 @@ func TestOperationReconcile_WriteHeavyBootstrap_PauseImportThenTerminalResumeRun
 		ClusterRef:                   &nominatimv1alpha1.LocalObjectReference{Name: "pg"},
 		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactWriteHeavy,
 		PostgresProfiles: &nominatimv1alpha1.PostgresProfiles{
-			Import:  map[string]string{"shared_buffers": "2GB"},
-			Runtime: map[string]string{"shared_buffers": "256MB"},
+			Import:  map[string]string{"shared_buffers": testImportSharedBuffers},
+			Runtime: map[string]string{"shared_buffers": testRuntimeSharedBuffers},
 		},
 	}
 	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{
@@ -702,7 +709,7 @@ func TestOperationReconcile_WriteHeavyBootstrap_PauseImportThenTerminalResumeRun
 	if effects.pauseCalls != 1 {
 		t.Fatalf("expected 1 pause call, got %d", effects.pauseCalls)
 	}
-	if effects.profileCalls != 1 || effects.lastParams["shared_buffers"] != "2GB" {
+	if effects.profileCalls != 1 || effects.lastParams["shared_buffers"] != testImportSharedBuffers {
 		t.Fatalf("expected import profile applied, got calls=%d params=%v", effects.profileCalls, effects.lastParams)
 	}
 
@@ -773,7 +780,7 @@ func TestOperationReconcile_WriteHeavyBootstrap_PauseImportThenTerminalResumeRun
 	// the import profile once more (pause=3rd call not tracked separately, profile 3rd import call)
 	// before syncStatusFromJob flips the phase to Succeeded and the terminal branch applies runtime
 	// on top (4th profile call) — both idempotent on a real Cluster, so the extra write is harmless.
-	if effects.profileCalls != 4 || effects.lastParams["shared_buffers"] != "256MB" {
+	if effects.profileCalls != 4 || effects.lastParams["shared_buffers"] != testRuntimeSharedBuffers {
 		t.Fatalf("expected runtime profile applied last, got calls=%d params=%v", effects.profileCalls, effects.lastParams)
 	}
 
@@ -1013,8 +1020,8 @@ func TestOperationReconcile_ConflictFailure_SyncsParentSideEffectsWithoutError(t
 		ClusterRef:                   &nominatimv1alpha1.LocalObjectReference{Name: "pg"},
 		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactWriteHeavy,
 		PostgresProfiles: &nominatimv1alpha1.PostgresProfiles{
-			Import:  map[string]string{"shared_buffers": "2GB", "work_mem": "64MB"},
-			Runtime: map[string]string{"shared_buffers": "256MB"},
+			Import:  map[string]string{"shared_buffers": testImportSharedBuffers, "work_mem": testImportWorkMem},
+			Runtime: map[string]string{"shared_buffers": testRuntimeSharedBuffers},
 		},
 	}
 	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{
@@ -1084,8 +1091,8 @@ func TestApplyPostgresProfile_RemovesImportOnlyKeysOnRuntime(t *testing.T) {
 		"spec": map[string]interface{}{
 			"postgresql": map[string]interface{}{
 				"parameters": map[string]interface{}{
-					"shared_buffers":  "2GB",
-					"work_mem":        "64MB",
+					"shared_buffers":  testImportSharedBuffers,
+					"work_mem":        testImportWorkMem,
 					"max_connections": "100",
 				},
 			},
@@ -1098,8 +1105,8 @@ func TestApplyPostgresProfile_RemovesImportOnlyKeysOnRuntime(t *testing.T) {
 	nom := baseNominatim("profile-rm")
 	nom.Spec.Database = nominatimv1alpha1.DatabaseSpec{
 		PostgresProfiles: &nominatimv1alpha1.PostgresProfiles{
-			Import:  map[string]string{"shared_buffers": "2GB", "work_mem": "64MB"},
-			Runtime: map[string]string{"shared_buffers": "256MB"},
+			Import:  map[string]string{"shared_buffers": testImportSharedBuffers, "work_mem": testImportWorkMem},
+			Runtime: map[string]string{"shared_buffers": testRuntimeSharedBuffers},
 		},
 	}
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{
@@ -1121,7 +1128,7 @@ func TestApplyPostgresProfile_RemovesImportOnlyKeysOnRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("params: %v", err)
 	}
-	if params["shared_buffers"] != "256MB" {
+	if params["shared_buffers"] != testRuntimeSharedBuffers {
 		t.Fatalf("expected runtime shared_buffers, got %#v", params)
 	}
 	if _, ok := params["work_mem"]; ok {
@@ -1141,8 +1148,8 @@ func TestOperationReconcile_DeleteMidFlight_ClearsRefAndResumes(t *testing.T) {
 		ClusterRef:                   &nominatimv1alpha1.LocalObjectReference{Name: "pg"},
 		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactWriteHeavy,
 		PostgresProfiles: &nominatimv1alpha1.PostgresProfiles{
-			Import:  map[string]string{"shared_buffers": "2GB"},
-			Runtime: map[string]string{"shared_buffers": "256MB"},
+			Import:  map[string]string{"shared_buffers": testImportSharedBuffers},
+			Runtime: map[string]string{"shared_buffers": testRuntimeSharedBuffers},
 		},
 	}
 	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{
@@ -1198,7 +1205,7 @@ func TestOperationReconcile_DeleteMidFlight_ClearsRefAndResumes(t *testing.T) {
 	if effects.resumeCalls != 1 {
 		t.Fatalf("expected resume on delete with no siblings, got %d", effects.resumeCalls)
 	}
-	if effects.profileCalls < 2 || effects.lastParams["shared_buffers"] != "256MB" {
+	if effects.profileCalls < 2 || effects.lastParams["shared_buffers"] != testRuntimeSharedBuffers {
 		t.Fatalf("expected runtime profile on delete, calls=%d params=%v", effects.profileCalls, effects.lastParams)
 	}
 
