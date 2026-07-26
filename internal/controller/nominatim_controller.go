@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"slices"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -51,8 +53,7 @@ type NominatimReconciler struct {
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
-// Reconcile updates Nominatim status conditions and honors annotation nudges.
-// Workload/Operation creation is deferred to later beads; this loop is the level-based entrypoint.
+// Reconcile runs database attach, serving-plane workloads, and status conditions.
 func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -75,6 +76,11 @@ func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	if err := r.reconcileDatabase(ctx, nom); err != nil {
 		log.Error(err, "failed to reconcile Nominatim database")
+		return ctrl.Result{}, err
+	}
+
+	if err := r.reconcileWorkloads(ctx, nom); err != nil {
+		log.Error(err, "failed to reconcile Nominatim workloads")
 		return ctrl.Result{}, err
 	}
 
@@ -269,8 +275,15 @@ func (r *NominatimReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	cnpgCluster := &unstructured.Unstructured{}
 	cnpgCluster.SetGroupVersionKind(CNPGClusterGVK)
 
+	httpRoute := &unstructured.Unstructured{}
+	httpRoute.SetGroupVersionKind(HTTPRouteGVK)
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&nominatimv1alpha1.Nominatim{}).
+		Owns(&appsv1.Deployment{}).
+		Owns(&corev1.Service{}).
+		Owns(&corev1.PersistentVolumeClaim{}).
+		Owns(httpRoute).
 		Watches(
 			&nominatimv1alpha1.NominatimOperation{},
 			handler.EnqueueRequestsFromMapFunc(mapOperationToNominatim),
