@@ -102,9 +102,23 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
+API_IMG ?= ghcr.io/zebernst/nominatim-api:latest
+WORKER_IMG ?= ghcr.io/zebernst/nominatim-worker:latest
+
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} .
+
+.PHONY: docker-build-api
+docker-build-api: ## Build nominatim-api image.
+	$(CONTAINER_TOOL) build -t ${API_IMG} -f Dockerfile.api .
+
+.PHONY: docker-build-worker
+docker-build-worker: ## Build nominatim-worker image.
+	$(CONTAINER_TOOL) build -t ${WORKER_IMG} -f Dockerfile.worker .
+
+.PHONY: docker-build-all
+docker-build-all: docker-build docker-build-api docker-build-worker ## Build operator, api, and worker images.
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.

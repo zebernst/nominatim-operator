@@ -1,3 +1,4 @@
+# nominatim-operator — kubebuilder manager (ghcr.io/zebernst/nominatim-operator)
 # Build the manager binary
 FROM docker.io/golang:1.23 AS builder
 ARG TARGETOS

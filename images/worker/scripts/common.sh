@@ -1,0 +1,274 @@
+#!/usr/bin/env bash
+# Shared helpers for worker Operation phases. Keep thin: wait, link, run nominatim CLI.
+# shellcheck shell=bash
+
+PROJECT_DIR="${PROJECT_DIR:-/nominatim}"
+STAGING_DIR="${IMPORT_STAGING:-/import-staging}"
+IMPORT_FINISHED="${IMPORT_FINISHED:-${PROJECT_DIR}/import-finished}"
+IMPORTED_LIST="${IMPORTED_LIST:-${PROJECT_DIR}/imported-regions.txt}"
+ENV_DEFAULTS="${ENV_DEFAULTS:-/opt/nominatim/env.defaults}"
+DOWNURL="${NOMINATIM_DOWNURL:-https://download.geofabrik.de}"
+CURL_USER_AGENT="${USER_AGENT:-nominatim-worker}"
+THREADS="${THREADS:-$(nproc)}"
+# Ubuntu packages pyosmium helpers under /usr/lib/python3-pyosmium (on PATH in the image).
+PYOSMIUM_GET_CHANGES="${PYOSMIUM_GET_CHANGES:-pyosmium-get-changes}"
+
+log() { echo "[nominatim-worker] $*"; }
+
+die() { echo "[nominatim-worker] ERROR: $*" >&2; exit 1; }
+
+truthy() {
+  case "${1,,}" in
+    true | 1 | yes | on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+require_db_env() {
+  : "${NOMINATIM_DATABASE_DSN:?NOMINATIM_DATABASE_DSN is required}"
+  : "${PGHOST:?PGHOST is required}"
+  : "${PGDATABASE:?PGDATABASE is required}"
+  : "${PGUSER:?PGUSER is required}"
+  : "${PGPASSWORD:?PGPASSWORD is required}"
+  export NOMINATIM_DATABASE_DSN PGHOST PGDATABASE PGUSER PGPASSWORD
+}
+
+wait_for_postgres() {
+  log "Waiting for PostgreSQL at ${PGHOST}"
+  local i
+  for i in $(seq 1 90); do
+    if pg_isready -h "${PGHOST}" -d "${PGDATABASE}" -U "${PGUSER}" -q; then
+      return 0
+    fi
+    sleep 2
+  done
+  die "PostgreSQL at ${PGHOST} did not become ready"
+}
+
+link_staging_name() {
+  local name="$1"
+  local link="${PROJECT_DIR}/${name}"
+  local target="${STAGING_DIR}/${name}"
+
+  if [ -e "${link}" ] && [ ! -L "${link}" ]; then
+    log "Removing stale project artifact: ${link}"
+    rm -f "${link}"
+  fi
+  ln -sfn "${target}" "${link}"
+}
+
+link_staging() {
+  mkdir -p "${STAGING_DIR}" "${PROJECT_DIR}"
+  link_staging_name "data.osm.pbf"
+  link_staging_name "wikimedia-importance.csv.gz"
+  link_staging_name "us_postcodes.csv.gz"
+  link_staging_name "secondary_importance.sql.gz"
+}
+
+seed_project_env() {
+  local env_file="${PROJECT_DIR}/.env"
+  local import_style="${IMPORT_STYLE:-extratags}"
+
+  if [ ! -f "${env_file}" ]; then
+    log "Seeding ${env_file} from ${ENV_DEFAULTS}"
+    cp "${ENV_DEFAULTS}" "${env_file}"
+  fi
+
+  if grep -qE '^NOMINATIM_IMPORT_STYLE=' "${env_file}"; then
+    sed -i "s|^NOMINATIM_IMPORT_STYLE=.*|NOMINATIM_IMPORT_STYLE=${import_style}|" "${env_file}"
+  fi
+
+  if [ -n "${NOMINATIM_FLATNODE_FILE:-}" ]; then
+    if grep -qE '^NOMINATIM_FLATNODE_FILE=' "${env_file}"; then
+      sed -i "s|^NOMINATIM_FLATNODE_FILE=.*|NOMINATIM_FLATNODE_FILE=${NOMINATIM_FLATNODE_FILE}|" "${env_file}"
+    else
+      printf 'NOMINATIM_FLATNODE_FILE=%s\n' "${NOMINATIM_FLATNODE_FILE}" >> "${env_file}"
+    fi
+  fi
+
+  if [ -n "${NOMINATIM_REPLICATION_URL:-}" ]; then
+    if grep -qE '^NOMINATIM_REPLICATION_URL=' "${env_file}"; then
+      sed -i "s|^NOMINATIM_REPLICATION_URL=.*|NOMINATIM_REPLICATION_URL=${NOMINATIM_REPLICATION_URL}|" "${env_file}"
+    else
+      printf 'NOMINATIM_REPLICATION_URL=%s\n' "${NOMINATIM_REPLICATION_URL}" >> "${env_file}"
+    fi
+  fi
+}
+
+# Prefer gosu when root; otherwise run directly (already nominatim).
+run_nominatim() {
+  if [ "$(id -u)" -eq 0 ]; then
+    gosu nominatim env \
+      NOMINATIM_DATABASE_DSN="${NOMINATIM_DATABASE_DSN}" \
+      PGHOST="${PGHOST}" \
+      PGDATABASE="${PGDATABASE}" \
+      PGUSER="${PGUSER}" \
+      PGPASSWORD="${PGPASSWORD}" \
+      nominatim "$@"
+  else
+    nominatim "$@"
+  fi
+}
+
+fix_project_ownership() {
+  if [ "$(id -u)" -ne 0 ]; then
+    return 0
+  fi
+  local flatnode_file="${NOMINATIM_FLATNODE_FILE:-}"
+  local flatnode_dir=""
+  if [ -n "${flatnode_file}" ]; then
+    flatnode_dir="$(dirname "${flatnode_file}")"
+  fi
+  chown nominatim:nominatim "${PROJECT_DIR}" 2>/dev/null || true
+  if [ -n "${flatnode_dir}" ] && [ -d "${flatnode_dir}" ]; then
+    find "${PROJECT_DIR}" -mindepth 1 \
+      \( -path "${flatnode_dir}" -o -path "${flatnode_dir}/*" \) -prune -o \
+      \( -type l ! -exec test -e {} \; \) -prune -o \
+      -print0 \
+      | xargs -0 -r chown nominatim:nominatim
+  else
+    find "${PROJECT_DIR}" -mindepth 1 \
+      \( -type l ! -exec test -e {} \; \) -prune -o \
+      -print0 \
+      | xargs -0 -r chown nominatim:nominatim
+  fi
+}
+
+psql_scalar() {
+  psql -h "${PGHOST}" -d "${PGDATABASE}" -U "${PGUSER}" -Atqc "$1"
+}
+
+psql_true() {
+  case "$1" in
+    t | true) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Detect nominatim import --continue stage against external DB (from resume-import knowledge).
+# Prints: done|fresh|import-from-file|load-data|indexing|db-postprocess
+detect_continue_at() {
+  if [ -n "${NOMINATIM_CONTINUE_AT:-}" ]; then
+    case "${NOMINATIM_CONTINUE_AT}" in
+      import-from-file | load-data | indexing | db-postprocess)
+        echo "${NOMINATIM_CONTINUE_AT}"
+        return 0
+        ;;
+      *)
+        die "Invalid NOMINATIM_CONTINUE_AT='${NOMINATIM_CONTINUE_AT}'"
+        ;;
+    esac
+  fi
+
+  if [ -f "${IMPORT_FINISHED}" ]; then
+    echo "done"
+    return 0
+  fi
+
+  local db_exists
+  db_exists="$(psql -h "${PGHOST}" -d postgres -U "${PGUSER}" -Atqc \
+    "SELECT 1 FROM pg_database WHERE datname = '${PGDATABASE}'" 2>/dev/null || true)"
+  if [ "${db_exists}" != "1" ]; then
+    echo "fresh"
+    return 0
+  fi
+
+  local has_place has_placex_rel placex_loaded indexing_started has_pending has_version
+
+  has_place="$(psql_scalar "SELECT COALESCE((SELECT true FROM place LIMIT 1), false)" 2>/dev/null || echo f)"
+  if ! psql_true "${has_place}"; then
+    echo "fresh"
+    return 0
+  fi
+
+  has_placex_rel="$(psql_scalar "SELECT to_regclass('public.placex') IS NOT NULL" 2>/dev/null || echo f)"
+  if ! psql_true "${has_placex_rel}"; then
+    echo "load-data"
+    return 0
+  fi
+
+  placex_loaded="$(psql_scalar "SELECT EXISTS (SELECT 1 FROM placex LIMIT 1)" 2>/dev/null || echo f)"
+  if ! psql_true "${placex_loaded}"; then
+    echo "load-data"
+    return 0
+  fi
+
+  has_version="$(psql_scalar \
+    "SELECT EXISTS (SELECT 1 FROM nominatim_properties WHERE property = 'database_version')" 2>/dev/null || echo f)"
+  if psql_true "${has_version}"; then
+    echo "done"
+    return 0
+  fi
+
+  indexing_started="$(psql_scalar \
+    "SELECT EXISTS (SELECT 1 FROM placex WHERE indexed_status = 0 LIMIT 1)" 2>/dev/null || echo f)"
+  if ! psql_true "${indexing_started}"; then
+    echo "load-data"
+    return 0
+  fi
+
+  has_pending="$(psql_scalar \
+    "SELECT EXISTS (SELECT 1 FROM placex WHERE indexed_status > 0 LIMIT 1)" 2>/dev/null || echo f)"
+  if psql_true "${has_pending}"; then
+    echo "indexing"
+    return 0
+  fi
+
+  echo "db-postprocess"
+}
+
+ensure_osm_file() {
+  local osmfile="${PBF_PATH:-${STAGING_DIR}/data.osm.pbf}"
+
+  if [ -n "${PBF_PATH:-}" ] && [ -f "${PBF_PATH}" ] && [ -s "${PBF_PATH}" ]; then
+    echo "${PBF_PATH}"
+    return 0
+  fi
+
+  mkdir -p "${STAGING_DIR}"
+  if [ -f "${osmfile}" ] && [ -s "${osmfile}" ]; then
+    echo "${osmfile}"
+    return 0
+  fi
+
+  if [ -z "${PBF_URL:-}" ]; then
+    die "OSM extract missing at ${osmfile} and PBF_URL is unset"
+  fi
+
+  log "Downloading OSM extract from ${PBF_URL}"
+  curl -L -A "${CURL_USER_AGENT}" --fail-with-body -C - --create-dirs \
+    --connect-timeout 30 --max-time 21600 \
+    -o "${osmfile}" "${PBF_URL}"
+  echo "${osmfile}"
+}
+
+seed_region_state() {
+  local region="$1"
+  local state_dir="${PROJECT_DIR}/update/${region}"
+  mkdir -p "${state_dir}"
+  curl -fsSL -A "${CURL_USER_AGENT}" \
+    "${DOWNURL}/${region}-updates/state.txt" > "${state_dir}/sequence.state"
+}
+
+parse_regions() {
+  # Populates bash array DESIRED_REGIONS from NOMINATIM_REGIONS (comma/space separated).
+  DESIRED_REGIONS=()
+  local raw="${NOMINATIM_REGIONS:-}"
+  if [ -z "${raw}" ]; then
+    return 0
+  fi
+  local region
+  while IFS= read -r region; do
+    [ -n "${region}" ] || continue
+    DESIRED_REGIONS+=("${region}")
+  done < <(echo "${raw}" | tr ',' ' ' | tr ' ' '\n' | sed '/^[[:space:]]*$/d')
+}
+
+prepare_worker() {
+  require_db_env
+  mkdir -p "${STAGING_DIR}" "${PROJECT_DIR}" "${PROJECT_DIR}/update"
+  link_staging
+  seed_project_env
+  wait_for_postgres
+  fix_project_ownership
+}
