@@ -7,7 +7,7 @@ You may obtain a copy of the License at
 
     http://www.apache.org/licenses/LICENSE-2.0
 
-    10|Unless required by applicable law or agreed to in writing, software
+Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
@@ -40,6 +40,8 @@ import (
 type NominatimOperationReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	// CNPGEffects optional override for tests; defaults to defaultCNPGEffects (see cnpg_effects.go).
+	CNPGEffects CNPGEffects
 }
 
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatimoperations,verbs=get;list;watch;create;update;patch;delete
@@ -64,6 +66,11 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 			if err := r.syncStatusFromJob(ctx, op); err != nil {
 				return ctrl.Result{}, err
 			}
+		}
+		// Idempotent: clears any lingering parent activeOperationRefs entry and re-applies
+		// resume/runtime CNPG effects (e.g. after an operator restart mid-cleanup).
+		if err := r.syncParentSideEffects(ctx, op); err != nil {
+			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
 	}
@@ -96,11 +103,19 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return ctrl.Result{}, err
 	}
 
+	if err := r.applyPreJobCNPGEffects(ctx, op, parent); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	if err := r.ensureJob(ctx, op, parent); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	if err := r.syncStatusFromJob(ctx, op); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := r.syncParentSideEffects(ctx, op); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -202,7 +217,13 @@ func (r *NominatimOperationReconciler) failOperation(ctx context.Context, op *no
 	if op.Status.StartTime == nil {
 		op.Status.StartTime = &now
 	}
-	return r.Status().Update(ctx, op)
+	if err := r.Status().Update(ctx, op); err != nil {
+		return err
+	}
+	// Best-effort cleanup: an Operation that fails before ever going active (Conflict,
+	// ParentNotFound) never had a ref/pause to undo, but this stays correct and idempotent
+	// for the case where it fails after having already gone Pending/Running.
+	return r.syncParentSideEffects(ctx, op)
 }
 
 // SetupWithManager sets up the controller with the Manager.
