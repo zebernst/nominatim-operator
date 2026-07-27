@@ -22,6 +22,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -243,15 +244,13 @@ func ensureCNPGManagedWebRole(cluster *unstructured.Unstructured) error {
 // reconcileOwnedCNPGDatabase owns a CNPG Database CR that declaratively installs Nominatim
 // extensions (hstore/postgis/…) on the initdb application database.
 func (r *NominatimReconciler) reconcileOwnedCNPGDatabase(ctx context.Context, nom *nominatimv1alpha1.Nominatim, clusterName string) error {
-	dbName := OwnedCNPGDatabaseName(nom)
+	return ensureOwnedCNPGDatabase(ctx, r.Client, r.Scheme, nom, clusterName)
+}
 
-	exts := make([]interface{}, 0, len(cnpgNominatimExtensions))
-	for _, name := range cnpgNominatimExtensions {
-		exts = append(exts, map[string]interface{}{
-			"name":   name,
-			"ensure": "present",
-		})
-	}
+// ensureOwnedCNPGDatabase CreateOrUpdates the owned CNPG Database CR for nom.
+// Used by the Nominatim reconciler and by Reimport database reset.
+func ensureOwnedCNPGDatabase(ctx context.Context, c client.Client, scheme *runtime.Scheme, nom *nominatimv1alpha1.Nominatim, clusterName string) error {
+	dbName := OwnedCNPGDatabaseName(nom)
 
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		db := &unstructured.Unstructured{}
@@ -259,35 +258,47 @@ func (r *NominatimReconciler) reconcileOwnedCNPGDatabase(ctx context.Context, no
 		db.SetName(dbName)
 		db.SetNamespace(nom.Namespace)
 
-		_, err := controllerutil.CreateOrUpdate(ctx, r.Client, db, func() error {
-			if err := controllerutil.SetControllerReference(nom, db, r.Scheme); err != nil {
+		_, err := controllerutil.CreateOrUpdate(ctx, c, db, func() error {
+			if err := controllerutil.SetControllerReference(nom, db, scheme); err != nil {
 				return err
 			}
-			if err := unstructured.SetNestedField(db.Object, cnpgAppDatabaseName, "spec", "name"); err != nil {
-				return err
-			}
-			if err := unstructured.SetNestedField(db.Object, cnpgAppOwnerName, "spec", "owner"); err != nil {
-				return err
-			}
-			if err := unstructured.SetNestedField(db.Object, clusterName, "spec", "cluster", "name"); err != nil {
-				return err
-			}
-			if err := unstructured.SetNestedSlice(db.Object, exts, "spec", "extensions"); err != nil {
-				return err
-			}
-			// delete reclaim so Reimport can drop+recreate the application database via the CR.
-			if err := unstructured.SetNestedField(db.Object, "delete", "spec", "databaseReclaimPolicy"); err != nil {
-				return err
-			}
-			if err := unstructured.SetNestedField(db.Object, "present", "spec", "ensure"); err != nil {
-				return err
-			}
-			return nil
+			return applyOwnedCNPGDatabaseSpec(db, clusterName)
 		})
 		return err
 	})
 	if err != nil {
 		return fmt.Errorf("reconcile owned CNPG Database %q: %w", dbName, err)
+	}
+	return nil
+}
+
+// applyOwnedCNPGDatabaseSpec sets the desired Database CR fields (name/owner/cluster/extensions/reclaim).
+func applyOwnedCNPGDatabaseSpec(db *unstructured.Unstructured, clusterName string) error {
+	exts := make([]interface{}, 0, len(cnpgNominatimExtensions))
+	for _, name := range cnpgNominatimExtensions {
+		exts = append(exts, map[string]interface{}{
+			"name":   name,
+			"ensure": "present",
+		})
+	}
+	if err := unstructured.SetNestedField(db.Object, cnpgAppDatabaseName, "spec", "name"); err != nil {
+		return err
+	}
+	if err := unstructured.SetNestedField(db.Object, cnpgAppOwnerName, "spec", "owner"); err != nil {
+		return err
+	}
+	if err := unstructured.SetNestedField(db.Object, clusterName, "spec", "cluster", "name"); err != nil {
+		return err
+	}
+	if err := unstructured.SetNestedSlice(db.Object, exts, "spec", "extensions"); err != nil {
+		return err
+	}
+	// delete reclaim so Reimport can drop+recreate the application database via the CR.
+	if err := unstructured.SetNestedField(db.Object, "delete", "spec", "databaseReclaimPolicy"); err != nil {
+		return err
+	}
+	if err := unstructured.SetNestedField(db.Object, "present", "spec", "ensure"); err != nil {
+		return err
 	}
 	return nil
 }
