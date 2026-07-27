@@ -1,6 +1,8 @@
 ---
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 # Opens/updates the release-please PR that bumps semver, changelog, and Chart.yaml.
+# Uses a GitHub App token so tag/release events re-trigger the Release workflow
+# (GITHUB_TOKEN-created releases do not).
 name: Prepare Release
 
 on:
@@ -18,13 +20,18 @@ jobs:
     name: Prepare release
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      issues: write
-      pull-requests: write
+      contents: read
     steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+
       - name: Bump version (release-please)
         uses: googleapis/release-please-action@v5
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
