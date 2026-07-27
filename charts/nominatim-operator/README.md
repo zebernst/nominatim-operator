@@ -90,7 +90,7 @@ If the GHCR package is private, configure Flux image/chart pull credentials for 
 ### Release flow
 
 1. Land conventional commits on `main` (`feat:`, `fix:`, …).
-2. release-please opens a release PR bumping `Chart.yaml` / changelog / manifest.
+2. The **Prepare Release** workflow (release-please) opens a PR bumping `Chart.yaml` / changelog / manifest.
 3. Merge that PR → GitHub Release + semver tag (no `v`).
 4. `release.yaml` builds/pushes images for that version and publishes the chart to
    `oci://ghcr.io/zebernst/charts` (Cosign-signed).
