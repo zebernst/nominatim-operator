@@ -38,6 +38,9 @@ go.work
 # Common / metaswarm
 .DS_Store
 *.log
+
+# Helm dependency packages (fetched by `helm dependency update`)
+charts/**/charts/*.tgz
 .env
 .env.local
 .env.*.local

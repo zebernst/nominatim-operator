@@ -7,9 +7,11 @@ Expand the name of the chart / release for resource naming hints.
 
 {{/*
 Image tag: explicit tag, else Chart.AppVersion.
+When image.digest is set (release publish), prefer digest and leave tag empty.
 */}}
 {{- define "nominatim-operator.imageTag" -}}
-{{- if .Values.image.tag -}}
+{{- if .Values.image.digest -}}
+{{- else if .Values.image.tag -}}
 {{- .Values.image.tag -}}
 {{- else -}}
 {{- .Chart.AppVersion -}}
@@ -58,7 +60,11 @@ controllers:
 {{- include "nominatim-operator.managerArgs" . | nindent 10 }}
         image:
           repository: {{ .Values.image.repository | quote }}
+          {{- if .Values.image.digest }}
+          digest: {{ .Values.image.digest | quote }}
+          {{- else }}
           tag: {{ include "nominatim-operator.imageTag" . | quote }}
+          {{- end }}
           pullPolicy: {{ .Values.image.pullPolicy | quote }}
         resources:
 {{- toYaml .Values.resources | nindent 10 }}

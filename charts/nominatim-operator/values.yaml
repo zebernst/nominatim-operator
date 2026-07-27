@@ -16,8 +16,10 @@ global:
 
 image:
   repository: ghcr.io/zebernst/nominatim-operator
-  # Empty uses Chart.AppVersion
+  # Empty uses Chart.AppVersion when digest is also empty.
   tag: ""
+  # Set at chart publish time to the released operator image digest (sha256:...).
+  digest: ""
   pullPolicy: IfNotPresent
 
 replicaCount: 1
