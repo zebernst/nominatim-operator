@@ -11,7 +11,7 @@ library chart (v5, Kubernetes ≥ 1.32).
 | **Kubernetes ≥ 1.32** | Chart `kubeVersion`; aligns with common v5 |
 | **CloudNativePG (CNPG) CRDs** | Required for full Nominatim features (Postgres clusters owned by Nominatim installs) |
 | **Gateway API CRDs** | Required when exposing Nominatim via Gateway API HTTPRoutes |
-| **Helm 3** | Chart dependency pulls from the bjw-s Helm repo |
+| **Helm 4** | Chart dependency pulls from the bjw-s Helm repo |
 
 Install CNPG and Gateway API CRDs **before** creating `Nominatim` resources that
 reference them. This chart does **not** install those third-party CRDs.
@@ -43,20 +43,15 @@ remove files from `crds/` — double-applying CRDs is confusing and error-prone.
 
 ### From OCI (recommended)
 
-Published to GHCR on pushes to `main` (`0.0.0-<sha>`) and on `v*` tags (`<semver>`):
+Charts are published to GHCR **only on GitHub Releases** created by
+[release-please](https://github.com/googleapis/release-please) (semver tags
+**without** a `v` prefix, e.g. `0.1.0`). Images are also tagged with that
+version; the published chart pins the operator image **digest**.
 
 ```bash
-# Tagged release
 helm install nominatim-operator \
   oci://ghcr.io/zebernst/charts/nominatim-operator \
   --version 0.1.0 \
-  --namespace nominatim-system \
-  --create-namespace
-
-# Or a main-branch build
-helm install nominatim-operator \
-  oci://ghcr.io/zebernst/charts/nominatim-operator \
-  --version 0.0.0-<sha> \
   --namespace nominatim-system \
   --create-namespace
 ```
@@ -83,7 +78,7 @@ spec:
   chart:
     spec:
       chart: nominatim-operator
-      version: "0.1.0" # or 0.0.0-<sha> from main
+      version: "0.1.0" # x-release-please-version
       sourceRef:
         kind: HelmRepository
         name: zebernst-charts
@@ -91,6 +86,17 @@ spec:
 ```
 
 If the GHCR package is private, configure Flux image/chart pull credentials for `ghcr.io`.
+
+### Release flow
+
+1. Land conventional commits on `main` (`feat:`, `fix:`, …).
+2. release-please opens a release PR bumping `Chart.yaml` / changelog / manifest.
+3. Merge that PR → GitHub Release + semver tag (no `v`).
+4. `release.yaml` builds/pushes images for that version and publishes the chart to
+   `oci://ghcr.io/zebernst/charts` (Cosign-signed).
+
+Main-branch image tags (`latest`, branch, SHA) still build for testing; they are
+**not** chart OCI releases.
 
 ### From a local checkout
 
@@ -137,7 +143,8 @@ Convenience keys (recommended):
 | Key | Description | Default |
 |-----|-------------|---------|
 | `image.repository` | Operator image repository | `ghcr.io/zebernst/nominatim-operator` |
-| `image.tag` | Image tag (empty → `Chart.AppVersion`) | `""` |
+| `image.tag` | Image tag (empty → `Chart.AppVersion` when no digest) | `""` |
+| `image.digest` | Image digest (set on OCI chart publish; preferred over tag) | `""` |
 | `image.pullPolicy` | Image pull policy | `IfNotPresent` |
 | `replicaCount` | Deployment replicas | `1` |
 | `resources` | Container resources | see `values.yaml` |
