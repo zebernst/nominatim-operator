@@ -1,6 +1,7 @@
 ---
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
-name: Release Please
+# Opens/updates the release-please PR that bumps semver, changelog, and Chart.yaml.
+name: Prepare Release
 
 on:
   push:
@@ -13,14 +14,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release-please:
+  prepare-release:
+    name: Prepare release
     runs-on: ubuntu-latest
     permissions:
       contents: write
       issues: write
       pull-requests: write
     steps:
-      - name: Release Please
+      - name: Bump version (release-please)
         uses: googleapis/release-please-action@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
