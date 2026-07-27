@@ -41,6 +41,59 @@ remove files from `crds/` — double-applying CRDs is confusing and error-prone.
 
 ## Install
 
+### From OCI (recommended)
+
+Published to GHCR on pushes to `main` (`0.0.0-<sha>`) and on `v*` tags (`<semver>`):
+
+```bash
+# Tagged release
+helm install nominatim-operator \
+  oci://ghcr.io/zebernst/charts/nominatim-operator \
+  --version 0.1.0 \
+  --namespace nominatim-system \
+  --create-namespace
+
+# Or a main-branch build
+helm install nominatim-operator \
+  oci://ghcr.io/zebernst/charts/nominatim-operator \
+  --version 0.0.0-<sha> \
+  --namespace nominatim-system \
+  --create-namespace
+```
+
+Flux (OCI `HelmRepository` + `HelmRelease`):
+
+```yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: zebernst-charts
+  namespace: flux-system
+spec:
+  type: oci
+  url: oci://ghcr.io/zebernst/charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: nominatim-operator
+  namespace: nominatim-system
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: nominatim-operator
+      version: "0.1.0" # or 0.0.0-<sha> from main
+      sourceRef:
+        kind: HelmRepository
+        name: zebernst-charts
+        namespace: flux-system
+```
+
+If the GHCR package is private, configure Flux image/chart pull credentials for `ghcr.io`.
+
+### From a local checkout
+
 ```bash
 # Fetch the common library dependency
 helm dependency update charts/nominatim-operator

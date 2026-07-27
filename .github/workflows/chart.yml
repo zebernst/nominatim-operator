@@ -1,0 +1,73 @@
+name: Chart
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  CHART_OWNER: zebernst
+  CHART_PATH: charts/nominatim-operator
+
+jobs:
+  publish:
+    name: Publish Helm chart (OCI)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: Resolve chart version
+        id: version
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            SHORT_SHA="$(echo "${GITHUB_SHA}" | cut -c1-7)"
+            VERSION="0.0.0-${SHORT_SHA}"
+          fi
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "Publishing chart version ${VERSION}"
+
+      - name: Set Chart.yaml version / appVersion
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          # Chart.yaml uses version/appVersion; keep them aligned for OCI tags.
+          sed -i.bak -E "s/^version: .*/version: ${VERSION}/" "${CHART_PATH}/Chart.yaml"
+          sed -i.bak -E "s/^appVersion: .*/appVersion: \"${VERSION}\"/" "${CHART_PATH}/Chart.yaml"
+          rm -f "${CHART_PATH}/Chart.yaml.bak"
+          cat "${CHART_PATH}/Chart.yaml"
+
+      - name: Helm dependency update
+        run: helm dependency update "${CHART_PATH}"
+
+      - name: Package chart
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          helm package "${CHART_PATH}" --destination dist
+          ls -la dist
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login "${REGISTRY}" \
+            -u "${{ github.actor }}" --password-stdin
+
+      - name: Push chart to OCI
+        run: |
+          set -euo pipefail
+          CHART_TGZ="$(ls dist/nominatim-operator-*.tgz)"
+          helm push "${CHART_TGZ}" "oci://${REGISTRY}/${CHART_OWNER}/charts"
