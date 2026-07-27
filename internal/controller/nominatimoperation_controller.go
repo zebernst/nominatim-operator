@@ -7,7 +7,7 @@ You may obtain a copy of the License at
 
     http://www.apache.org/licenses/LICENSE-2.0
 
-    10|Unless required by applicable law or agreed to in writing, software
+Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
@@ -40,6 +40,8 @@ import (
 type NominatimOperationReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	// CNPGEffects optional override for tests; defaults to defaultCNPGEffects (see cnpg_effects.go).
+	CNPGEffects CNPGEffects
 }
 
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatimoperations,verbs=get;list;watch;create;update;patch;delete
@@ -58,12 +60,29 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	if !op.DeletionTimestamp.IsZero() {
+		return r.reconcileOperationDelete(ctx, op)
+	}
+
+	if !controllerutil.ContainsFinalizer(op, nominatimv1alpha1.NominatimOperationFinalizer) {
+		controllerutil.AddFinalizer(op, nominatimv1alpha1.NominatimOperationFinalizer)
+		if err := r.Update(ctx, op); err != nil {
+			return ctrl.Result{}, err
+		}
+		// Continue in the same pass so callers/tests that reconcile once still progress.
+	}
+
 	if isTerminalOperationPhase(op.Status.Phase) {
 		// Keep Job-derived status fresh for Succeeded/Failed Jobs; Conflict failures have no Job.
 		if op.Status.JobRef != nil {
 			if err := r.syncStatusFromJob(ctx, op); err != nil {
 				return ctrl.Result{}, err
 			}
+		}
+		// Idempotent: clears any lingering parent activeOperationRefs entry and re-applies
+		// resume/runtime CNPG effects (e.g. after an operator restart mid-cleanup).
+		if err := r.syncParentSideEffects(ctx, op); err != nil {
+			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
 	}
@@ -96,6 +115,10 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return ctrl.Result{}, err
 	}
 
+	if err := r.applyPreJobCNPGEffects(ctx, op, parent); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	if err := r.ensureJob(ctx, op, parent); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -104,6 +127,41 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return ctrl.Result{}, err
 	}
 
+	if err := r.syncParentSideEffects(ctx, op); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// reconcileOperationDelete clears parent ActiveOperationRefs and resumes CNPG side-effects
+// (when no matching sibling remains) before removing the Operation finalizer. Without this,
+// kubectl-delete of a Running Bootstrap permanently orphans pause-state and suspends the API.
+func (r *NominatimOperationReconciler) reconcileOperationDelete(ctx context.Context, op *nominatimv1alpha1.NominatimOperation) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(op, nominatimv1alpha1.NominatimOperationFinalizer) {
+		return ctrl.Result{}, nil
+	}
+
+	if err := r.syncParentActiveOperationRef(ctx, op, false); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if op.Spec.NominatimRef.Name != "" {
+		parent := &nominatimv1alpha1.Nominatim{}
+		key := types.NamespacedName{Name: op.Spec.NominatimRef.Name, Namespace: op.Namespace}
+		if err := r.Get(ctx, key, parent); err != nil {
+			if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+		} else if err := r.applyTerminalCNPGEffects(ctx, op, parent); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	controllerutil.RemoveFinalizer(op, nominatimv1alpha1.NominatimOperationFinalizer)
+	if err := r.Update(ctx, op); err != nil {
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -202,7 +260,13 @@ func (r *NominatimOperationReconciler) failOperation(ctx context.Context, op *no
 	if op.Status.StartTime == nil {
 		op.Status.StartTime = &now
 	}
-	return r.Status().Update(ctx, op)
+	if err := r.Status().Update(ctx, op); err != nil {
+		return err
+	}
+	// Best-effort cleanup: an Operation that fails before ever going active (Conflict,
+	// ParentNotFound) never had a ref/pause to undo, but this stays correct and idempotent
+	// for the case where it fails after having already gone Pending/Running.
+	return r.syncParentSideEffects(ctx, op)
 }
 
 // SetupWithManager sets up the controller with the Manager.

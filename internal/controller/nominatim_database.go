@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	nominatimv1alpha1 "github.com/zebernst/nominatim-operator/api/v1alpha1"
@@ -36,35 +37,8 @@ var CNPGClusterGVK = schema.GroupVersionKind{
 	Kind:    "Cluster",
 }
 
-// CNPGEffects abstracts Barman backup pause and postgres parameter patches for CNPG Clusters.
-// Operations (nominatim-vzw) call these hooks; degraded connectionSecretRef mode must never invoke them.
-type CNPGEffects interface {
-	PauseBackups(ctx context.Context, cluster *unstructured.Unstructured) error
-	ResumeBackups(ctx context.Context, cluster *unstructured.Unstructured) error
-	ApplyParameters(ctx context.Context, cluster *unstructured.Unstructured, params map[string]string) error
-}
-
-// defaultCNPGEffects is a stub that records intent for later Operation wiring (no live Barman patch yet).
-type defaultCNPGEffects struct{}
-
-func (defaultCNPGEffects) PauseBackups(_ context.Context, _ *unstructured.Unstructured) error {
-	return nil
-}
-
-func (defaultCNPGEffects) ResumeBackups(_ context.Context, _ *unstructured.Unstructured) error {
-	return nil
-}
-
-func (defaultCNPGEffects) ApplyParameters(_ context.Context, _ *unstructured.Unstructured, _ map[string]string) error {
-	return nil
-}
-
-func (r *NominatimReconciler) cnpgEffects() CNPGEffects {
-	if r.CNPGEffects != nil {
-		return r.CNPGEffects
-	}
-	return defaultCNPGEffects{}
-}
+// CNPGEffects, defaultCNPGEffects, and each reconciler's cnpgEffects() accessor live in
+// cnpg_effects.go, since both NominatimReconciler and NominatimOperationReconciler use them.
 
 // OwnedCNPGClusterName is the default name for a Cluster created from spec.database.cluster.
 func OwnedCNPGClusterName(nom *nominatimv1alpha1.Nominatim) string {
@@ -180,9 +154,15 @@ func cnpgStorageFromVolumeClaimTemplate(vct *nominatimv1alpha1.VolumeClaimTempla
 }
 
 func (r *NominatimReconciler) getCNPGCluster(ctx context.Context, namespace, name string) (*unstructured.Unstructured, error) {
+	return getCNPGCluster(ctx, r.Client, namespace, name)
+}
+
+// getCNPGCluster is the shared lookup used by both the Nominatim and NominatimOperation
+// reconcilers (the latter acts on the parent's Cluster from cnpg_effects.go call sites).
+func getCNPGCluster(ctx context.Context, c client.Client, namespace, name string) (*unstructured.Unstructured, error) {
 	cluster := &unstructured.Unstructured{}
 	cluster.SetGroupVersionKind(CNPGClusterGVK)
-	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, cluster); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, cluster); err != nil {
 		return nil, err
 	}
 	return cluster, nil
@@ -191,6 +171,13 @@ func (r *NominatimReconciler) getCNPGCluster(ctx context.Context, namespace, nam
 // SetBackupPaused pauses or resumes continuous (Barman) backup on the managed/attached CNPG Cluster.
 // No-op in degraded connectionSecretRef mode — never attempts Barman pause there.
 func (r *NominatimReconciler) SetBackupPaused(ctx context.Context, nom *nominatimv1alpha1.Nominatim, paused bool) error {
+	return setBackupPaused(ctx, r.Client, r.cnpgEffects(), nom, paused)
+}
+
+// setBackupPaused is the shared implementation behind NominatimReconciler.SetBackupPaused,
+// reused by the NominatimOperation reconciler (nominatimoperation_effects.go) so both act
+// through the exact same degraded-mode guard and CNPGEffects call.
+func setBackupPaused(ctx context.Context, c client.Client, effects CNPGEffects, nom *nominatimv1alpha1.Nominatim, paused bool) error {
 	if nom.Status.Database.Degraded || nom.Status.Database.Mode == nominatimv1alpha1.DatabaseModeConnectionSecret {
 		return nil
 	}
@@ -198,19 +185,29 @@ func (r *NominatimReconciler) SetBackupPaused(ctx context.Context, nom *nominati
 	if clusterName == "" {
 		return fmt.Errorf("cannot pause backups: no CNPG cluster in status")
 	}
-	cluster, err := r.getCNPGCluster(ctx, nom.Namespace, clusterName)
+	cluster, err := getCNPGCluster(ctx, c, nom.Namespace, clusterName)
 	if err != nil {
 		return err
 	}
 	if paused {
-		return r.cnpgEffects().PauseBackups(ctx, cluster)
+		return effects.PauseBackups(ctx, cluster)
 	}
-	return r.cnpgEffects().ResumeBackups(ctx, cluster)
+	return effects.ResumeBackups(ctx, cluster)
 }
 
 // ApplyPostgresProfile applies import or runtime postgresProfiles to the CNPG Cluster.
 // No-op in degraded connectionSecretRef mode. Intended for Operations to call later.
 func (r *NominatimReconciler) ApplyPostgresProfile(ctx context.Context, nom *nominatimv1alpha1.Nominatim, which string) error {
+	return applyPostgresProfile(ctx, r.Client, r.cnpgEffects(), nom, which)
+}
+
+// applyPostgresProfile is the shared implementation behind NominatimReconciler.ApplyPostgresProfile,
+// reused by the NominatimOperation reconciler (nominatimoperation_effects.go).
+//
+// Profile-managed keys are the union of import ∪ runtime. When switching profiles, keys that
+// belong to that union but are absent from the target profile are removed so import-only knobs
+// (e.g. work_mem) do not leak into "runtime" forever. Keys outside the union are left alone.
+func applyPostgresProfile(ctx context.Context, c client.Client, effects CNPGEffects, nom *nominatimv1alpha1.Nominatim, which string) error {
 	if nom.Status.Database.Degraded || nom.Status.Database.Mode == nominatimv1alpha1.DatabaseModeConnectionSecret {
 		return nil
 	}
@@ -228,16 +225,39 @@ func (r *NominatimReconciler) ApplyPostgresProfile(ctx context.Context, nom *nom
 	default:
 		return fmt.Errorf("unknown postgres profile %q (want import or runtime)", which)
 	}
-	if len(params) == 0 {
+	removeKeys := profileKeysToRemove(profiles, params)
+	if len(params) == 0 && len(removeKeys) == 0 {
 		return nil
 	}
 	clusterName := nom.Status.Database.ClusterName
 	if clusterName == "" {
 		return fmt.Errorf("cannot apply postgres profile: no CNPG cluster in status")
 	}
-	cluster, err := r.getCNPGCluster(ctx, nom.Namespace, clusterName)
+	cluster, err := getCNPGCluster(ctx, c, nom.Namespace, clusterName)
 	if err != nil {
 		return err
 	}
-	return r.cnpgEffects().ApplyParameters(ctx, cluster, params)
+	return effects.ApplyParameters(ctx, cluster, params, removeKeys)
+}
+
+// profileKeysToRemove returns profile-managed keys (import ∪ runtime) that are not present in
+// the target profile map, so ApplyParameters can delete them when switching profiles.
+func profileKeysToRemove(profiles *nominatimv1alpha1.PostgresProfiles, target map[string]string) []string {
+	if profiles == nil {
+		return nil
+	}
+	managed := map[string]struct{}{}
+	for k := range profiles.Import {
+		managed[k] = struct{}{}
+	}
+	for k := range profiles.Runtime {
+		managed[k] = struct{}{}
+	}
+	var remove []string
+	for k := range managed {
+		if _, ok := target[k]; !ok {
+			remove = append(remove, k)
+		}
+	}
+	return remove
 }

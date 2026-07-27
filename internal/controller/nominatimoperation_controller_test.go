@@ -7,7 +7,7 @@ You may obtain a copy of the License at
 
     http://www.apache.org/licenses/LICENSE-2.0
 
-    10|Unless required by applicable law or agreed to in writing, software
+Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
@@ -375,6 +375,8 @@ func cleanupOperation(ctx context.Context, name string) {
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: name + "-staging", Namespace: "default"}, pvc); err == nil {
 		_ = k8sClient.Delete(ctx, pvc)
 	}
+	controllerutil.RemoveFinalizer(op, nominatimv1alpha1.NominatimOperationFinalizer)
+	_ = k8sClient.Update(ctx, op)
 	_ = k8sClient.Delete(ctx, op)
 	Eventually(func() bool {
 		err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &nominatimv1alpha1.NominatimOperation{})
