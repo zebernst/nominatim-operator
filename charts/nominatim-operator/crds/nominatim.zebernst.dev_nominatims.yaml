@@ -1103,6 +1103,13 @@ spec:
                     description: Mode is ClusterManaged, ClusterAttached, or ConnectionSecret.
                     type: string
                 type: object
+              lastUpdateScheduleTime:
+                description: |-
+                  LastUpdateScheduleTime is the last cron fire time for which the controller created
+                  (or intentionally skipped) a scheduled Update NominatimOperation. Used as the schedule
+                  cursor so fires are not double-created across reconciles.
+                format: date-time
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the last reconciled generation.
                 format: int64

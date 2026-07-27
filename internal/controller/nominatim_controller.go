@@ -92,12 +92,18 @@ func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
+	updateResult, err := r.reconcileUpdates(ctx, nom)
+	if err != nil {
+		log.Error(err, "failed to reconcile Nominatim scheduled updates")
+		return ctrl.Result{}, err
+	}
+
 	if err := r.syncStatus(ctx, nom); err != nil {
 		log.Error(err, "failed to update Nominatim status")
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{}, nil
+	return updateResult, nil
 }
 
 func (r *NominatimReconciler) reconcileDelete(ctx context.Context, nom *nominatimv1alpha1.Nominatim) (ctrl.Result, error) {
