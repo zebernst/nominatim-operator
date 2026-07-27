@@ -92,6 +92,11 @@ func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
+	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+		log.Error(err, "failed to reconcile Nominatim region drift")
+		return ctrl.Result{}, err
+	}
+
 	updateResult, err := r.reconcileUpdates(ctx, nom)
 	if err != nil {
 		log.Error(err, "failed to reconcile Nominatim scheduled updates")
