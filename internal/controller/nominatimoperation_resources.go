@@ -29,11 +29,8 @@ import (
 )
 
 const (
-	defaultWorkerImage = "ghcr.io/zebernst/nominatim-worker"
-	defaultStagingSize = "50Gi"
-
-	// workerImageAnnotation overrides the Operation Job worker image when set on the Operation.
-	workerImageAnnotation = "nominatim.zebernst.dev/worker-image"
+	defaultWorkerRepository = "ghcr.io/zebernst/nominatim-worker"
+	defaultStagingSize      = "50Gi"
 
 	projectVolumeName  = "project"
 	stagingVolumeName  = "staging"
@@ -133,13 +130,27 @@ func volumeClaimName(vs nominatimv1alpha1.VolumeSource, fallback string) string 
 	return fallback
 }
 
-func workerImageForOperation(op *nominatimv1alpha1.NominatimOperation) string {
-	if op.Annotations != nil {
-		if img := strings.TrimSpace(op.Annotations[workerImageAnnotation]); img != "" {
-			return img
-		}
+// workerImageForOperation resolves the Job image from Operation.spec.image,
+// then Nominatim.spec.worker.image, else the default worker repository:tag.
+func workerImageForOperation(op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim) string {
+	if op != nil && op.Spec.Image != nil {
+		return resolveImage(op.Spec.Image, defaultWorkerRepository)
 	}
-	return defaultWorkerImage
+	if parent != nil && parent.Spec.Worker != nil && parent.Spec.Worker.Image != nil {
+		return resolveImage(parent.Spec.Worker.Image, defaultWorkerRepository)
+	}
+	return resolveImage(nil, defaultWorkerRepository)
+}
+
+// workerPullPolicyForOperation resolves ImagePullPolicy the same way as workerImageForOperation.
+func workerPullPolicyForOperation(op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim) corev1.PullPolicy {
+	if op != nil && op.Spec.Image != nil {
+		return resolvePullPolicy(op.Spec.Image)
+	}
+	if parent != nil && parent.Spec.Worker != nil {
+		return resolvePullPolicy(parent.Spec.Worker.Image)
+	}
+	return ""
 }
 
 func phaseFromJob(succeeded, failed, active int32) nominatimv1alpha1.NominatimOperationPhase {
@@ -190,7 +201,7 @@ func operationLabels(op *nominatimv1alpha1.NominatimOperation) map[string]string
 	}
 }
 
-func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim, stagingClaim, image string) *batchv1.Job {
+func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim, stagingClaim, image string, pullPolicy corev1.PullPolicy) *batchv1.Job {
 	projectClaim := volumeClaimName(parent.Spec.Project.Volume, parent.Name+"-project")
 
 	volumes := []corev1.Volume{
@@ -216,6 +227,11 @@ func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominat
 		{Name: "OPERATION_TYPE", Value: string(op.Spec.Type)},
 		{Name: "PROJECT_DIR", Value: projectMountPath},
 		{Name: "IMPORT_STAGING", Value: stagingMountPath},
+	}
+	if op.Spec.Type == nominatimv1alpha1.NominatimOperationReimport {
+		// Worker refuses Reimport unless the operator explicitly arms it after
+		// orchestrating DB/project reset (see images/worker/scripts/reimport.sh).
+		env = append(env, corev1.EnvVar{Name: "NOMINATIM_REIMPORT_CONFIRM", Value: "1"})
 	}
 
 	regions := op.Spec.Regions
@@ -263,10 +279,11 @@ func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominat
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyNever,
 					Containers: []corev1.Container{{
-						Name:         "worker",
-						Image:        image,
-						Env:          env,
-						VolumeMounts: mounts,
+						Name:            "worker",
+						Image:           image,
+						ImagePullPolicy: pullPolicy,
+						Env:             env,
+						VolumeMounts:    mounts,
 					}},
 					Volumes: volumes,
 				},

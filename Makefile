@@ -79,6 +79,28 @@ test-e2e: manifests generate fmt vet ## Run e2e on Kind: build/load image, insta
 	}
 	go test ./test/e2e/ -v -ginkgo.v -timeout 40m
 
+# Monaco import e2e (CNPG + api/worker images + Geofabrik). Longer timeout; set E2E_IMPORT=1.
+.PHONY: test-e2e-import
+test-e2e-import: manifests generate fmt vet ## Run Monaco import e2e on Kind (requires Docker + network).
+	@command -v $(KIND) >/dev/null 2>&1 || { \
+		echo "Kind is not installed. Please install Kind (https://kind.sigs.k8s.io/)."; \
+		exit 1; \
+	}
+	@command -v $(KUBECTL) >/dev/null 2>&1 || { \
+		echo "kubectl is not installed."; \
+		exit 1; \
+	}
+	@$(KIND) get clusters 2>/dev/null | grep -qx 'kind' || { \
+		echo "No Kind cluster named 'kind'; creating one..."; \
+		$(KIND) create cluster --name kind --wait 120s; \
+	}
+	E2E_IMPORT=1 go test ./test/e2e/ -v -ginkgo.v -timeout 90m
+
+# Interactive kind validation: CNPG + operator + Monaco Bootstrap/search (+ AddRegions/Reimport).
+.PHONY: validate-kind
+validate-kind: ## Local kind validation lab (see hack/validate-kind.sh, test/validation/README.md).
+	./hack/validate-kind.sh
+
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
 	$(GOLANGCI_LINT) run

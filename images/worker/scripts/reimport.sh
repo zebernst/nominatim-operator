@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Reimport: full re-bootstrap. Operator is responsible for emptying/recreating the DB
-# and clearing project markers before launching this Operation.
+# Reimport: full re-bootstrap. Operator arms this with NOMINATIM_REIMPORT_CONFIRM=1
+# and is responsible for providing an empty/ready application database (CNPG Database
+# CR recreate). This script only clears project markers, then runs Bootstrap.
 set -euo pipefail
 
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

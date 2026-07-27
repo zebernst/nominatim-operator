@@ -20,12 +20,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -50,6 +52,7 @@ type NominatimOperationReconciler struct {
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatims,verbs=get;list;watch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 // Reconcile ensures staging PVC + worker Job for a NominatimOperation and syncs status from the Job.
 func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -117,6 +120,35 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	if err := r.applyPreJobCNPGEffects(ctx, op, parent); err != nil {
 		return ctrl.Result{}, err
+	}
+
+	if parent.Status.Database.ConnectionSecretName == "" {
+		log.Info("waiting for parent status.database.connectionSecretName before creating Job",
+			"nominatim", parent.Name)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
+	secret := &corev1.Secret{}
+	secretKey := types.NamespacedName{
+		Name:      parent.Status.Database.ConnectionSecretName,
+		Namespace: parent.Namespace,
+	}
+	if err := r.Get(ctx, secretKey, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("waiting for database connection Secret before creating Job",
+				"secret", secretKey.Name, "nominatim", parent.Name)
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+		return ctrl.Result{}, err
+	}
+
+	if ready, err := r.cnpgClusterReadyForJobs(ctx, parent); err != nil {
+		return ctrl.Result{}, err
+	} else if !ready {
+		log.Info("waiting for CNPG Cluster/Database readiness before creating Job",
+			"nominatim", parent.Name, "cluster", parent.Status.Database.ClusterName,
+			"mode", parent.Status.Database.Mode)
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	if err := r.ensureJob(ctx, op, parent); err != nil {
@@ -194,7 +226,7 @@ func (r *NominatimOperationReconciler) ensureStagingPVC(ctx context.Context, op 
 }
 
 func (r *NominatimOperationReconciler) ensureJob(ctx context.Context, op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim) error {
-	desired := buildOperationJob(op, parent, stagingPVCName(op), workerImageForOperation(op))
+	desired := buildOperationJob(op, parent, stagingPVCName(op), workerImageForOperation(op, parent), workerPullPolicyForOperation(op, parent))
 	if err := controllerutil.SetControllerReference(op, desired, r.Scheme); err != nil {
 		return err
 	}
@@ -202,12 +234,108 @@ func (r *NominatimOperationReconciler) ensureJob(ctx context.Context, op *nomina
 	existing := &batchv1.Job{}
 	err := r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing)
 	if err == nil {
+		// Jobs are mostly immutable. If an earlier race created a Job without DB env,
+		// delete it so the next reconcile can recreate with NOMINATIM_DATABASE_DSN.
+		if existing.Status.Succeeded == 0 && !jobHasDatabaseDSN(existing) {
+			policy := metav1.DeletePropagationBackground
+			if err := r.Delete(ctx, existing, &client.DeleteOptions{PropagationPolicy: &policy}); err != nil {
+				return err
+			}
+			return fmt.Errorf("deleted Job %q missing NOMINATIM_DATABASE_DSN; will recreate", existing.Name)
+		}
 		return nil
 	}
 	if !apierrors.IsNotFound(err) {
 		return err
 	}
 	return r.Create(ctx, desired)
+}
+
+func jobHasDatabaseDSN(job *batchv1.Job) bool {
+	for _, c := range job.Spec.Template.Spec.Containers {
+		for _, e := range c.Env {
+			if e.Name == "NOMINATIM_DATABASE_DSN" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// cnpgClusterReadyForJobs reports whether Jobs that talk to Postgres may start.
+// Connection-secret / degraded mode (no Cluster to wait on) is always ready.
+// Owned/attached Clusters must report Ready=True; owned Clusters also wait for the
+// declarative Database CR (extensions) to report status.applied=true.
+func (r *NominatimOperationReconciler) cnpgClusterReadyForJobs(ctx context.Context, parent *nominatimv1alpha1.Nominatim) (bool, error) {
+	if parent.Status.Database.Degraded || parent.Status.Database.Mode == nominatimv1alpha1.DatabaseModeConnectionSecret {
+		return true, nil
+	}
+
+	// Prefer status; fall back to the owned name from Spec so we never treat an
+	// in-progress cluster-create as "ready" just because ClusterName is unset.
+	clusterName := parent.Status.Database.ClusterName
+	ownedCluster := parent.Spec.Database.Cluster != nil
+	if clusterName == "" && ownedCluster {
+		clusterName = OwnedCNPGClusterName(parent)
+	}
+	if clusterName == "" {
+		// Attached/ref mode without a name yet — wait for database status.
+		if parent.Spec.Database.ClusterRef != nil {
+			return false, nil
+		}
+		return true, nil
+	}
+
+	cluster, err := getCNPGCluster(ctx, r.Client, parent.Namespace, clusterName)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	conds, found, err := unstructured.NestedSlice(cluster.Object, "status", "conditions")
+	if err != nil || !found {
+		return false, err
+	}
+	clusterReady := false
+	for _, raw := range conds {
+		cond, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if cond["type"] == "Ready" && cond["status"] == "True" {
+			clusterReady = true
+			break
+		}
+	}
+	if !clusterReady {
+		return false, nil
+	}
+
+	// Wait for Database CR when we own the Cluster (by Spec or Mode). Spec wins so a
+	// status race cannot start Bootstrap before extensions/roles are applied.
+	if ownedCluster || parent.Status.Database.Mode == nominatimv1alpha1.DatabaseModeClusterManaged {
+		return cnpgOwnedDatabaseApplied(ctx, r.Client, parent.Namespace, OwnedCNPGDatabaseName(parent))
+	}
+	return true, nil
+}
+
+// cnpgOwnedDatabaseApplied is true when the owned CNPG Database CR has reconciled
+// (status.applied=true), including declarative extensions.
+func cnpgOwnedDatabaseApplied(ctx context.Context, c client.Client, namespace, name string) (bool, error) {
+	db := &unstructured.Unstructured{}
+	db.SetGroupVersionKind(CNPGDatabaseGVK)
+	if err := c.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, db); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	applied, found, err := unstructured.NestedBool(db.Object, "status", "applied")
+	if err != nil || !found {
+		return false, err
+	}
+	return applied, nil
 }
 
 func (r *NominatimOperationReconciler) syncStatusFromJob(ctx context.Context, op *nominatimv1alpha1.NominatimOperation) error {

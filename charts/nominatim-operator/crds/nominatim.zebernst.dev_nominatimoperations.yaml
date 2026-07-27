@@ -63,6 +63,20 @@ spec:
               Do not manage NominatimOperation objects via Flux Kustomizations or similar continuous apply;
               create them with kubectl (or let the Nominatim controller create them) and let them complete.
             properties:
+              image:
+                description: Image overrides Nominatim.spec.worker.image for this
+                  Operation Job only.
+                properties:
+                  pullPolicy:
+                    description: PullPolicy for the container.
+                    type: string
+                  repository:
+                    description: Repository is the image repository (e.g. ghcr.io/zebernst/nominatim-api).
+                    type: string
+                  tag:
+                    description: Tag is the image tag.
+                    type: string
+                type: object
               nominatimRef:
                 description: |-
                   NominatimRef names the Nominatim instance in the same namespace.

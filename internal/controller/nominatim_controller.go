@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -54,6 +55,7 @@ type NominatimReconciler struct {
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatims/finalizers,verbs=update
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatimoperations,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=databases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 // Reconcile runs database attach, serving-plane workloads, and status conditions.
@@ -82,13 +84,35 @@ func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	if err := r.reconcileWorkloads(ctx, nom); err != nil {
-		log.Error(err, "failed to reconcile Nominatim workloads")
+	// Persist database status before creating Operations/Jobs that read it from the API.
+	// reconcileBootstrap creates NominatimOperations immediately; without this write the
+	// Operation controller can race and build a worker Job with no NOMINATIM_DATABASE_DSN.
+	dbStatus := nom.Status.Database
+	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		latest := &nominatimv1alpha1.Nominatim{}
+		if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
+			return err
+		}
+		latest.Status.Database = dbStatus
+		if err := r.Status().Update(ctx, latest); err != nil {
+			return err
+		}
+		nom.Status = latest.Status
+		return nil
+	}); err != nil {
+		log.Error(err, "failed to persist Nominatim database status")
 		return ctrl.Result{}, err
 	}
 
+	// Bootstrap before serving workloads so status.regions (synced on Succeeded)
+	// can unlock API/UI creation in the same reconcile pass.
 	if err := r.reconcileBootstrap(ctx, nom); err != nil {
 		log.Error(err, "failed to reconcile Nominatim bootstrap")
+		return ctrl.Result{}, err
+	}
+
+	if err := r.reconcileWorkloads(ctx, nom); err != nil {
+		log.Error(err, "failed to reconcile Nominatim workloads")
 		return ctrl.Result{}, err
 	}
 
@@ -329,6 +353,14 @@ func (r *NominatimReconciler) setupWithManager(mgr ctrl.Manager, mapper meta.RES
 			cnpgCluster,
 			handler.EnqueueRequestsFromMapFunc(mapCNPGClusterToNominatim(r.Client)),
 		)
+	}
+
+	if ok, err := gvkAvailableFromMapper(mapper, CNPGDatabaseGVK); err != nil {
+		return err
+	} else if ok {
+		cnpgDB := &unstructured.Unstructured{}
+		cnpgDB.SetGroupVersionKind(CNPGDatabaseGVK)
+		b = b.Owns(cnpgDB)
 	}
 
 	return b.Complete(r)

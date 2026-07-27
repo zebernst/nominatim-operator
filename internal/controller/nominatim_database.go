@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -37,6 +38,13 @@ var CNPGClusterGVK = schema.GroupVersionKind{
 	Kind:    "Cluster",
 }
 
+// CNPGDatabaseGVK is the CloudNativePG Database resource used for declarative extensions.
+var CNPGDatabaseGVK = schema.GroupVersionKind{
+	Group:   "postgresql.cnpg.io",
+	Version: "v1",
+	Kind:    "Database",
+}
+
 // CNPGEffects, defaultCNPGEffects, and each reconciler's cnpgEffects() accessor live in
 // cnpg_effects.go, since both NominatimReconciler and NominatimOperationReconciler use them.
 
@@ -45,9 +53,37 @@ func OwnedCNPGClusterName(nom *nominatimv1alpha1.Nominatim) string {
 	return nom.Name + "-pg"
 }
 
+// OwnedCNPGDatabaseName is the owned Database CR that declares Nominatim extensions on the
+// application database created by Cluster bootstrap.initdb.
+func OwnedCNPGDatabaseName(nom *nominatimv1alpha1.Nominatim) string {
+	return OwnedCNPGClusterName(nom) + "-nominatim"
+}
+
 // CNPGAppSecretName is the conventional CNPG application-user Secret for a Cluster.
 func CNPGAppSecretName(clusterName string) string {
 	return clusterName + "-app"
+}
+
+// Default CNPG application database/owner created via bootstrap.initdb.
+// Nominatim connects via the Cluster's {name}-app Secret (dbname/user match these).
+const (
+	cnpgAppDatabaseName = "nominatim"
+	cnpgAppOwnerName    = "nominatim"
+	// Official CNPG PostGIS operand from postgis-containers (bake pipeline).
+	// Prefer the new multi-arch rolling tag (amd64+arm64); legacy :17 is amd64-only.
+	// "standard" = PostGIS without Barman Cloud (enough for Nominatim; backups optional).
+	// See https://github.com/cloudnative-pg/postgis-containers
+	cnpgDefaultPostGISImage = "ghcr.io/cloudnative-pg/postgis:17-3-standard-trixie"
+	// cnpgNominatimWebRole is Nominatim's default DATABASE_WEBUSER (grants.sql target).
+	cnpgNominatimWebRole = "www-data"
+)
+
+// cnpgNominatimExtensions are installed via an owned CNPG Database CR (spec.extensions),
+// not imperative postInitTemplateSQL.
+var cnpgNominatimExtensions = []string{
+	"hstore",
+	"postgis",
+	"postgis_raster",
 }
 
 // reconcileDatabase branches on exactly one of cluster / clusterRef / connectionSecretRef.
@@ -80,15 +116,26 @@ func (r *NominatimReconciler) reconcileDatabaseConnectionSecret(ctx context.Cont
 }
 
 func (r *NominatimReconciler) reconcileDatabaseClusterRef(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
-	clusterName := nom.Spec.Database.ClusterRef.Name
+	ref := nom.Spec.Database.ClusterRef
+	clusterName := ref.Name
 	cluster, err := r.getCNPGCluster(ctx, nom.Namespace, clusterName)
 	if err != nil {
 		return fmt.Errorf("clusterRef %q: %w", clusterName, err)
 	}
+
+	secretName := CNPGAppSecretName(clusterName)
+	if ref.ConnectionSecretRef != nil && ref.ConnectionSecretRef.Name != "" {
+		secretName = ref.ConnectionSecretRef.Name
+		secret := &corev1.Secret{}
+		if err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: nom.Namespace}, secret); err != nil {
+			return fmt.Errorf("clusterRef.connectionSecretRef %q: %w", secretName, err)
+		}
+	}
+
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{
 		Mode:                 nominatimv1alpha1.DatabaseModeClusterAttached,
 		ClusterName:          cluster.GetName(),
-		ConnectionSecretName: CNPGAppSecretName(clusterName),
+		ConnectionSecretName: secretName,
 		Degraded:             false,
 	}
 	return nil
@@ -98,34 +145,65 @@ func (r *NominatimReconciler) reconcileDatabaseClusterCreate(ctx context.Context
 	create := nom.Spec.Database.Cluster
 	clusterName := OwnedCNPGClusterName(nom)
 
-	cluster := &unstructured.Unstructured{}
-	cluster.SetGroupVersionKind(CNPGClusterGVK)
-	cluster.SetName(clusterName)
-	cluster.SetNamespace(nom.Namespace)
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		cluster := &unstructured.Unstructured{}
+		cluster.SetGroupVersionKind(CNPGClusterGVK)
+		cluster.SetName(clusterName)
+		cluster.SetNamespace(nom.Namespace)
 
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, cluster, func() error {
-		if err := controllerutil.SetControllerReference(nom, cluster, r.Scheme); err != nil {
-			return err
-		}
-		instances := int64(1)
-		if create.Instances != nil {
-			instances = int64(*create.Instances)
-		}
-		if err := unstructured.SetNestedField(cluster.Object, instances, "spec", "instances"); err != nil {
-			return err
-		}
-		if create.Storage != nil {
-			storage, err := cnpgStorageFromVolumeClaimTemplate(create.Storage)
-			if err != nil {
+		_, err := controllerutil.CreateOrUpdate(ctx, r.Client, cluster, func() error {
+			if err := controllerutil.SetControllerReference(nom, cluster, r.Scheme); err != nil {
 				return err
 			}
-			// Parent "spec" map exists after SetNestedField above.
-			_ = unstructured.SetNestedMap(cluster.Object, storage, "spec", "storage")
-		}
-		return nil
+			instances := int64(1)
+			if create.Instances != nil {
+				instances = int64(*create.Instances)
+			}
+			if err := unstructured.SetNestedField(cluster.Object, instances, "spec", "instances"); err != nil {
+				return err
+			}
+			if create.Storage != nil {
+				storage, err := cnpgStorageFromVolumeClaimTemplate(create.Storage)
+				if err != nil {
+					return err
+				}
+				// Set fields individually — replacing the whole storage map would wipe
+				// CNPG-managed keys and cause update churn.
+				for key, val := range storage {
+					if err := unstructured.SetNestedField(cluster.Object, val, "spec", "storage", key); err != nil {
+						return err
+					}
+				}
+			}
+			if err := unstructured.SetNestedField(cluster.Object, cnpgDefaultPostGISImage, "spec", "imageName"); err != nil {
+				return err
+			}
+			// bootstrap.initdb is only meaningful on first create; rewriting it on every
+			// reconcile fights CNPG's expanded defaults (encoding/locale/…) and causes
+			// perpetual resourceVersion conflicts that block Database CR ownership.
+			if cluster.GetResourceVersion() == "" {
+				if err := unstructured.SetNestedField(cluster.Object, cnpgAppDatabaseName, "spec", "bootstrap", "initdb", "database"); err != nil {
+					return err
+				}
+				if err := unstructured.SetNestedField(cluster.Object, cnpgAppOwnerName, "spec", "bootstrap", "initdb", "owner"); err != nil {
+					return err
+				}
+			}
+			// Nominatim grants.sql targets role www-data — declare via CNPG managed.roles.
+			// Merge only: never replace CNPG-expanded role objects once www-data is present.
+			if err := ensureCNPGManagedWebRole(cluster); err != nil {
+				return err
+			}
+			return nil
+		})
+		return err
 	})
 	if err != nil {
 		return fmt.Errorf("reconcile owned CNPG Cluster %q: %w", clusterName, err)
+	}
+
+	if err := r.reconcileOwnedCNPGDatabase(ctx, nom, clusterName); err != nil {
+		return err
 	}
 
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{
@@ -133,6 +211,83 @@ func (r *NominatimReconciler) reconcileDatabaseClusterCreate(ctx context.Context
 		ClusterName:          clusterName,
 		ConnectionSecretName: CNPGAppSecretName(clusterName),
 		Degraded:             false,
+	}
+	return nil
+}
+
+// ensureCNPGManagedWebRole appends www-data when missing; leaves existing role entries untouched
+// so CNPG-added fields (inherit, connectionLimit, …) do not churn CreateOrUpdate.
+func ensureCNPGManagedWebRole(cluster *unstructured.Unstructured) error {
+	roles, _, err := unstructured.NestedSlice(cluster.Object, "spec", "managed", "roles")
+	if err != nil {
+		return err
+	}
+	for _, raw := range roles {
+		role, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if role["name"] == cnpgNominatimWebRole {
+			return nil
+		}
+	}
+	roles = append(roles, map[string]interface{}{
+		"name":    cnpgNominatimWebRole,
+		"ensure":  "present",
+		"login":   false,
+		"comment": "Nominatim DATABASE_WEBUSER (read-only grants target)",
+	})
+	return unstructured.SetNestedSlice(cluster.Object, roles, "spec", "managed", "roles")
+}
+
+// reconcileOwnedCNPGDatabase owns a CNPG Database CR that declaratively installs Nominatim
+// extensions (hstore/postgis/…) on the initdb application database.
+func (r *NominatimReconciler) reconcileOwnedCNPGDatabase(ctx context.Context, nom *nominatimv1alpha1.Nominatim, clusterName string) error {
+	dbName := OwnedCNPGDatabaseName(nom)
+
+	exts := make([]interface{}, 0, len(cnpgNominatimExtensions))
+	for _, name := range cnpgNominatimExtensions {
+		exts = append(exts, map[string]interface{}{
+			"name":   name,
+			"ensure": "present",
+		})
+	}
+
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		db := &unstructured.Unstructured{}
+		db.SetGroupVersionKind(CNPGDatabaseGVK)
+		db.SetName(dbName)
+		db.SetNamespace(nom.Namespace)
+
+		_, err := controllerutil.CreateOrUpdate(ctx, r.Client, db, func() error {
+			if err := controllerutil.SetControllerReference(nom, db, r.Scheme); err != nil {
+				return err
+			}
+			if err := unstructured.SetNestedField(db.Object, cnpgAppDatabaseName, "spec", "name"); err != nil {
+				return err
+			}
+			if err := unstructured.SetNestedField(db.Object, cnpgAppOwnerName, "spec", "owner"); err != nil {
+				return err
+			}
+			if err := unstructured.SetNestedField(db.Object, clusterName, "spec", "cluster", "name"); err != nil {
+				return err
+			}
+			if err := unstructured.SetNestedSlice(db.Object, exts, "spec", "extensions"); err != nil {
+				return err
+			}
+			// delete reclaim so Reimport can drop+recreate the application database via the CR.
+			if err := unstructured.SetNestedField(db.Object, "delete", "spec", "databaseReclaimPolicy"); err != nil {
+				return err
+			}
+			if err := unstructured.SetNestedField(db.Object, "present", "spec", "ensure"); err != nil {
+				return err
+			}
+			return nil
+		})
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("reconcile owned CNPG Database %q: %w", dbName, err)
 	}
 	return nil
 }

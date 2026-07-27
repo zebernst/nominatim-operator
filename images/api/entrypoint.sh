@@ -43,8 +43,16 @@ fi
 
 ENV_FILE="${PROJECT_DIR}/.env"
 IMPORT_STYLE="${IMPORT_STYLE:-extratags}"
+WEBUSER="${NOMINATIM_DATABASE_WEBUSER:-www-data}"
 if grep -qE '^NOMINATIM_IMPORT_STYLE=' "${ENV_FILE}"; then
   sed -i "s|^NOMINATIM_IMPORT_STYLE=.*|NOMINATIM_IMPORT_STYLE=${IMPORT_STYLE}|" "${ENV_FILE}"
+else
+  printf 'NOMINATIM_IMPORT_STYLE=%s\n' "${IMPORT_STYLE}" >> "${ENV_FILE}"
+fi
+if grep -qE '^NOMINATIM_DATABASE_WEBUSER=' "${ENV_FILE}"; then
+  sed -i "s|^NOMINATIM_DATABASE_WEBUSER=.*|NOMINATIM_DATABASE_WEBUSER=${WEBUSER}|" "${ENV_FILE}"
+else
+  printf 'NOMINATIM_DATABASE_WEBUSER=%s\n' "${WEBUSER}" >> "${ENV_FILE}"
 fi
 
 if [ -n "${NOMINATIM_FLATNODE_FILE:-}" ]; then
@@ -60,20 +68,24 @@ until pg_isready -h "${PGHOST}" -d "${PGDATABASE}" -U "${PGUSER}" -q; do
   sleep 2
 done
 
-# Fail closed: only seed import-finished when placex exists (imported DB).
-if [ ! -f "${IMPORT_FINISHED}" ]; then
-  echo "[nominatim-api] Verifying nominatim schema on ${PGHOST}/${PGDATABASE}"
-  has_placex="$(psql -h "${PGHOST}" -d "${PGDATABASE}" -U "${PGUSER}" -Atqc \
-    "SELECT EXISTS (
-       SELECT 1
-       FROM pg_catalog.pg_class c
-       JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-       WHERE n.nspname = 'public' AND c.relname = 'placex' AND c.relkind = 'r'
-     );")"
-  if [ "${has_placex}" != "t" ]; then
-    echo "[nominatim-api] ERROR: public.placex missing; refusing to seed import-finished" >&2
-    exit 1
+# Fail closed: only seed / trust import-finished when placex exists (imported DB).
+echo "[nominatim-api] Verifying nominatim schema on ${PGHOST}/${PGDATABASE}"
+has_placex="$(psql -h "${PGHOST}" -d "${PGDATABASE}" -U "${PGUSER}" -Atqc \
+  "SELECT EXISTS (
+     SELECT 1
+     FROM pg_catalog.pg_class c
+     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public' AND c.relname = 'placex' AND c.relkind = 'r'
+   );")"
+if [ "${has_placex}" != "t" ]; then
+  if [ -f "${IMPORT_FINISHED}" ]; then
+    echo "[nominatim-api] Removing stale ${IMPORT_FINISHED} (public.placex missing)" >&2
+    rm -f "${IMPORT_FINISHED}"
   fi
+  echo "[nominatim-api] ERROR: public.placex missing; refusing to start" >&2
+  exit 1
+fi
+if [ ! -f "${IMPORT_FINISHED}" ]; then
   echo "[nominatim-api] Seeding ${IMPORT_FINISHED}"
   touch "${IMPORT_FINISHED}"
 fi

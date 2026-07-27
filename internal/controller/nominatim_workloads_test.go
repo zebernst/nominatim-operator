@@ -24,6 +24,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -478,6 +479,7 @@ func TestShouldSuspendAPI_ImpactMatrix(t *testing.T) {
 		{nominatimv1alpha1.OperationImpactBootstrapReimport, false},
 		{nominatimv1alpha1.OperationImpactWriteHeavy, false},
 		{nominatimv1alpha1.OperationImpactAll, true},
+		// Empty impact defaults to Never; Update is not suspended.
 		{"", false},
 	}
 	for _, tc := range cases {
@@ -504,6 +506,101 @@ func TestShouldSuspendAPI_SkipsMissingOperations(t *testing.T) {
 	}
 	if got {
 		t.Fatal("expected false when active operation ref no longer exists")
+	}
+}
+
+func TestServingWorkloadsAllowed(t *testing.T) {
+	cases := []struct {
+		name    string
+		spec    []string
+		status  []nominatimv1alpha1.RegionStatus
+		want    bool
+	}{
+		{name: "no desired regions", want: true},
+		{name: "desired regions waiting on bootstrap", spec: []string{"europe/monaco"}, want: false},
+		{
+			name:   "bootstrap synced regions",
+			spec:   []string{"europe/monaco"},
+			status: []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: "Imported"}},
+			want:   true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nom := &nominatimv1alpha1.Nominatim{
+				Spec:   nominatimv1alpha1.NominatimSpec{Regions: tc.spec},
+				Status: nominatimv1alpha1.NominatimStatus{Regions: tc.status},
+			}
+			if got := servingWorkloadsAllowed(nom); got != tc.want {
+				t.Fatalf("servingWorkloadsAllowed=%v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestReconcileAPI_SkipsUntilBootstrapRegionsSynced(t *testing.T) {
+	scheme := testScheme(t)
+	nom := nominatimWithConnectionSecret("api-pre-bootstrap")
+	nom.Spec.Regions = []string{"europe/monaco"}
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
+	// Pre-existing API from an older Never-during-bootstrap behavior — must be deleted.
+	existing := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: APIName(nom), Namespace: "default"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "x"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "api", Image: "x"}}},
+			},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, existing).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+
+	if err := r.reconcileAPI(context.Background(), nom, "project-pvc", ""); err != nil {
+		t.Fatalf("reconcileAPI: %v", err)
+	}
+	deploy := &appsv1.Deployment{}
+	err := c.Get(context.Background(), types.NamespacedName{Name: APIName(nom), Namespace: "default"}, deploy)
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("expected API deployment absent until bootstrap, got err=%v deploy=%v", err, deploy.Name)
+	}
+}
+
+func TestReconcileAPI_CreatesAfterBootstrapRegionsSynced(t *testing.T) {
+	scheme := testScheme(t)
+	nom := nominatimWithConnectionSecret("api-post-bootstrap")
+	nom.Spec.Regions = []string{"europe/monaco"}
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: "Imported"}}
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+
+	if err := r.reconcileAPI(context.Background(), nom, "project-pvc", ""); err != nil {
+		t.Fatalf("reconcileAPI: %v", err)
+	}
+	deploy := &appsv1.Deployment{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: APIName(nom), Namespace: "default"}, deploy); err != nil {
+		t.Fatalf("expected API after bootstrap: %v", err)
+	}
+}
+
+func TestReconcileUI_SkipsUntilBootstrapRegionsSynced(t *testing.T) {
+	scheme := testScheme(t)
+	nom := nominatimWithConnectionSecret("ui-pre-bootstrap")
+	nom.Spec.Regions = []string{"europe/monaco"}
+	nom.Spec.UI = &nominatimv1alpha1.UISpec{}
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+
+	if err := r.reconcileUI(context.Background(), nom); err != nil {
+		t.Fatalf("reconcileUI: %v", err)
+	}
+	deploy := &appsv1.Deployment{}
+	err := c.Get(context.Background(), types.NamespacedName{Name: UIName(nom), Namespace: "default"}, deploy)
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("expected UI deployment absent until bootstrap, got err=%v", err)
 	}
 }
 

@@ -22,12 +22,14 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	nominatimv1alpha1 "github.com/zebernst/nominatim-operator/api/v1alpha1"
@@ -89,7 +91,8 @@ func commonLabels(nom *nominatimv1alpha1.Nominatim, component string) map[string
 }
 
 // reconcileWorkloads reconciles the project/flatnode PVCs and the API/UI serving plane.
-// It must run after reconcileDatabase, which populates nom.Status.Database.
+// It must run after reconcileDatabase (connection secret known) and preferably after
+// reconcileBootstrap so status.regions can unlock API/UI in the same pass.
 func (r *NominatimReconciler) reconcileWorkloads(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
 	projectClaim, err := r.reconcilePVC(ctx, nom, nom.Spec.Project.Volume, ProjectPVCName(nom), ComponentProject)
 	if err != nil {
@@ -109,6 +112,19 @@ func (r *NominatimReconciler) reconcileWorkloads(ctx context.Context, nom *nomin
 	}
 
 	return r.reconcileUI(ctx, nom)
+}
+
+// servingWorkloadsAllowed reports whether API/UI Deployments may exist.
+// Day-0 Bootstrap must finish first: with desired regions, the serving plane waits
+// until status.regions is populated (synced from a Succeeded Bootstrap).
+// Instances with no desired regions never Bootstrap, so API/UI may be created
+// immediately (smoke / attach-only). suspendDuringOperations does not apply here —
+// that knob is day-2 scale-down only.
+func servingWorkloadsAllowed(nom *nominatimv1alpha1.Nominatim) bool {
+	if len(nom.Spec.Regions) == 0 {
+		return true
+	}
+	return len(nom.Status.Regions) > 0
 }
 
 // reconcilePVC resolves a VolumeSource into a claim name usable by a Pod spec: it passes
@@ -285,10 +301,15 @@ func (r *NominatimReconciler) shouldSuspendAPI(ctx context.Context, nom *nominat
 	return false, nil
 }
 
-// reconcileAPI reconciles the API Deployment, Service, and optional HTTPRoute. The API
-// workload is always created (with sensible defaults) once the database connection
-// secret is known; it is never skipped merely because spec.api is unset.
+// reconcileAPI reconciles the API Deployment, Service, and optional HTTPRoute.
+// Until Bootstrap has populated status.regions (when regions are desired), no API
+// objects are created — and any leftover owned API Deployment/Service/HTTPRoute
+// are removed. suspendDuringOperations only scales an already-allowed API.
 func (r *NominatimReconciler) reconcileAPI(ctx context.Context, nom *nominatimv1alpha1.Nominatim, projectClaim, flatnodeClaim string) error {
+	if !servingWorkloadsAllowed(nom) {
+		return r.deleteServingComponent(ctx, nom, APIName(nom), ComponentAPI)
+	}
+
 	if nom.Status.Database.ConnectionSecretName == "" {
 		return fmt.Errorf("cannot reconcile API workload: status.database.connectionSecretName is empty")
 	}
@@ -362,11 +383,20 @@ func (r *NominatimReconciler) reconcileAPI(ctx context.Context, nom *nominatimv1
 }
 
 // reconcileUI reconciles the optional UI Deployment, Service, and HTTPRoute. It is a
-// no-op when spec.ui is unset.
+// no-op when spec.ui is unset. Like the API, UI objects are not created until
+// Bootstrap has populated status.regions when regions are desired.
 func (r *NominatimReconciler) reconcileUI(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
 	uiSpec := nom.Spec.UI
 	if uiSpec == nil {
+		// Still clean up a stray UI if Bootstrap is in progress and UI was removed from spec.
+		if !servingWorkloadsAllowed(nom) {
+			return r.deleteServingComponent(ctx, nom, UIName(nom), ComponentUI)
+		}
 		return nil
+	}
+
+	if !servingWorkloadsAllowed(nom) {
+		return r.deleteServingComponent(ctx, nom, UIName(nom), ComponentUI)
 	}
 
 	replicas := int32(1)
@@ -416,6 +446,28 @@ func (r *NominatimReconciler) reconcileUI(ctx context.Context, nom *nominatimv1a
 		}
 	}
 
+	return nil
+}
+
+// deleteServingComponent removes an owned API/UI Deployment, Service, and HTTPRoute
+// if present (IgnoreNotFound / no CRD). Used while Bootstrap has not yet unlocked
+// the serving plane.
+func (r *NominatimReconciler) deleteServingComponent(ctx context.Context, nom *nominatimv1alpha1.Nominatim, name, component string) error {
+	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: nom.Namespace}}
+	if err := r.Delete(ctx, deploy); client.IgnoreNotFound(err) != nil {
+		return fmt.Errorf("delete %s deployment %q: %w", component, name, err)
+	}
+	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: nom.Namespace}}
+	if err := r.Delete(ctx, svc); client.IgnoreNotFound(err) != nil {
+		return fmt.Errorf("delete %s service %q: %w", component, name, err)
+	}
+	route := &unstructured.Unstructured{}
+	route.SetGroupVersionKind(HTTPRouteGVK)
+	route.SetName(name)
+	route.SetNamespace(nom.Namespace)
+	if err := r.Delete(ctx, route); err != nil && !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {
+		return fmt.Errorf("delete %s HTTPRoute %q: %w", component, name, err)
+	}
 	return nil
 }
 

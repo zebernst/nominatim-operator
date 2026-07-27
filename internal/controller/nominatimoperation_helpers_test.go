@@ -151,12 +151,32 @@ func TestVolumeClaimName(t *testing.T) {
 
 func TestWorkerImageForOperation(t *testing.T) {
 	g := NewWithT(t)
-	g.Expect(workerImageForOperation(&nominatimv1alpha1.NominatimOperation{})).To(Equal(defaultWorkerImage))
+	defaultImage := resolveImage(nil, defaultWorkerRepository)
+	g.Expect(workerImageForOperation(&nominatimv1alpha1.NominatimOperation{}, nil)).To(Equal(defaultImage))
 	g.Expect(workerImageForOperation(&nominatimv1alpha1.NominatimOperation{
-		ObjectMeta: metav1.ObjectMeta{
-			Annotations: map[string]string{workerImageAnnotation: "example.com/worker:v1"},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Image: &nominatimv1alpha1.ImageSpec{Repository: "example.com/worker", Tag: "v1"},
 		},
-	})).To(Equal("example.com/worker:v1"))
+	}, nil)).To(Equal("example.com/worker:v1"))
+	g.Expect(workerImageForOperation(&nominatimv1alpha1.NominatimOperation{}, &nominatimv1alpha1.Nominatim{
+		Spec: nominatimv1alpha1.NominatimSpec{
+			Worker: &nominatimv1alpha1.WorkerSpec{
+				Image: &nominatimv1alpha1.ImageSpec{Repository: "example.com/from-parent", Tag: "e2e"},
+			},
+		},
+	})).To(Equal("example.com/from-parent:e2e"))
+	// Operation.spec.image wins over Nominatim.spec.worker.image.
+	g.Expect(workerImageForOperation(&nominatimv1alpha1.NominatimOperation{
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Image: &nominatimv1alpha1.ImageSpec{Repository: "example.com/op", Tag: "v1"},
+		},
+	}, &nominatimv1alpha1.Nominatim{
+		Spec: nominatimv1alpha1.NominatimSpec{
+			Worker: &nominatimv1alpha1.WorkerSpec{
+				Image: &nominatimv1alpha1.ImageSpec{Repository: "example.com/parent", Tag: "v1"},
+			},
+		},
+	})).To(Equal("example.com/op:v1"))
 }
 
 func TestPhaseFromJob(t *testing.T) {
@@ -204,12 +224,12 @@ func TestBuildOperationJob(t *testing.T) {
 			},
 		},
 	}
-	job := buildOperationJob(op, parent, "staging-pvc", defaultWorkerImage)
+	job := buildOperationJob(op, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
 	g.Expect(job.Name).To(Equal("boot-1"))
 	g.Expect(job.Spec.Template.Spec.RestartPolicy).To(Equal(corev1.RestartPolicyNever))
 	g.Expect(job.Spec.Template.Spec.Containers).To(HaveLen(1))
 	c := job.Spec.Template.Spec.Containers[0]
-	g.Expect(c.Image).To(Equal(defaultWorkerImage))
+	g.Expect(c.Image).To(Equal(resolveImage(nil, defaultWorkerRepository)))
 	g.Expect(envValue(c.Env, "OPERATION_TYPE")).To(Equal("Bootstrap"))
 	g.Expect(envValue(c.Env, "NOMINATIM_REGIONS")).To(Equal("europe/monaco"))
 	g.Expect(envValue(c.Env, "NOMINATIM_FLATNODE_FILE")).To(Equal(flatnodeFilePath))
@@ -220,8 +240,35 @@ func TestBuildOperationJob(t *testing.T) {
 	opNoRegions := op.DeepCopy()
 	opNoRegions.Spec.Regions = nil
 	parent.Spec.Regions = []string{"africa/morocco"}
-	job = buildOperationJob(opNoRegions, parent, "staging-pvc", defaultWorkerImage)
+	job = buildOperationJob(opNoRegions, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
 	g.Expect(envValue(job.Spec.Template.Spec.Containers[0].Env, "NOMINATIM_REGIONS")).To(Equal("africa/morocco"))
+}
+
+func TestBuildOperationJob_ReimportSetsConfirmEnv(t *testing.T) {
+	g := NewWithT(t)
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "reimport-1", Namespace: "ns"},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationReimport,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
+			Regions:      []string{"europe/monaco"},
+		},
+	}
+	parent := &nominatimv1alpha1.Nominatim{
+		ObjectMeta: metav1.ObjectMeta{Name: "mynom", Namespace: "ns"},
+		Spec: nominatimv1alpha1.NominatimSpec{
+			Project: nominatimv1alpha1.ProjectSpec{
+				Volume: nominatimv1alpha1.VolumeSource{ClaimName: "project-pvc"},
+			},
+		},
+		Status: nominatimv1alpha1.NominatimStatus{
+			Database: nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: "pg-secret"},
+		},
+	}
+	job := buildOperationJob(op, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
+	c := job.Spec.Template.Spec.Containers[0]
+	g.Expect(envValue(c.Env, "NOMINATIM_REIMPORT_CONFIRM")).To(Equal("1"))
+	g.Expect(envValue(c.Env, "OPERATION_TYPE")).To(Equal("Reimport"))
 }
 
 func TestBuildOperationJob_IncludesDBEnvAndPBFURLForBootstrap(t *testing.T) {
@@ -245,7 +292,7 @@ func TestBuildOperationJob_IncludesDBEnvAndPBFURLForBootstrap(t *testing.T) {
 			Database: nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: "pg-secret"},
 		},
 	}
-	job := buildOperationJob(op, parent, "staging-pvc", defaultWorkerImage)
+	job := buildOperationJob(op, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
 	c := job.Spec.Template.Spec.Containers[0]
 
 	g.Expect(envValue(c.Env, "PBF_URL")).To(Equal("https://download.geofabrik.de/europe/monaco-latest.osm.pbf"))
@@ -282,7 +329,7 @@ func TestBuildOperationJob_NoPBFURLForNonWriteHeavyOperation(t *testing.T) {
 			},
 		},
 	}
-	job := buildOperationJob(op, parent, "staging-pvc", defaultWorkerImage)
+	job := buildOperationJob(op, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
 	c := job.Spec.Template.Spec.Containers[0]
 	g.Expect(findEnvVar(c.Env, "PBF_URL")).To(BeNil())
 }
@@ -304,7 +351,7 @@ func TestBuildOperationJob_NoDBEnvWhenConnectionSecretNameEmpty(t *testing.T) {
 			},
 		},
 	}
-	job := buildOperationJob(op, parent, "staging-pvc", defaultWorkerImage)
+	job := buildOperationJob(op, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
 	c := job.Spec.Template.Spec.Containers[0]
 	g.Expect(findEnvVar(c.Env, "NOMINATIM_DATABASE_DSN")).To(BeNil())
 }

@@ -13,7 +13,8 @@ THREADS="${THREADS:-$(nproc)}"
 # Ubuntu packages pyosmium helpers under /usr/lib/python3-pyosmium (on PATH in the image).
 PYOSMIUM_GET_CHANGES="${PYOSMIUM_GET_CHANGES:-pyosmium-get-changes}"
 
-log() { echo "[nominatim-worker] $*"; }
+# Logs go to stderr so command substitutions (e.g. osmfile="$(ensure_osm_file)") stay clean.
+log() { echo "[nominatim-worker] $*" >&2; }
 
 die() { echo "[nominatim-worker] ERROR: $*" >&2; exit 1; }
 
@@ -68,6 +69,9 @@ link_staging() {
 seed_project_env() {
   local env_file="${PROJECT_DIR}/.env"
   local import_style="${IMPORT_STYLE:-extratags}"
+  # Prefer explicit WEBUSER; otherwise Nominatim's default grants target (www-data),
+  # which owned CNPG Clusters declare via spec.managed.roles.
+  local webuser="${NOMINATIM_DATABASE_WEBUSER:-www-data}"
 
   if [ ! -f "${env_file}" ]; then
     log "Seeding ${env_file} from ${ENV_DEFAULTS}"
@@ -76,6 +80,14 @@ seed_project_env() {
 
   if grep -qE '^NOMINATIM_IMPORT_STYLE=' "${env_file}"; then
     sed -i "s|^NOMINATIM_IMPORT_STYLE=.*|NOMINATIM_IMPORT_STYLE=${import_style}|" "${env_file}"
+  else
+    printf 'NOMINATIM_IMPORT_STYLE=%s\n' "${import_style}" >> "${env_file}"
+  fi
+
+  if grep -qE '^NOMINATIM_DATABASE_WEBUSER=' "${env_file}"; then
+    sed -i "s|^NOMINATIM_DATABASE_WEBUSER=.*|NOMINATIM_DATABASE_WEBUSER=${webuser}|" "${env_file}"
+  else
+    printf 'NOMINATIM_DATABASE_WEBUSER=%s\n' "${webuser}" >> "${env_file}"
   fi
 
   if [ -n "${NOMINATIM_FLATNODE_FILE:-}" ]; then
@@ -100,13 +112,15 @@ run_nominatim() {
   if [ "$(id -u)" -eq 0 ]; then
     gosu nominatim env \
       NOMINATIM_DATABASE_DSN="${NOMINATIM_DATABASE_DSN}" \
+      NOMINATIM_DATABASE_WEBUSER="${NOMINATIM_DATABASE_WEBUSER:-www-data}" \
       PGHOST="${PGHOST}" \
       PGDATABASE="${PGDATABASE}" \
       PGUSER="${PGUSER}" \
       PGPASSWORD="${PGPASSWORD}" \
       nominatim "$@"
   else
-    nominatim "$@"
+    NOMINATIM_DATABASE_WEBUSER="${NOMINATIM_DATABASE_WEBUSER:-www-data}" \
+      nominatim "$@"
   fi
 }
 
@@ -145,8 +159,30 @@ psql_true() {
   esac
 }
 
+# import_schema_ready is true when placex exists and Nominatim finished setup
+# (database_version property). Used to reject stale import-finished markers.
+import_schema_ready() {
+  local has_placex has_version
+  has_placex="$(psql_scalar "SELECT EXISTS (
+       SELECT 1
+       FROM pg_catalog.pg_class c
+       JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'public' AND c.relname = 'placex' AND c.relkind = 'r'
+     )" 2>/dev/null || echo f)"
+  if ! psql_true "${has_placex}"; then
+    return 1
+  fi
+  has_version="$(psql_scalar \
+    "SELECT EXISTS (SELECT 1 FROM nominatim_properties WHERE property = 'database_version')" 2>/dev/null || echo f)"
+  psql_true "${has_version}"
+}
+
 # Detect nominatim import --continue stage against external DB (from resume-import knowledge).
-# Prints: done|fresh|import-from-file|load-data|indexing|db-postprocess
+# Prints: done|missing-db|import-from-file|load-data|indexing|db-postprocess
+#
+# The worker never runs createdb / CREATE DATABASE. The database (and Nominatim extensions)
+# must already exist via CNPG bootstrap.initdb / Database CR / admin. An empty existing DB
+# starts at import-from-file (skips nominatim's setup_database_skeleton).
 detect_continue_at() {
   if [ -n "${NOMINATIM_CONTINUE_AT:-}" ]; then
     case "${NOMINATIM_CONTINUE_AT}" in
@@ -160,7 +196,9 @@ detect_continue_at() {
     esac
   fi
 
-  if [ -f "${IMPORT_FINISHED}" ]; then
+  # Never trust import-finished alone — a leftover marker on the project PVC must not
+  # report "done" when the database was wiped / never imported.
+  if [ -f "${IMPORT_FINISHED}" ] && import_schema_ready; then
     echo "done"
     return 0
   fi
@@ -169,7 +207,7 @@ detect_continue_at() {
   db_exists="$(psql -h "${PGHOST}" -d postgres -U "${PGUSER}" -Atqc \
     "SELECT 1 FROM pg_database WHERE datname = '${PGDATABASE}'" 2>/dev/null || true)"
   if [ "${db_exists}" != "1" ]; then
-    echo "fresh"
+    echo "missing-db"
     return 0
   fi
 
@@ -177,7 +215,7 @@ detect_continue_at() {
 
   has_place="$(psql_scalar "SELECT COALESCE((SELECT true FROM place LIMIT 1), false)" 2>/dev/null || echo f)"
   if ! psql_true "${has_place}"; then
-    echo "fresh"
+    echo "import-from-file"
     return 0
   fi
 

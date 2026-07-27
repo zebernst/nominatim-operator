@@ -114,8 +114,10 @@ spec:
                   suspendDuringOperations:
                     default: Never
                     description: |-
-                      SuspendDuringOperations controls scaling/suspending the API during operations.
-                      Default Never keeps the API up (homelab default).
+                      SuspendDuringOperations controls scaling the API during day-2 operations
+                      (AddRegions, Reimport, Update, …). Default Never keeps the API up.
+                      Day-0 Bootstrap is not covered here: API/UI are not created until Bootstrap
+                      has populated status.regions (see servingWorkloadsAllowed).
                     enum:
                     - Never
                     - BootstrapReimport
@@ -350,11 +352,25 @@ spec:
                         type: object
                     type: object
                   clusterRef:
-                    description: ClusterRef attaches an existing CNPG Cluster (preferred
-                      when not creating).
+                    description: |-
+                      ClusterRef attaches an existing CNPG Cluster (preferred when not creating).
+                      Optional clusterRef.connectionSecretRef overrides the default "{cluster}-app" Secret.
                     properties:
+                      connectionSecretRef:
+                        description: |-
+                          ConnectionSecretRef optionally names the Secret with Postgres credentials for
+                          API/worker (CNPG-shaped keys: uri, host, port, dbname, user, password).
+                          When unset, defaults to the Cluster's application Secret "{name}-app".
+                        properties:
+                          name:
+                            description: Name of the referent.
+                            minLength: 1
+                            type: string
+                        required:
+                        - name
+                        type: object
                       name:
-                        description: Name of the referent.
+                        description: Name of the CNPG Cluster.
                         minLength: 1
                         type: string
                     required:
@@ -363,7 +379,7 @@ spec:
                   connectionSecretRef:
                     description: |-
                       ConnectionSecretRef is a thin escape hatch to any Postgres (degraded: no Cluster manage,
-                      no param profiles, no backup pause).
+                      no param profiles, no backup pause). Mutually exclusive with cluster / clusterRef.
                     properties:
                       name:
                         description: Name of the referent.
@@ -966,6 +982,24 @@ spec:
                     description: Schedule is a cron expression evaluated by the Nominatim
                       controller.
                     type: string
+                type: object
+              worker:
+                description: Worker configures the image used by NominatimOperation
+                  Jobs.
+                properties:
+                  image:
+                    description: Image for Operation Job containers. Defaults to ghcr.io/zebernst/nominatim-worker:latest.
+                    properties:
+                      pullPolicy:
+                        description: PullPolicy for the container.
+                        type: string
+                      repository:
+                        description: Repository is the image repository (e.g. ghcr.io/zebernst/nominatim-api).
+                        type: string
+                      tag:
+                        description: Tag is the image tag.
+                        type: string
+                    type: object
                 type: object
             required:
             - database
