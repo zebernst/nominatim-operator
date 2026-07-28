@@ -23,8 +23,8 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -511,10 +511,10 @@ func TestShouldSuspendAPI_SkipsMissingOperations(t *testing.T) {
 
 func TestServingWorkloadsAllowed(t *testing.T) {
 	cases := []struct {
-		name    string
-		spec    []string
-		status  []nominatimv1alpha1.RegionStatus
-		want    bool
+		name   string
+		spec   []string
+		status []nominatimv1alpha1.RegionStatus
+		want   bool
 	}{
 		{name: "no desired regions", want: true},
 		{name: "desired regions waiting on bootstrap", spec: []string{"europe/monaco"}, want: false},

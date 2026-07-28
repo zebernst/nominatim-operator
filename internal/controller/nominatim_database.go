@@ -77,6 +77,8 @@ const (
 	cnpgDefaultPostGISImage = "ghcr.io/cloudnative-pg/postgis:17-3-standard-trixie"
 	// cnpgNominatimWebRole is Nominatim's default DATABASE_WEBUSER (grants.sql target).
 	cnpgNominatimWebRole = "www-data"
+	// cnpgDatabaseReclaimDelete drops the Postgres database when the Database CR is deleted.
+	cnpgDatabaseReclaimDelete = "delete"
 )
 
 // cnpgNominatimExtensions are installed via an owned CNPG Database CR (spec.extensions),
@@ -294,7 +296,7 @@ func applyOwnedCNPGDatabaseSpec(db *unstructured.Unstructured, clusterName strin
 		return err
 	}
 	// delete reclaim so Reimport can drop+recreate the application database via the CR.
-	if err := unstructured.SetNestedField(db.Object, "delete", "spec", "databaseReclaimPolicy"); err != nil {
+	if err := unstructured.SetNestedField(db.Object, cnpgDatabaseReclaimDelete, "spec", "databaseReclaimPolicy"); err != nil {
 		return err
 	}
 	if err := unstructured.SetNestedField(db.Object, "present", "spec", "ensure"); err != nil {

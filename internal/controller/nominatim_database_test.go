@@ -293,17 +293,14 @@ func TestReconcileDatabase_ClusterRef_Missing(t *testing.T) {
 	}
 }
 
-func TestReconcileDatabase_Cluster_CreateOwned(t *testing.T) {
-	scheme := testScheme(t)
-	sc := "fast-ssd"
-	nom := baseNominatim("owned")
-	instances := int32(2)
+func ownedClusterNominatim(name, storageClass string, instances int32) *nominatimv1alpha1.Nominatim {
+	nom := baseNominatim(name)
 	nom.Spec.Database = nominatimv1alpha1.DatabaseSpec{
 		Cluster: &nominatimv1alpha1.DatabaseClusterCreate{
 			Instances: &instances,
 			Storage: &nominatimv1alpha1.VolumeClaimTemplate{
 				Spec: corev1.PersistentVolumeClaimSpec{
-					StorageClassName: &sc,
+					StorageClassName: &storageClass,
 					AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 					Resources: corev1.VolumeResourceRequirements{
 						Requests: corev1.ResourceList{
@@ -314,16 +311,11 @@ func TestReconcileDatabase_Cluster_CreateOwned(t *testing.T) {
 			},
 		},
 	}
+	return nom
+}
 
-	effects := &recordingCNPGEffects{}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
-
-	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
-		t.Fatalf("reconcileDatabase: %v", err)
-	}
-
-	wantName := OwnedCNPGClusterName(nom)
+func assertOwnedClusterStatus(t *testing.T, nom *nominatimv1alpha1.Nominatim, wantName string) {
+	t.Helper()
 	if nom.Status.Database.Mode != nominatimv1alpha1.DatabaseModeClusterManaged {
 		t.Fatalf("mode=%q", nom.Status.Database.Mode)
 	}
@@ -336,13 +328,10 @@ func TestReconcileDatabase_Cluster_CreateOwned(t *testing.T) {
 	if nom.Status.Database.Degraded {
 		t.Fatal("expected degraded=false")
 	}
+}
 
-	got := &unstructured.Unstructured{}
-	got.SetGroupVersionKind(CNPGClusterGVK)
-	if err := c.Get(context.Background(), types.NamespacedName{Name: wantName, Namespace: "default"}, got); err != nil {
-		t.Fatalf("get created cluster: %v", err)
-	}
-
+func assertOwnedClusterStorageAndOwner(t *testing.T, got *unstructured.Unstructured, nom *nominatimv1alpha1.Nominatim) {
+	t.Helper()
 	inst, found, err := unstructured.NestedInt64(got.Object, "spec", "instances")
 	if err != nil || !found || inst != 2 {
 		t.Fatalf("instances=%v found=%v err=%v", inst, found, err)
@@ -360,7 +349,10 @@ func TestReconcileDatabase_Cluster_CreateOwned(t *testing.T) {
 	if len(owners) != 1 || owners[0].Name != nom.Name {
 		t.Fatalf("ownerRefs=%v", owners)
 	}
+}
 
+func assertOwnedClusterBootstrapAndRoles(t *testing.T, got *unstructured.Unstructured) {
+	t.Helper()
 	dbName, found, err := unstructured.NestedString(got.Object, "spec", "bootstrap", "initdb", "database")
 	if err != nil || !found || dbName != cnpgAppDatabaseName {
 		t.Fatalf("bootstrap.initdb.database=%q found=%v err=%v want %q", dbName, found, err, cnpgAppDatabaseName)
@@ -392,7 +384,23 @@ func TestReconcileDatabase_Cluster_CreateOwned(t *testing.T) {
 	if role["name"] != cnpgNominatimWebRole || role["ensure"] != "present" || role["login"] != false {
 		t.Fatalf("managed.roles[0]=%v want name=%s ensure=present login=false", role, cnpgNominatimWebRole)
 	}
+}
 
+func assertOwnedClusterCreate(t *testing.T, c client.Client, nom *nominatimv1alpha1.Nominatim, wantName string) {
+	t.Helper()
+	assertOwnedClusterStatus(t, nom, wantName)
+
+	got := &unstructured.Unstructured{}
+	got.SetGroupVersionKind(CNPGClusterGVK)
+	if err := c.Get(context.Background(), types.NamespacedName{Name: wantName, Namespace: "default"}, got); err != nil {
+		t.Fatalf("get created cluster: %v", err)
+	}
+	assertOwnedClusterStorageAndOwner(t, got, nom)
+	assertOwnedClusterBootstrapAndRoles(t, got)
+}
+
+func assertOwnedDatabaseCR(t *testing.T, c client.Client, nom *nominatimv1alpha1.Nominatim, wantName string) {
+	t.Helper()
 	dbCR := &unstructured.Unstructured{}
 	dbCR.SetGroupVersionKind(CNPGDatabaseGVK)
 	if err := c.Get(context.Background(), types.NamespacedName{Name: OwnedCNPGDatabaseName(nom), Namespace: "default"}, dbCR); err != nil {
@@ -415,14 +423,41 @@ func TestReconcileDatabase_Cluster_CreateOwned(t *testing.T) {
 		t.Fatalf("Database spec name=%q owner=%q cluster=%q", gotDBName, gotOwner, clusterRef)
 	}
 	reclaim, _, _ := unstructured.NestedString(dbCR.Object, "spec", "databaseReclaimPolicy")
-	if reclaim != "delete" {
-		t.Fatalf("databaseReclaimPolicy=%q want delete", reclaim)
+	if reclaim != cnpgDatabaseReclaimDelete {
+		t.Fatalf("databaseReclaimPolicy=%q want %q", reclaim, cnpgDatabaseReclaimDelete)
+	}
+}
+
+func TestReconcileDatabase_Cluster_CreateOwned(t *testing.T) {
+	scheme := testScheme(t)
+	nom := ownedClusterNominatim("owned", "fast-ssd", 2)
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+
+	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
+		t.Fatalf("reconcileDatabase: %v", err)
 	}
 
-	// Idempotent second reconcile
+	wantName := OwnedCNPGClusterName(nom)
+	assertOwnedClusterCreate(t, c, nom, wantName)
+	assertOwnedDatabaseCR(t, c, nom, wantName)
+
 	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
 		t.Fatalf("second reconcile: %v", err)
 	}
+}
+
+func TestReconcileDatabase_Cluster_PreservesExpandedManagedRoles(t *testing.T) {
+	scheme := testScheme(t)
+	nom := ownedClusterNominatim("owned-roles", "fast-ssd", 2)
+	effects := &recordingCNPGEffects{}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
+
+	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
+		t.Fatalf("reconcileDatabase: %v", err)
+	}
+	wantName := OwnedCNPGClusterName(nom)
 
 	// Simulate CNPG expanding managed.roles defaults; reconciler must not replace them.
 	expanded := &unstructured.Unstructured{}

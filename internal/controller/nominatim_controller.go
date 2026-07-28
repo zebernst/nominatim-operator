@@ -97,7 +97,10 @@ func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if err := r.Status().Update(ctx, latest); err != nil {
 			return err
 		}
+		// Keep the in-memory object aligned with the version we just wrote so a later
+		// syncStatus Status().Update does not conflict on a stale resourceVersion.
 		nom.Status = latest.Status
+		nom.SetResourceVersion(latest.GetResourceVersion())
 		return nil
 	}); err != nil {
 		log.Error(err, "failed to persist Nominatim database status")

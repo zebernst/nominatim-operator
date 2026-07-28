@@ -35,7 +35,6 @@ import (
 	nominatimv1alpha1 "github.com/zebernst/nominatim-operator/api/v1alpha1"
 )
 
-
 func fakeConnectionSecret(name string) *corev1.Secret {
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
@@ -691,7 +690,7 @@ func TestOperationReconcile_WriteHeavyBootstrap_PauseImportThenTerminalResumeRun
 
 	parent := baseNominatim("vzw-write-heavy")
 	parent.Spec.Database = nominatimv1alpha1.DatabaseSpec{
-		ClusterRef: &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
+		ClusterRef:                   &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
 		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactWriteHeavy,
 		PostgresProfiles: &nominatimv1alpha1.PostgresProfiles{
 			Import:  map[string]string{"shared_buffers": testImportSharedBuffers},
@@ -829,7 +828,7 @@ func TestOperationReconcile_NeverImpact_NoCNPGCallsButRefStillTracked(t *testing
 
 	parent := baseNominatim("vzw-never")
 	parent.Spec.Database = nominatimv1alpha1.DatabaseSpec{
-		ClusterRef: &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
+		ClusterRef:                   &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
 		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactNever,
 	}
 	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{
@@ -901,7 +900,7 @@ func TestOperationReconcile_ParentNotYetAttached_NoCNPGCallsNoError(t *testing.T
 
 	parent := baseNominatim("vzw-unattached")
 	parent.Spec.Database = nominatimv1alpha1.DatabaseSpec{
-		ClusterRef: &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
+		ClusterRef:                   &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
 		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactWriteHeavy,
 	}
 	// parent.Status.Database left zero-value: the Nominatim controller hasn't reconciled yet.
@@ -1040,7 +1039,7 @@ func TestOperationReconcile_ConflictFailure_SyncsParentSideEffectsWithoutError(t
 
 	parent := baseNominatim("vzw-conflict")
 	parent.Spec.Database = nominatimv1alpha1.DatabaseSpec{
-		ClusterRef: &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
+		ClusterRef:                   &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
 		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactWriteHeavy,
 		PostgresProfiles: &nominatimv1alpha1.PostgresProfiles{
 			Import:  map[string]string{"shared_buffers": testImportSharedBuffers, "work_mem": testImportWorkMem},
@@ -1168,7 +1167,7 @@ func TestOperationReconcile_DeleteMidFlight_ClearsRefAndResumes(t *testing.T) {
 
 	parent := baseNominatim("vzw-delete")
 	parent.Spec.Database = nominatimv1alpha1.DatabaseSpec{
-		ClusterRef: &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
+		ClusterRef:                   &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
 		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactWriteHeavy,
 		PostgresProfiles: &nominatimv1alpha1.PostgresProfiles{
 			Import:  map[string]string{"shared_buffers": testImportSharedBuffers},

@@ -454,7 +454,7 @@ func (r *NominatimOperationReconciler) ensureReimportDatabaseReset(
 
 func ensureDatabaseReclaimDelete(ctx context.Context, c client.Client, db *unstructured.Unstructured) error {
 	reclaim, _, _ := unstructured.NestedString(db.Object, "spec", "databaseReclaimPolicy")
-	if reclaim == "delete" {
+	if reclaim == cnpgDatabaseReclaimDelete {
 		return nil
 	}
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
@@ -463,7 +463,7 @@ func ensureDatabaseReclaimDelete(ctx context.Context, c client.Client, db *unstr
 		if err := c.Get(ctx, types.NamespacedName{Name: db.GetName(), Namespace: db.GetNamespace()}, current); err != nil {
 			return err
 		}
-		if err := unstructured.SetNestedField(current.Object, "delete", "spec", "databaseReclaimPolicy"); err != nil {
+		if err := unstructured.SetNestedField(current.Object, cnpgDatabaseReclaimDelete, "spec", "databaseReclaimPolicy"); err != nil {
 			return err
 		}
 		return c.Update(ctx, current)
