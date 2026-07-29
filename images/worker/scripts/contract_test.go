@@ -21,10 +21,12 @@ func TestAddRegionsImportsFullSpec(t *testing.T) {
 	script := string(contents)
 
 	if strings.Contains(script, "NOMINATIM_IMPORT_MAX_REGIONS") {
-		t.Error("add-regions.sh must not reference NOMINATIM_IMPORT_MAX_REGIONS; the operator now chunks AddRegions and the worker must import every desired region")
+		t.Error("add-regions.sh must not reference NOMINATIM_IMPORT_MAX_REGIONS; " +
+			"operator chunks AddRegions and worker imports every desired region")
 	}
 	if strings.Contains(script, "deferring remaining regions") {
-		t.Error("add-regions.sh must not defer remaining regions; it must import every region in DESIRED_REGIONS not already imported")
+		t.Error("add-regions.sh must not defer remaining regions; " +
+			"import every DESIRED_REGIONS entry not already imported")
 	}
 }
 
@@ -62,7 +64,8 @@ func TestWaitForPostgresDefaultIsShortened(t *testing.T) {
 		t.Error("common.sh wait_for_postgres must reference NOMINATIM_PG_WAIT_ATTEMPTS for operator/user override")
 	}
 	if !strings.Contains(script, `NOMINATIM_PG_WAIT_ATTEMPTS:-15`) {
-		t.Error(`common.sh wait_for_postgres must default to 15 attempts via "${NOMINATIM_PG_WAIT_ATTEMPTS:-15}" (~30s at 2s/attempt)`)
+		t.Error(`common.sh wait_for_postgres must default to 15 attempts ` +
+			`via "${NOMINATIM_PG_WAIT_ATTEMPTS:-15}" (~30s at 2s/attempt)`)
 	}
 	if strings.Contains(script, "seq 1 90") {
 		t.Error("common.sh wait_for_postgres must not retain the old 90-attempt (~180s) upper bound")
