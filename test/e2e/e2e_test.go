@@ -454,10 +454,8 @@ var _ = Describe("Manager", Ordered, func() {
 			// status.regions alone can lie (copied from Spec after Bootstrap Succeeded).
 			// Country-scoped probes fail if only one extract landed in the database.
 			By("probing Monaco-scoped and Andorra-scoped search until both return hits")
-			assertNonEmptySearchQuery(nomName+"-api",
-				"avenue%20pasteur&countrycodes=mc")
-			assertNonEmptySearchQuery(nomName+"-api",
-				"andorra%20la%20vella&countrycodes=ad")
+			assertNonEmptySearchQuery("avenue%20pasteur&countrycodes=mc")
+			assertNonEmptySearchQuery("andorra%20la%20vella&countrycodes=ad")
 		})
 
 		// Reimport must start from an empty application database so CNPG (as superuser)
@@ -492,10 +490,8 @@ var _ = Describe("Manager", Ordered, func() {
 			waitForAPIServing(validationNamespace, nomName+"-api")
 
 			By("probing both countries again after Reimport")
-			assertNonEmptySearchQuery(nomName+"-api",
-				"avenue%20pasteur&countrycodes=mc")
-			assertNonEmptySearchQuery(nomName+"-api",
-				"andorra%20la%20vella&countrycodes=ad")
+			assertNonEmptySearchQuery("avenue%20pasteur&countrycodes=mc")
+			assertNonEmptySearchQuery("andorra%20la%20vella&countrycodes=ad")
 		})
 	})
 })
@@ -591,16 +587,15 @@ func waitForAPIServing(ns, name string) {
 	}, 10*time.Minute, 5*time.Second).Should(Succeed())
 }
 
-// assertNonEmptySearchQuery port-forwards the API Service and retries until /search returns
-// hits for the given query string (already URL-encoded, without the leading "q=").
+// assertNonEmptySearchQuery port-forwards monaco-api in nominatim-validation and retries
+// until /search returns hits for the given query string (already URL-encoded, without the
+// leading "q=").
 //
 // countrycodes= filters are preferred for multi-region Bootstrap: a bare free-text probe can
 // pass when only one of several Spec regions actually landed in the database.
-//
-// The import e2e Context always uses the nominatim-validation namespace.
-func assertNonEmptySearchQuery(svc, query string) {
+func assertNonEmptySearchQuery(query string) {
 	By("probing /search?q=" + query + " until non-empty JSON")
-	pf := &portForward{ns: "nominatim-validation", svc: svc, local: apiLocalPort}
+	pf := &portForward{ns: "nominatim-validation", svc: "monaco-api", local: apiLocalPort}
 	defer pf.stop()
 
 	Eventually(func(g Gomega) {
