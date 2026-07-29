@@ -293,7 +293,12 @@ func TestReconcileDatabase_ClusterRef_Missing(t *testing.T) {
 	}
 }
 
-func ownedClusterNominatim(name, storageClass string, instances int32) *nominatimv1alpha1.Nominatim {
+// testCNPGStorageClass is asserted verbatim by assertOwnedClusterStorageAndOwner: the
+// operator must pass a caller-supplied storage class through instead of inventing one.
+const testCNPGStorageClass = "fast-ssd"
+
+func ownedClusterNominatim(name string, instances int32) *nominatimv1alpha1.Nominatim {
+	storageClass := testCNPGStorageClass
 	nom := baseNominatim(name)
 	nom.Spec.Database = nominatimv1alpha1.DatabaseSpec{
 		Cluster: &nominatimv1alpha1.DatabaseClusterCreate{
@@ -314,7 +319,16 @@ func ownedClusterNominatim(name, storageClass string, instances int32) *nominati
 	return nom
 }
 
-func assertOwnedClusterStatus(t *testing.T, nom *nominatimv1alpha1.Nominatim, wantName string) {
+// assertT is the slice of *testing.T the shared CNPG assertion helpers need, so the same
+// assertions can run under plain go tests (fake client) and Ginkgo specs (envtest client,
+// where GinkgoT() is not a *testing.T).
+type assertT interface {
+	Helper()
+	Fatal(args ...any)
+	Fatalf(format string, args ...any)
+}
+
+func assertOwnedClusterStatus(t assertT, nom *nominatimv1alpha1.Nominatim, wantName string) {
 	t.Helper()
 	if nom.Status.Database.Mode != nominatimv1alpha1.DatabaseModeClusterManaged {
 		t.Fatalf("mode=%q", nom.Status.Database.Mode)
@@ -330,7 +344,7 @@ func assertOwnedClusterStatus(t *testing.T, nom *nominatimv1alpha1.Nominatim, wa
 	}
 }
 
-func assertOwnedClusterStorageAndOwner(t *testing.T, got *unstructured.Unstructured, nom *nominatimv1alpha1.Nominatim) {
+func assertOwnedClusterStorageAndOwner(t assertT, got *unstructured.Unstructured, nom *nominatimv1alpha1.Nominatim) {
 	t.Helper()
 	inst, found, err := unstructured.NestedInt64(got.Object, "spec", "instances")
 	if err != nil || !found || inst != 2 {
@@ -341,7 +355,7 @@ func assertOwnedClusterStorageAndOwner(t *testing.T, got *unstructured.Unstructu
 		t.Fatalf("storage.size=%q found=%v err=%v", size, found, err)
 	}
 	class, found, err := unstructured.NestedString(got.Object, "spec", "storage", "storageClass")
-	if err != nil || !found || class != "fast-ssd" {
+	if err != nil || !found || class != testCNPGStorageClass {
 		t.Fatalf("storageClass=%q found=%v (must passthrough, not hardcode)", class, found)
 	}
 
@@ -351,7 +365,7 @@ func assertOwnedClusterStorageAndOwner(t *testing.T, got *unstructured.Unstructu
 	}
 }
 
-func assertOwnedClusterBootstrapAndRoles(t *testing.T, got *unstructured.Unstructured) {
+func assertOwnedClusterBootstrapAndRoles(t assertT, got *unstructured.Unstructured) {
 	t.Helper()
 	dbName, found, err := unstructured.NestedString(got.Object, "spec", "bootstrap", "initdb", "database")
 	if err != nil || !found || dbName != cnpgAppDatabaseName {
@@ -386,24 +400,24 @@ func assertOwnedClusterBootstrapAndRoles(t *testing.T, got *unstructured.Unstruc
 	}
 }
 
-func assertOwnedClusterCreate(t *testing.T, c client.Client, nom *nominatimv1alpha1.Nominatim, wantName string) {
+func assertOwnedClusterCreate(t assertT, c client.Client, nom *nominatimv1alpha1.Nominatim, wantName string) {
 	t.Helper()
 	assertOwnedClusterStatus(t, nom, wantName)
 
 	got := &unstructured.Unstructured{}
 	got.SetGroupVersionKind(CNPGClusterGVK)
-	if err := c.Get(context.Background(), types.NamespacedName{Name: wantName, Namespace: "default"}, got); err != nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Name: wantName, Namespace: nom.Namespace}, got); err != nil {
 		t.Fatalf("get created cluster: %v", err)
 	}
 	assertOwnedClusterStorageAndOwner(t, got, nom)
 	assertOwnedClusterBootstrapAndRoles(t, got)
 }
 
-func assertOwnedDatabaseCR(t *testing.T, c client.Client, nom *nominatimv1alpha1.Nominatim, wantName string) {
+func assertOwnedDatabaseCR(t assertT, c client.Client, nom *nominatimv1alpha1.Nominatim, wantName string) {
 	t.Helper()
 	dbCR := &unstructured.Unstructured{}
 	dbCR.SetGroupVersionKind(CNPGDatabaseGVK)
-	if err := c.Get(context.Background(), types.NamespacedName{Name: OwnedCNPGDatabaseName(nom), Namespace: "default"}, dbCR); err != nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Name: OwnedCNPGDatabaseName(nom), Namespace: nom.Namespace}, dbCR); err != nil {
 		t.Fatalf("get owned Database CR: %v", err)
 	}
 	exts, found, err := unstructured.NestedSlice(dbCR.Object, "spec", "extensions")
@@ -428,122 +442,10 @@ func assertOwnedDatabaseCR(t *testing.T, c client.Client, nom *nominatimv1alpha1
 	}
 }
 
-func TestReconcileDatabase_Cluster_CreateOwned(t *testing.T) {
-	scheme := testScheme(t)
-	nom := ownedClusterNominatim("owned", "fast-ssd", 2)
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
-
-	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
-		t.Fatalf("reconcileDatabase: %v", err)
-	}
-
-	wantName := OwnedCNPGClusterName(nom)
-	assertOwnedClusterCreate(t, c, nom, wantName)
-	assertOwnedDatabaseCR(t, c, nom, wantName)
-
-	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
-		t.Fatalf("second reconcile: %v", err)
-	}
-}
-
-func TestReconcileDatabase_Cluster_PreservesExpandedManagedRoles(t *testing.T) {
-	scheme := testScheme(t)
-	nom := ownedClusterNominatim("owned-roles", "fast-ssd", 2)
-	effects := &recordingCNPGEffects{}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
-
-	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
-		t.Fatalf("reconcileDatabase: %v", err)
-	}
-	wantName := OwnedCNPGClusterName(nom)
-
-	// Simulate CNPG expanding managed.roles defaults; reconciler must not replace them.
-	expanded := &unstructured.Unstructured{}
-	expanded.SetGroupVersionKind(CNPGClusterGVK)
-	if err := c.Get(context.Background(), types.NamespacedName{Name: wantName, Namespace: "default"}, expanded); err != nil {
-		t.Fatalf("get cluster for expand: %v", err)
-	}
-	if err := unstructured.SetNestedSlice(expanded.Object, []interface{}{
-		map[string]interface{}{
-			"name":            cnpgNominatimWebRole,
-			"ensure":          "present",
-			"login":           false,
-			"inherit":         true,
-			"connectionLimit": int64(-1),
-			"comment":         "Nominatim DATABASE_WEBUSER (read-only grants target)",
-		},
-	}, "spec", "managed", "roles"); err != nil {
-		t.Fatalf("expand roles: %v", err)
-	}
-	if err := c.Update(context.Background(), expanded); err != nil {
-		t.Fatalf("update expanded roles: %v", err)
-	}
-	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
-		t.Fatalf("reconcile after CNPG role expand: %v", err)
-	}
-	gotAfter := &unstructured.Unstructured{}
-	gotAfter.SetGroupVersionKind(CNPGClusterGVK)
-	if err := c.Get(context.Background(), types.NamespacedName{Name: wantName, Namespace: "default"}, gotAfter); err != nil {
-		t.Fatalf("get after expand reconcile: %v", err)
-	}
-	rolesAfter, _, _ := unstructured.NestedSlice(gotAfter.Object, "spec", "managed", "roles")
-	roleAfter, _ := rolesAfter[0].(map[string]interface{})
-	if roleAfter["connectionLimit"] != int64(-1) || roleAfter["inherit"] != true {
-		t.Fatalf("managed.roles churned away CNPG defaults: %v", roleAfter)
-	}
-
-	if err := r.SetBackupPaused(context.Background(), nom, false); err != nil {
-		t.Fatalf("SetBackupPaused resume: %v", err)
-	}
-	if effects.resumeCalls != 1 {
-		t.Fatalf("expected ResumeBackups, got %d", effects.resumeCalls)
-	}
-}
-
-func TestReconcileDatabase_Cluster_InstanceTune(t *testing.T) {
-	scheme := testScheme(t)
-	nom := ownedClusterNominatim("tune", "fast-ssd", 1)
-	affinityJSON := []byte(`{"nodeSelector":{"node-role.kubernetes.io/postgres":""},"enablePodAntiAffinity":true,"topologyKey":"kubernetes.io/hostname"}`)
-	nom.Spec.Database.Cluster.Resources = &corev1.ResourceRequirements{
-		Requests: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")},
-	}
-	nom.Spec.Database.Cluster.Affinity = &runtime.RawExtension{Raw: affinityJSON}
-	nom.Spec.Database.Cluster.TopologySpreadConstraints = []corev1.TopologySpreadConstraint{{
-		MaxSkew:           1,
-		TopologyKey:       "topology.kubernetes.io/zone",
-		WhenUnsatisfiable: corev1.DoNotSchedule,
-		LabelSelector:     &metav1.LabelSelector{MatchLabels: map[string]string{"app": "pg"}},
-	}}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
-
-	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
-		t.Fatalf("reconcileDatabase: %v", err)
-	}
-	got := &unstructured.Unstructured{}
-	got.SetGroupVersionKind(CNPGClusterGVK)
-	if err := c.Get(context.Background(), types.NamespacedName{Name: OwnedCNPGClusterName(nom), Namespace: "default"}, got); err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	mem, found, err := unstructured.NestedString(got.Object, "spec", "resources", "requests", "memory")
-	if err != nil || !found || mem != "1Gi" {
-		t.Fatalf("resources.memory=%q found=%v err=%v", mem, found, err)
-	}
-	ns, found, err := unstructured.NestedStringMap(got.Object, "spec", "affinity", "nodeSelector")
-	if err != nil || !found || ns["node-role.kubernetes.io/postgres"] != "" {
-		t.Fatalf("affinity.nodeSelector=%v found=%v err=%v", ns, found, err)
-	}
-	tsc, found, err := unstructured.NestedSlice(got.Object, "spec", "topologySpreadConstraints")
-	if err != nil || !found || len(tsc) != 1 {
-		t.Fatalf("topologySpreadConstraints=%v found=%v err=%v", tsc, found, err)
-	}
-	img, _, _ := unstructured.NestedString(got.Object, "spec", "imageName")
-	if img != cnpgDefaultPostGISImage {
-		t.Fatalf("imageName seal broken: %q", img)
-	}
-}
+// The owned-Cluster / owned-Database happy paths (create, instance tune, managed.roles
+// merge) now run against envtest with the vendored CNPG schemas — see
+// cnpg_gateway_envtest_test.go. Only paths the fake client can reach (malformed existing
+// objects, injected client failures) stay on fake.NewClientBuilder below.
 
 func TestApplyOwnedCNPGClusterTune_InvalidAffinity(t *testing.T) {
 	cluster := &unstructured.Unstructured{Object: map[string]interface{}{}}

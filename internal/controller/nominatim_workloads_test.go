@@ -350,63 +350,9 @@ func TestReconcileAPI_FlatnodeVolumeAndEnv(t *testing.T) {
 	}
 }
 
-func TestReconcileAPI_RouteCreatesHTTPRoute(t *testing.T) {
-	scheme := testScheme(t)
-	nom := nominatimWithConnectionSecret("api-route")
-	group := "gateway.networking.k8s.io"
-	kind := "Gateway"
-	nom.Spec.API = &nominatimv1alpha1.APISpec{
-		Route: &nominatimv1alpha1.RouteSpec{
-			ParentRefs: []nominatimv1alpha1.ParentReference{
-				{Name: "my-gateway", Group: &group, Kind: &kind},
-			},
-			Hostnames: []string{"nominatim.example.com"},
-		},
-	}
-	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
-
-	if err := r.reconcileAPI(context.Background(), nom, "project-pvc", ""); err != nil {
-		t.Fatalf("reconcileAPI: %v", err)
-	}
-
-	route := &unstructured.Unstructured{}
-	route.SetGroupVersionKind(HTTPRouteGVK)
-	if err := c.Get(context.Background(), types.NamespacedName{Name: APIName(nom), Namespace: "default"}, route); err != nil {
-		t.Fatalf("get HTTPRoute: %v", err)
-	}
-
-	hostnames, found, err := unstructured.NestedStringSlice(route.Object, "spec", "hostnames")
-	if err != nil || !found || len(hostnames) != 1 || hostnames[0] != "nominatim.example.com" {
-		t.Fatalf("hostnames=%v found=%v err=%v", hostnames, found, err)
-	}
-
-	parentRefs, found, err := unstructured.NestedSlice(route.Object, "spec", "parentRefs")
-	if err != nil || !found || len(parentRefs) != 1 {
-		t.Fatalf("parentRefs=%v found=%v err=%v", parentRefs, found, err)
-	}
-	pr := parentRefs[0].(map[string]interface{})
-	if pr["name"] != "my-gateway" || pr["group"] != group || pr["kind"] != kind {
-		t.Fatalf("parentRef=%v", pr)
-	}
-
-	rules, found, err := unstructured.NestedSlice(route.Object, "spec", "rules")
-	if err != nil || !found || len(rules) != 1 {
-		t.Fatalf("rules=%v found=%v err=%v", rules, found, err)
-	}
-	rule := rules[0].(map[string]interface{})
-	backends := rule["backendRefs"].([]interface{})
-	backend := backends[0].(map[string]interface{})
-	if backend["name"] != APIName(nom) {
-		t.Fatalf("backendRef name=%v want %v", backend["name"], APIName(nom))
-	}
-
-	owners := route.GetOwnerReferences()
-	if len(owners) != 1 || owners[0].Name != nom.Name {
-		t.Fatalf("HTTPRoute ownerRefs=%v", owners)
-	}
-}
+// The HTTPRoute happy paths (reconcileAPI route creation, full parentRef passthrough) now
+// run against envtest with the vendored Gateway API schema — see
+// cnpg_gateway_envtest_test.go.
 
 func TestReconcileUI_NoopWhenUnset(t *testing.T) {
 	scheme := testScheme(t)
@@ -1095,38 +1041,6 @@ func TestReconcileHTTPRoute_SetNestedSliceError(t *testing.T) {
 	route := &nominatimv1alpha1.RouteSpec{ParentRefs: []nominatimv1alpha1.ParentReference{{Name: "gw"}}}
 	if err := r.reconcileHTTPRoute(context.Background(), nom, APIName(nom), APIName(nom), route, ComponentAPI); err == nil {
 		t.Fatal("expected SetNestedSlice failure on malformed existing spec")
-	}
-}
-
-func TestReconcileHTTPRoute_ParentRefNamespaceAndSectionName(t *testing.T) {
-	scheme := testScheme(t)
-	nom := baseNominatim("route-fullparent")
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
-
-	ns := "gw-ns"
-	section := "https"
-	route := &nominatimv1alpha1.RouteSpec{
-		ParentRefs: []nominatimv1alpha1.ParentReference{
-			{Name: "gw", Namespace: &ns, SectionName: &section},
-		},
-	}
-	if err := r.reconcileHTTPRoute(context.Background(), nom, "full-route", "svc", route, ComponentAPI); err != nil {
-		t.Fatalf("reconcileHTTPRoute: %v", err)
-	}
-
-	got := &unstructured.Unstructured{}
-	got.SetGroupVersionKind(HTTPRouteGVK)
-	if err := c.Get(context.Background(), types.NamespacedName{Name: "full-route", Namespace: "default"}, got); err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	parentRefs, found, err := unstructured.NestedSlice(got.Object, "spec", "parentRefs")
-	if err != nil || !found || len(parentRefs) != 1 {
-		t.Fatalf("parentRefs=%v found=%v err=%v", parentRefs, found, err)
-	}
-	pr := parentRefs[0].(map[string]interface{})
-	if pr["namespace"] != ns || pr["sectionName"] != section {
-		t.Fatalf("parentRef=%v", pr)
 	}
 }
 
