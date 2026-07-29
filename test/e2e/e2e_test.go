@@ -463,6 +463,10 @@ var _ = Describe("Manager", Ordered, func() {
 		// Reimport must start from an empty application database so CNPG (as superuser)
 		// reinstalls PostGIS/hstore. The controller drops and recreates the owned Database
 		// CR and only arms the worker Job once the replacement reports applied=true.
+		//
+		// This also covers suspendDuringOperations (fixture: BootstrapReimport) / the
+		// Reimport-always-quiesce rule: API replicas must hit 0 while the Op is active and
+		// restore after it reaches a terminal phase (nominatim-5et.27).
 		It("drops and recreates the owned CNPG Database before arming the Reimport Job", func() {
 			By("recording the current owned CNPG Database UID")
 			oldUID := cnpgDatabaseField(validationNamespace, ownedDatabaseName, "metadata.uid")
@@ -473,6 +477,9 @@ var _ = Describe("Manager", Ordered, func() {
 			cmd := exec.Command("kubectl", "apply", "-f", fixture)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to create the Reimport NominatimOperation")
+
+			By("waiting for the API Deployment to scale to zero while Reimport is active")
+			expectAPIScaledTo(validationNamespace, nomName+"-api", 0)
 
 			expectDatabaseReplacedBeforeJob(validationNamespace, ownedDatabaseName, reimportName, oldUID)
 
@@ -487,8 +494,8 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(out).To(Equal("Succeeded"))
 			}, 40*time.Minute, 15*time.Second).Should(Succeed())
 
-			// Reimport quiesces the API so DROP DATABASE can proceed, so this also asserts
-			// the operator scales serving back up once the Operation reaches a terminal phase.
+			By("waiting for the API Deployment to restore after Reimport completes")
+			expectAPIScaledTo(validationNamespace, nomName+"-api", 1)
 			waitForAPIServing(validationNamespace, nomName+"-api")
 
 			By("probing both countries again after Reimport")
@@ -499,6 +506,33 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 	})
 })
+
+// expectAPIScaledTo waits until the API Deployment's desired replicas match want and, when
+// scaling to zero, until no pods remain (status.replicas == 0). Used to assert
+// suspendDuringOperations / Reimport quiesce in the import e2e.
+func expectAPIScaledTo(ns, name string, want int32) {
+	Eventually(func(g Gomega) {
+		cmd := exec.Command("kubectl", "get", "deploy", name, "-n", ns,
+			"-o", "jsonpath={.spec.replicas}")
+		out, err := utils.Run(cmd)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(strings.TrimSpace(out)).To(Equal(fmt.Sprintf("%d", want)),
+			"API Deployment %s/%s spec.replicas", ns, name)
+
+		if want == 0 {
+			cmd = exec.Command("kubectl", "get", "deploy", name, "-n", ns,
+				"-o", "jsonpath={.status.replicas}")
+			statusOut, err := utils.Run(cmd)
+			g.Expect(err).NotTo(HaveOccurred())
+			statusReplicas := strings.TrimSpace(statusOut)
+			if statusReplicas == "" {
+				statusReplicas = "0"
+			}
+			g.Expect(statusReplicas).To(Equal("0"),
+				"API Deployment %s/%s still has pods while suspended", ns, name)
+		}
+	}, 10*time.Minute, 2*time.Second).Should(Succeed())
+}
 
 // cnpgDatabaseField reads a jsonpath field off the owned CNPG Database, returning "" while
 // the object is absent (the window between the drop and the recreate).

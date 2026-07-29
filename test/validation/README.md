@@ -44,7 +44,7 @@ That ordering is asserted in three places:
 | Where | What it covers |
 | --- | --- |
 | `internal/controller/nominatimoperation_reimport_test.go` | Every branch of the UID handshake (missing / same-UID / pending / applied / API errors) against a fake client |
-| `make test-e2e-import` (CI job **E2E Import**) | Real CNPG on kind: Database UID changes and reports `applied=true` before the Reimport Job exists |
+| `make test-e2e-import` (CI job **E2E Import**) | Real CNPG on kind: Database UID changes and reports `applied=true` before the Reimport Job exists; API scales to 0 for the duration of Reimport and restores afterward |
 | `make validate-kind` | Same invariant in the interactive lab, after AddRegions |
 
 The e2e and lab checks poll, so they can miss a very short-lived violation; they fail
