@@ -1,0 +1,73 @@
+// Package scripts holds contract tests over the worker's bash Operation scripts.
+// These tests read the shell scripts as text and assert on presence/absence of
+// specific strings, guarding against regressions in the bash/Go split described
+// in images/README.md.
+package scripts
+
+import (
+	"os"
+	"strings"
+	"testing"
+)
+
+// TestAddRegionsImportsFullSpec asserts add-regions.sh no longer defers regions
+// via NOMINATIM_IMPORT_MAX_REGIONS: it must import every region in
+// NOMINATIM_REGIONS / Spec.Regions not already recorded in imported-regions.txt.
+func TestAddRegionsImportsFullSpec(t *testing.T) {
+	contents, err := os.ReadFile("add-regions.sh")
+	if err != nil {
+		t.Fatalf("reading add-regions.sh: %v", err)
+	}
+	script := string(contents)
+
+	if strings.Contains(script, "NOMINATIM_IMPORT_MAX_REGIONS") {
+		t.Error("add-regions.sh must not reference NOMINATIM_IMPORT_MAX_REGIONS; " +
+			"operator chunks AddRegions and worker imports every desired region")
+	}
+	if strings.Contains(script, "deferring remaining regions") {
+		t.Error("add-regions.sh must not defer remaining regions; " +
+			"import every DESIRED_REGIONS entry not already imported")
+	}
+}
+
+// TestAddRegionsKeepsBashBelts asserts the IMPORT_FINISHED and NOMINATIM_REGIONS
+// guards remain in add-regions.sh even though the operator now enforces
+// preconditions too (belt-and-suspenders per R6 in the worker guards plan).
+func TestAddRegionsKeepsBashBelts(t *testing.T) {
+	contents, err := os.ReadFile("add-regions.sh")
+	if err != nil {
+		t.Fatalf("reading add-regions.sh: %v", err)
+	}
+	script := string(contents)
+
+	if !strings.Contains(script, "IMPORT_FINISHED") {
+		t.Error("add-regions.sh must still guard on IMPORT_FINISHED (Bootstrap-done belt)")
+	}
+	if !strings.Contains(script, "NOMINATIM_REGIONS") {
+		t.Error("add-regions.sh must still require NOMINATIM_REGIONS (regions belt)")
+	}
+}
+
+// TestWaitForPostgresDefaultIsShortened asserts common.sh's wait_for_postgres
+// default upper bound is 15 attempts (2s sleep -> ~30s), down from the prior
+// 90 attempts (~180s), and that it honors NOMINATIM_PG_WAIT_ATTEMPTS when set.
+// CNPG cluster/database readiness (cnpgClusterReadyForJobs) is the primary
+// gate before the Job is even created; this loop is last-mile only (R5).
+func TestWaitForPostgresDefaultIsShortened(t *testing.T) {
+	contents, err := os.ReadFile("common.sh")
+	if err != nil {
+		t.Fatalf("reading common.sh: %v", err)
+	}
+	script := string(contents)
+
+	if !strings.Contains(script, "NOMINATIM_PG_WAIT_ATTEMPTS") {
+		t.Error("common.sh wait_for_postgres must reference NOMINATIM_PG_WAIT_ATTEMPTS for operator/user override")
+	}
+	if !strings.Contains(script, `NOMINATIM_PG_WAIT_ATTEMPTS:-15`) {
+		t.Error(`common.sh wait_for_postgres must default to 15 attempts ` +
+			`via "${NOMINATIM_PG_WAIT_ATTEMPTS:-15}" (~30s at 2s/attempt)`)
+	}
+	if strings.Contains(script, "seq 1 90") {
+		t.Error("common.sh wait_for_postgres must not retain the old 90-attempt (~180s) upper bound")
+	}
+}

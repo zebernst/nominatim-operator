@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	nominatimv1alpha1 "github.com/zebernst/nominatim-operator/api/v1alpha1"
@@ -57,6 +58,94 @@ func TestReconcileRegionDrift_AddDataCreatesAddRegions(t *testing.T) {
 	}
 	if len(op.Spec.Regions) != 1 || op.Spec.Regions[0] != "asia/kazakhstan" {
 		t.Fatalf("regions=%v (want only missing)", op.Spec.Regions)
+	}
+}
+
+func TestReconcileRegionDrift_AddDataMultiMissingCreatesSingleRegionOp(t *testing.T) {
+	scheme := testScheme(t)
+	ctx := context.Background()
+	nom := baseNominatim("drift-multi")
+	nom.Spec.Regions = []string{"a", "b", "c"}
+	nom.Spec.RegionChangePolicy = nominatimv1alpha1.RegionChangeAddData
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "a", Phase: regionPhaseImported}}
+	nom.Status.Database.ConnectionSecretName = testConnSecret
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+
+	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+		t.Fatalf("reconcileRegionDrift: %v", err)
+	}
+
+	ops := &nominatimv1alpha1.NominatimOperationList{}
+	if err := c.List(ctx, ops); err != nil {
+		t.Fatal(err)
+	}
+	if len(ops.Items) != 1 {
+		t.Fatalf("expected 1 AddRegions op, got %d", len(ops.Items))
+	}
+	op := ops.Items[0]
+	if op.Spec.Type != nominatimv1alpha1.NominatimOperationAddRegions {
+		t.Fatalf("type=%q", op.Spec.Type)
+	}
+	if len(op.Spec.Regions) != 1 || op.Spec.Regions[0] != "b" {
+		t.Fatalf("regions=%v (want only first missing region [b])", op.Spec.Regions)
+	}
+}
+
+func TestReconcileRegionDrift_AddDataSerialMultiMissingCreatesNextOpAfterSucceed(t *testing.T) {
+	scheme := testScheme(t)
+	ctx := context.Background()
+	nom := baseNominatim("drift-serial-multi")
+	nom.Spec.Regions = []string{"a", "b", "c"}
+	nom.Spec.RegionChangePolicy = nominatimv1alpha1.RegionChangeAddData
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "a", Phase: regionPhaseImported}}
+	nom.Status.Database.ConnectionSecretName = testConnSecret
+
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithStatusSubresource(nom, &nominatimv1alpha1.NominatimOperation{}).
+		WithObjects(nom).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+
+	// First reconcile creates the op for "b" only.
+	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+		t.Fatalf("reconcileRegionDrift (1st): %v", err)
+	}
+	ops := &nominatimv1alpha1.NominatimOperationList{}
+	if err := c.List(ctx, ops); err != nil {
+		t.Fatal(err)
+	}
+	if len(ops.Items) != 1 || len(ops.Items[0].Spec.Regions) != 1 || ops.Items[0].Spec.Regions[0] != "b" {
+		t.Fatalf("expected single op for [b], got %#v", ops.Items)
+	}
+
+	// Mark the op Succeeded and update status.regions accordingly (simulating what
+	// the operation controller + syncRegionsFromDriftOps would do).
+	first := &nominatimv1alpha1.NominatimOperation{}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(&ops.Items[0]), first); err != nil {
+		t.Fatalf("get op: %v", err)
+	}
+	first.Status.Phase = nominatimv1alpha1.NominatimOperationPhaseSucceeded
+	if err := c.Status().Update(ctx, first); err != nil {
+		t.Fatalf("update op status: %v", err)
+	}
+
+	// Re-reconcile: syncRegionsFromDriftOps should merge "b" into status, and drift
+	// should then create a new op for the next missing region, "c".
+	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+		t.Fatalf("reconcileRegionDrift (2nd): %v", err)
+	}
+	if err := c.List(ctx, ops); err != nil {
+		t.Fatal(err)
+	}
+	var cOps []nominatimv1alpha1.NominatimOperation
+	for _, op := range ops.Items {
+		if op.Spec.Type == nominatimv1alpha1.NominatimOperationAddRegions && len(op.Spec.Regions) == 1 && op.Spec.Regions[0] == "c" {
+			cOps = append(cOps, op)
+		}
+	}
+	if len(cOps) != 1 {
+		t.Fatalf("expected exactly 1 AddRegions op for [c], got %d (all ops: %#v)", len(cOps), ops.Items)
 	}
 }
 

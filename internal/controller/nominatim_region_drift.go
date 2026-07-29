@@ -114,12 +114,18 @@ func (r *NominatimReconciler) ensureAddRegionsOperation(
 		}
 	}
 
+	// Create one AddRegions operation per missing region, serially: only the
+	// first missing region is included here. The next missing region is picked
+	// up on a later reconcile once this operation Succeeds and syncRegionsFromDriftOps
+	// merges it into status.regions (see the serial-AddRegions guard above).
+	next := missing[0]
+
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: nom.Namespace},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
 			Type:         nominatimv1alpha1.NominatimOperationAddRegions,
 			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
-			Regions:      append([]string(nil), missing...),
+			Regions:      []string{next},
 		},
 	}
 	if err := controllerutil.SetControllerReference(nom, op, r.Scheme); err != nil {
@@ -128,7 +134,7 @@ func (r *NominatimReconciler) ensureAddRegionsOperation(
 	if err := r.Create(ctx, op); err != nil {
 		return fmt.Errorf("create AddRegions operation: %w", err)
 	}
-	log.Info("created AddRegions operation", "operation", op.Name, "regions", strings.Join(missing, ","))
+	log.Info("created AddRegions operation", "operation", op.Name, "region", next)
 	return nil
 }
 

@@ -140,6 +140,7 @@ var _ = Describe("NominatimOperation Controller", func() {
 			Spec: nominatimv1alpha1.NominatimOperationSpec{
 				Type:         nominatimv1alpha1.NominatimOperationUpdate,
 				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+				Regions:      []string{"europe/monaco"},
 			},
 		}
 		Expect(k8sClient.Create(ctx, op)).To(Succeed())
@@ -231,6 +232,7 @@ var _ = Describe("NominatimOperation Controller", func() {
 			Spec: nominatimv1alpha1.NominatimOperationSpec{
 				Type:         nominatimv1alpha1.NominatimOperationUpdate,
 				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+				Regions:      []string{"europe/monaco"},
 			},
 		}
 		Expect(k8sClient.Create(ctx, op)).To(Succeed())
@@ -283,6 +285,7 @@ var _ = Describe("NominatimOperation Controller", func() {
 			Spec: nominatimv1alpha1.NominatimOperationSpec{
 				Type:         nominatimv1alpha1.NominatimOperationUpdate,
 				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+				Regions:      []string{"europe/monaco"},
 			},
 		}
 		Expect(k8sClient.Create(ctx, op)).To(Succeed())
@@ -400,6 +403,271 @@ var _ = Describe("NominatimOperation Controller", func() {
 
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, op)).To(Succeed())
 		Expect(op.Status.Phase).To(Equal(nominatimv1alpha1.NominatimOperationPhaseFailed))
+	})
+
+	It("fails AddRegions with RegionsRequired when no regions are configured (T5)", func() {
+		op := &nominatimv1alpha1.NominatimOperation{
+			ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: "default"},
+			Spec: nominatimv1alpha1.NominatimOperationSpec{
+				Type:         nominatimv1alpha1.NominatimOperationAddRegions,
+				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+			},
+		}
+		Expect(k8sClient.Create(ctx, op)).To(Succeed())
+
+		_, err := reconciler.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: opName, Namespace: "default"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, op)).To(Succeed())
+		Expect(op.Status.Phase).To(Equal(nominatimv1alpha1.NominatimOperationPhaseFailed))
+		Expect(op.Status.Message).To(ContainSubstring("RegionsRequired"))
+
+		job := &batchv1.Job{}
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, job)
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+		pvc := &corev1.PersistentVolumeClaim{}
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: opName + "-staging", Namespace: "default"}, pvc)
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("fails Update with BootstrapIncomplete when regions-mode parent has no Bootstrap history (T6)", func() {
+		parent := &nominatimv1alpha1.Nominatim{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: parentName, Namespace: "default"}, parent)).To(Succeed())
+		parent.Spec.Regions = []string{"europe/monaco"}
+		Expect(k8sClient.Update(ctx, parent)).To(Succeed())
+
+		op := &nominatimv1alpha1.NominatimOperation{
+			ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: "default"},
+			Spec: nominatimv1alpha1.NominatimOperationSpec{
+				Type:         nominatimv1alpha1.NominatimOperationUpdate,
+				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+			},
+		}
+		Expect(k8sClient.Create(ctx, op)).To(Succeed())
+
+		_, err := reconciler.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: opName, Namespace: "default"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, op)).To(Succeed())
+		Expect(op.Status.Phase).To(Equal(nominatimv1alpha1.NominatimOperationPhaseFailed))
+		Expect(op.Status.Message).To(ContainSubstring("BootstrapIncomplete"))
+
+		job := &batchv1.Job{}
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, job)
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("fails CatchUp with RegionsRequired when no regions are configured (T6b)", func() {
+		op := &nominatimv1alpha1.NominatimOperation{
+			ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: "default"},
+			Spec: nominatimv1alpha1.NominatimOperationSpec{
+				Type:         nominatimv1alpha1.NominatimOperationCatchUp,
+				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+			},
+		}
+		Expect(k8sClient.Create(ctx, op)).To(Succeed())
+
+		_, err := reconciler.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: opName, Namespace: "default"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, op)).To(Succeed())
+		Expect(op.Status.Phase).To(Equal(nominatimv1alpha1.NominatimOperationPhaseFailed))
+		Expect(op.Status.Message).To(ContainSubstring("RegionsRequired"))
+
+		job := &batchv1.Job{}
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, job)
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("fails AddRegions with BootstrapIncomplete when regions-mode parent has no Bootstrap history (T6c)", func() {
+		parent := &nominatimv1alpha1.Nominatim{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: parentName, Namespace: "default"}, parent)).To(Succeed())
+		parent.Spec.Regions = []string{"europe/monaco", "africa/morocco"}
+		Expect(k8sClient.Update(ctx, parent)).To(Succeed())
+
+		op := &nominatimv1alpha1.NominatimOperation{
+			ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: "default"},
+			Spec: nominatimv1alpha1.NominatimOperationSpec{
+				Type:         nominatimv1alpha1.NominatimOperationAddRegions,
+				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+				Regions:      []string{"africa/morocco"},
+			},
+		}
+		Expect(k8sClient.Create(ctx, op)).To(Succeed())
+
+		_, err := reconciler.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: opName, Namespace: "default"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, op)).To(Succeed())
+		Expect(op.Status.Phase).To(Equal(nominatimv1alpha1.NominatimOperationPhaseFailed))
+		Expect(op.Status.Message).To(ContainSubstring("BootstrapIncomplete"))
+
+		job := &batchv1.Job{}
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, job)
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("fails CatchUp with BootstrapIncomplete when regions-mode parent has no Bootstrap history (T6d)", func() {
+		parent := &nominatimv1alpha1.Nominatim{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: parentName, Namespace: "default"}, parent)).To(Succeed())
+		parent.Spec.Regions = []string{"europe/monaco"}
+		Expect(k8sClient.Update(ctx, parent)).To(Succeed())
+
+		op := &nominatimv1alpha1.NominatimOperation{
+			ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: "default"},
+			Spec: nominatimv1alpha1.NominatimOperationSpec{
+				Type:         nominatimv1alpha1.NominatimOperationCatchUp,
+				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+			},
+		}
+		Expect(k8sClient.Create(ctx, op)).To(Succeed())
+
+		_, err := reconciler.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: opName, Namespace: "default"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, op)).To(Succeed())
+		Expect(op.Status.Phase).To(Equal(nominatimv1alpha1.NominatimOperationPhaseFailed))
+		Expect(op.Status.Message).To(ContainSubstring("BootstrapIncomplete"))
+
+		job := &batchv1.Job{}
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, job)
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("creates a Job for AddRegions when Bootstrap already imported regions (T7)", func() {
+		parent := &nominatimv1alpha1.Nominatim{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: parentName, Namespace: "default"}, parent)).To(Succeed())
+		parent.Spec.Regions = []string{"europe/monaco", "africa/morocco"}
+		Expect(k8sClient.Update(ctx, parent)).To(Succeed())
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: parentName, Namespace: "default"}, parent)).To(Succeed())
+		parent.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: "pg-secret"}
+		parent.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}}
+		Expect(k8sClient.Status().Update(ctx, parent)).To(Succeed())
+
+		op := &nominatimv1alpha1.NominatimOperation{
+			ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: "default"},
+			Spec: nominatimv1alpha1.NominatimOperationSpec{
+				Type:         nominatimv1alpha1.NominatimOperationAddRegions,
+				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+				Regions:      []string{"africa/morocco"},
+			},
+		}
+		Expect(k8sClient.Create(ctx, op)).To(Succeed())
+
+		_, err := reconciler.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: opName, Namespace: "default"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		job := &batchv1.Job{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, job)).To(Succeed())
+		Expect(envValue(job.Spec.Template.Spec.Containers[0].Env, "NOMINATIM_REGIONS")).To(Equal("africa/morocco"))
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, op)).To(Succeed())
+		Expect(op.Status.Phase).NotTo(Equal(nominatimv1alpha1.NominatimOperationPhaseFailed))
+	})
+
+	It("creates a Job for Update falling back to parent.spec.regions (T8)", func() {
+		parent := &nominatimv1alpha1.Nominatim{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: parentName, Namespace: "default"}, parent)).To(Succeed())
+		parent.Spec.Regions = []string{"europe/monaco"}
+		Expect(k8sClient.Update(ctx, parent)).To(Succeed())
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: parentName, Namespace: "default"}, parent)).To(Succeed())
+		parent.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: "pg-secret"}
+		parent.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}}
+		Expect(k8sClient.Status().Update(ctx, parent)).To(Succeed())
+
+		op := &nominatimv1alpha1.NominatimOperation{
+			ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: "default"},
+			Spec: nominatimv1alpha1.NominatimOperationSpec{
+				Type:         nominatimv1alpha1.NominatimOperationUpdate,
+				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+			},
+		}
+		Expect(k8sClient.Create(ctx, op)).To(Succeed())
+
+		_, err := reconciler.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: opName, Namespace: "default"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		job := &batchv1.Job{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, job)).To(Succeed())
+		Expect(envValue(job.Spec.Template.Spec.Containers[0].Env, "NOMINATIM_REGIONS")).To(Equal("europe/monaco"))
+	})
+
+	It("does not require Bootstrap history for AddRegions on a PBF-only parent (T9)", func() {
+		op := &nominatimv1alpha1.NominatimOperation{
+			ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: "default"},
+			Spec: nominatimv1alpha1.NominatimOperationSpec{
+				Type:         nominatimv1alpha1.NominatimOperationAddRegions,
+				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+				Regions:      []string{"europe/monaco"},
+			},
+		}
+		Expect(k8sClient.Create(ctx, op)).To(Succeed())
+
+		_, err := reconciler.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: opName, Namespace: "default"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, op)).To(Succeed())
+		Expect(op.Status.Message).NotTo(ContainSubstring("BootstrapIncomplete"))
+
+		job := &batchv1.Job{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, job)).To(Succeed())
+	})
+
+	It("passes the Bootstrap-done gate via a Succeeded Bootstrap peer (T9b)", func() {
+		parent := &nominatimv1alpha1.Nominatim{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: parentName, Namespace: "default"}, parent)).To(Succeed())
+		parent.Spec.Regions = []string{"europe/monaco"}
+		Expect(k8sClient.Update(ctx, parent)).To(Succeed())
+
+		bootstrapName := opName + "-bootstrap"
+		bootstrap := &nominatimv1alpha1.NominatimOperation{
+			ObjectMeta: metav1.ObjectMeta{Name: bootstrapName, Namespace: "default"},
+			Spec: nominatimv1alpha1.NominatimOperationSpec{
+				Type:         nominatimv1alpha1.NominatimOperationBootstrap,
+				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+			},
+		}
+		Expect(k8sClient.Create(ctx, bootstrap)).To(Succeed())
+		bootstrap.Status.Phase = nominatimv1alpha1.NominatimOperationPhaseSucceeded
+		Expect(k8sClient.Status().Update(ctx, bootstrap)).To(Succeed())
+		DeferCleanup(func() { cleanupOperation(ctx, bootstrapName) })
+
+		op := &nominatimv1alpha1.NominatimOperation{
+			ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: "default"},
+			Spec: nominatimv1alpha1.NominatimOperationSpec{
+				Type:         nominatimv1alpha1.NominatimOperationUpdate,
+				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+			},
+		}
+		Expect(k8sClient.Create(ctx, op)).To(Succeed())
+
+		_, err := reconciler.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: opName, Namespace: "default"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, op)).To(Succeed())
+		Expect(op.Status.Message).NotTo(ContainSubstring("BootstrapIncomplete"))
+
+		job := &batchv1.Job{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, job)).To(Succeed())
 	})
 
 	It("is a no-op when the Operation is already deleted", func() {

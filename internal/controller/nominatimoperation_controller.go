@@ -78,18 +78,7 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	if isTerminalOperationPhase(op.Status.Phase) {
-		// Keep Job-derived status fresh for Succeeded/Failed Jobs; Conflict failures have no Job.
-		if op.Status.JobRef != nil {
-			if err := r.syncStatusFromJob(ctx, op); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-		// Idempotent: clears any lingering parent activeOperationRefs entry and re-applies
-		// resume/runtime CNPG effects (e.g. after an operator restart mid-cleanup).
-		if err := r.syncParentSideEffects(ctx, op); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{}, nil
+		return r.reconcileTerminalOperation(ctx, op)
 	}
 
 	if !isOperationTypeImplemented(op.Spec.Type) {
@@ -120,6 +109,10 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return ctrl.Result{}, r.failOperation(ctx, op, reasonConflict, conflictMessage(conflict))
 	}
 
+	if stop, err := r.enforceRegionGates(ctx, op, parent, peers.Items); stop || err != nil {
+		return ctrl.Result{}, err
+	}
+
 	staging := resolveStagingSpec(op, parent)
 	if err := r.ensureStagingPVC(ctx, op, staging); err != nil {
 		return ctrl.Result{}, err
@@ -135,43 +128,8 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return ctrl.Result{}, err
 	}
 
-	if parent.Status.Database.ConnectionSecretName == "" {
-		log.Info("waiting for parent status.database.connectionSecretName before creating Job",
-			"nominatim", parent.Name)
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-	}
-
-	secret := &corev1.Secret{}
-	secretKey := types.NamespacedName{
-		Name:      parent.Status.Database.ConnectionSecretName,
-		Namespace: parent.Namespace,
-	}
-	if err := r.Get(ctx, secretKey, secret); err != nil {
-		if apierrors.IsNotFound(err) {
-			log.Info("waiting for database connection Secret before creating Job",
-				"secret", secretKey.Name, "nominatim", parent.Name)
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-		}
-		return ctrl.Result{}, err
-	}
-
-	// Reimport reset must run before cnpgClusterReadyForJobs: after the drop the owned
-	// Database is absent / not-applied, and the Operation (not readiness gating) recreates it.
-	if ready, err := r.ensureReimportDatabaseReset(ctx, op, parent); err != nil {
-		return ctrl.Result{}, err
-	} else if !ready {
-		log.Info("waiting for owned CNPG Database drop/recreate before Reimport Job",
-			"nominatim", parent.Name, "database", OwnedCNPGDatabaseName(parent))
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-	}
-
-	if ready, err := r.cnpgClusterReadyForJobs(ctx, parent); err != nil {
-		return ctrl.Result{}, err
-	} else if !ready {
-		log.Info("waiting for CNPG Cluster/Database readiness before creating Job",
-			"nominatim", parent.Name, "cluster", parent.Status.Database.ClusterName,
-			"mode", parent.Status.Database.Mode)
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	if result, wait, err := r.waitForJobPrerequisites(ctx, op, parent); wait || err != nil {
+		return result, err
 	}
 
 	if err := r.ensureJob(ctx, op, parent); err != nil {
@@ -187,6 +145,96 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *NominatimOperationReconciler) reconcileTerminalOperation(ctx context.Context, op *nominatimv1alpha1.NominatimOperation) (ctrl.Result, error) {
+	// Keep Job-derived status fresh for Succeeded/Failed Jobs; Conflict failures have no Job.
+	if op.Status.JobRef != nil {
+		if err := r.syncStatusFromJob(ctx, op); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	// Idempotent: clears any lingering parent activeOperationRefs entry and re-applies
+	// resume/runtime CNPG effects (e.g. after an operator restart mid-cleanup).
+	if err := r.syncParentSideEffects(ctx, op); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+// enforceRegionGates fails AddRegions/Update/CatchUp when no regions are configured or
+// when regions-mode Bootstrap has not completed yet. stop=true means Reconcile must return
+// immediately (the Operation was failed); failOperation often returns a nil error.
+func (r *NominatimOperationReconciler) enforceRegionGates(
+	ctx context.Context,
+	op *nominatimv1alpha1.NominatimOperation,
+	parent *nominatimv1alpha1.Nominatim,
+	peers []nominatimv1alpha1.NominatimOperation,
+) (stop bool, err error) {
+	if !requiresRegionGate(op.Spec.Type) {
+		return false, nil
+	}
+	if len(effectiveRegions(op, parent)) == 0 {
+		return true, r.failOperation(ctx, op, reasonRegionsRequired,
+			fmt.Sprintf("no regions configured on Operation %q or Nominatim %q", op.Name, parent.Name))
+	}
+	if len(parent.Spec.Regions) > 0 && !bootstrapComplete(parent, peers) {
+		return true, r.failOperation(ctx, op, reasonBootstrapIncomplete,
+			fmt.Sprintf("Nominatim %q has not completed a Bootstrap Operation", parent.Name))
+	}
+	return false, nil
+}
+
+// waitForJobPrerequisites blocks Job creation until the connection Secret exists, the CNPG
+// Cluster/Database is ready, and (for Reimport) the owned Database has been drop/recreated.
+// wait=true means the caller should return result without creating the Job.
+func (r *NominatimOperationReconciler) waitForJobPrerequisites(
+	ctx context.Context,
+	op *nominatimv1alpha1.NominatimOperation,
+	parent *nominatimv1alpha1.Nominatim,
+) (result ctrl.Result, wait bool, err error) {
+	log := logf.FromContext(ctx)
+
+	if parent.Status.Database.ConnectionSecretName == "" {
+		log.Info("waiting for parent status.database.connectionSecretName before creating Job",
+			"nominatim", parent.Name)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, true, nil
+	}
+
+	secret := &corev1.Secret{}
+	secretKey := types.NamespacedName{
+		Name:      parent.Status.Database.ConnectionSecretName,
+		Namespace: parent.Namespace,
+	}
+	if err := r.Get(ctx, secretKey, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("waiting for database connection Secret before creating Job",
+				"secret", secretKey.Name, "nominatim", parent.Name)
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, true, nil
+		}
+		return ctrl.Result{}, false, err
+	}
+
+	// Reimport reset must run before cnpgClusterReadyForJobs: after the drop the owned
+	// Database is absent / not-applied, and the Operation (not readiness gating) recreates it.
+	if ready, err := r.ensureReimportDatabaseReset(ctx, op, parent); err != nil {
+		return ctrl.Result{}, false, err
+	} else if !ready {
+		log.Info("waiting for owned CNPG Database drop/recreate before Reimport Job",
+			"nominatim", parent.Name, "database", OwnedCNPGDatabaseName(parent))
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, true, nil
+	}
+
+	if ready, err := r.cnpgClusterReadyForJobs(ctx, parent); err != nil {
+		return ctrl.Result{}, false, err
+	} else if !ready {
+		log.Info("waiting for CNPG Cluster/Database readiness before creating Job",
+			"nominatim", parent.Name, "cluster", parent.Status.Database.ClusterName,
+			"mode", parent.Status.Database.Mode)
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, true, nil
+	}
+
+	return ctrl.Result{}, false, nil
 }
 
 // reconcileOperationDelete clears parent ActiveOperationRefs and resumes CNPG side-effects
