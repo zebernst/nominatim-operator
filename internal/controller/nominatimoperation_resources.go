@@ -42,16 +42,11 @@ const (
 	flatnodeMountPath = "/flatnode"
 	flatnodeFilePath  = "/flatnode/flatnode.file"
 
-<<<<<<< HEAD
 	reasonConflict            = "Conflict"
 	reasonParentNotFound      = "ParentNotFound"
+	reasonNotImplemented      = "NotImplemented"
 	reasonRegionsRequired     = "RegionsRequired"
 	reasonBootstrapIncomplete = "BootstrapIncomplete"
-=======
-	reasonConflict       = "Conflict"
-	reasonParentNotFound = "ParentNotFound"
-	reasonNotImplemented = "NotImplemented"
->>>>>>> origin/main
 )
 
 // isOperationTypeImplemented reports whether the worker entrypoint can run this type.
