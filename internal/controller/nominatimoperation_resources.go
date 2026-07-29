@@ -42,8 +42,10 @@ const (
 	flatnodeMountPath = "/flatnode"
 	flatnodeFilePath  = "/flatnode/flatnode.file"
 
-	reasonConflict       = "Conflict"
-	reasonParentNotFound = "ParentNotFound"
+	reasonConflict            = "Conflict"
+	reasonParentNotFound      = "ParentNotFound"
+	reasonRegionsRequired     = "RegionsRequired"
+	reasonBootstrapIncomplete = "BootstrapIncomplete"
 )
 
 // Mutex policy for NominatimOperations targeting the same Nominatim:
@@ -99,6 +101,51 @@ func findConflictingOperation(op *nominatimv1alpha1.NominatimOperation, peers []
 		}
 	}
 	return nil
+}
+
+// effectiveRegions returns the region set an Operation acts on: Operation.spec.regions
+// when set, else falling back to the parent Nominatim's spec.regions. Shared by the
+// pre-Job region gate (see requiresRegionGate) and buildOperationJob so both agree on
+// what "no regions configured" means.
+func effectiveRegions(op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim) []string {
+	if len(op.Spec.Regions) > 0 {
+		return op.Spec.Regions
+	}
+	return parent.Spec.Regions
+}
+
+// requiresRegionGate reports whether an Operation type is subject to the pre-Job
+// region gate (R1: regions required, R2: Bootstrap-done for regions-mode parents).
+// Bootstrap and Reimport intentionally opt out: Bootstrap is how a regions-mode
+// parent first gets imported, and Reimport rebuilds from a caller-supplied region set.
+func requiresRegionGate(t nominatimv1alpha1.NominatimOperationType) bool {
+	switch t {
+	case nominatimv1alpha1.NominatimOperationAddRegions,
+		nominatimv1alpha1.NominatimOperationUpdate,
+		nominatimv1alpha1.NominatimOperationCatchUp:
+		return true
+	default:
+		return false
+	}
+}
+
+// bootstrapComplete reports whether a regions-mode Nominatim (parent.Spec.Regions
+// non-empty) has finished its initial Bootstrap: either status.regions already has
+// entries, or a peer Bootstrap Operation targeting this Nominatim has Succeeded.
+// PBF-only parents never need this gate — callers check parent.Spec.Regions first.
+func bootstrapComplete(parent *nominatimv1alpha1.Nominatim, peers []nominatimv1alpha1.NominatimOperation) bool {
+	if len(parent.Status.Regions) > 0 {
+		return true
+	}
+	for i := range peers {
+		peer := &peers[i]
+		if peer.Spec.Type == nominatimv1alpha1.NominatimOperationBootstrap &&
+			peer.Status.Phase == nominatimv1alpha1.NominatimOperationPhaseSucceeded &&
+			peer.Spec.NominatimRef.Name == parent.Name {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveStagingSpec(op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim) nominatimv1alpha1.StagingSpec {
@@ -235,10 +282,7 @@ func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominat
 		env = append(env, corev1.EnvVar{Name: "NOMINATIM_REIMPORT_CONFIRM", Value: "1"})
 	}
 
-	regions := op.Spec.Regions
-	if len(regions) == 0 {
-		regions = parent.Spec.Regions
-	}
+	regions := effectiveRegions(op, parent)
 	if len(regions) > 0 {
 		env = append(env, corev1.EnvVar{Name: "NOMINATIM_REGIONS", Value: strings.Join(regions, ",")})
 		if isWriteHeavyOperation(op.Spec.Type) {

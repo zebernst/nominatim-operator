@@ -114,6 +114,17 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return ctrl.Result{}, r.failOperation(ctx, op, reasonConflict, conflictMessage(conflict))
 	}
 
+	if requiresRegionGate(op.Spec.Type) {
+		if len(effectiveRegions(op, parent)) == 0 {
+			return ctrl.Result{}, r.failOperation(ctx, op, reasonRegionsRequired,
+				fmt.Sprintf("no regions configured on Operation %q or Nominatim %q", op.Name, parent.Name))
+		}
+		if len(parent.Spec.Regions) > 0 && !bootstrapComplete(parent, peers.Items) {
+			return ctrl.Result{}, r.failOperation(ctx, op, reasonBootstrapIncomplete,
+				fmt.Sprintf("Nominatim %q has not completed a Bootstrap Operation", parent.Name))
+		}
+	}
+
 	staging := resolveStagingSpec(op, parent)
 	if err := r.ensureStagingPVC(ctx, op, staging); err != nil {
 		return ctrl.Result{}, err

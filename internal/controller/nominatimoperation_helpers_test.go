@@ -378,6 +378,77 @@ func TestIsTerminalOperationPhase(t *testing.T) {
 	g.Expect(isTerminalOperationPhase(nominatimv1alpha1.NominatimOperationPhaseRunning)).To(BeFalse())
 }
 
+func TestEffectiveRegions(t *testing.T) {
+	g := NewWithT(t)
+
+	// Operation.spec.regions wins when set.
+	op := &nominatimv1alpha1.NominatimOperation{
+		Spec: nominatimv1alpha1.NominatimOperationSpec{Regions: []string{"europe/monaco"}},
+	}
+	parent := &nominatimv1alpha1.Nominatim{
+		Spec: nominatimv1alpha1.NominatimSpec{Regions: []string{"africa/morocco"}},
+	}
+	g.Expect(effectiveRegions(op, parent)).To(Equal([]string{"europe/monaco"}))
+
+	// Falls back to parent.spec.regions when Operation.spec.regions is empty.
+	g.Expect(effectiveRegions(&nominatimv1alpha1.NominatimOperation{}, parent)).To(Equal([]string{"africa/morocco"}))
+
+	// Empty on both sides.
+	g.Expect(effectiveRegions(&nominatimv1alpha1.NominatimOperation{}, &nominatimv1alpha1.Nominatim{})).To(BeEmpty())
+}
+
+func TestBootstrapComplete(t *testing.T) {
+	g := NewWithT(t)
+
+	// status.regions already populated → complete regardless of peers.
+	parentWithStatus := &nominatimv1alpha1.Nominatim{
+		ObjectMeta: metav1.ObjectMeta{Name: "nom"},
+		Status: nominatimv1alpha1.NominatimStatus{
+			Regions: []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}},
+		},
+	}
+	g.Expect(bootstrapComplete(parentWithStatus, nil)).To(BeTrue())
+
+	// Empty status, no peers → incomplete.
+	parentEmpty := &nominatimv1alpha1.Nominatim{ObjectMeta: metav1.ObjectMeta{Name: "nom"}}
+	g.Expect(bootstrapComplete(parentEmpty, nil)).To(BeFalse())
+
+	// Empty status, Succeeded Bootstrap peer targeting this Nominatim → complete.
+	succeededBootstrap := nominatimv1alpha1.NominatimOperation{
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
+		},
+		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
+	}
+	g.Expect(bootstrapComplete(parentEmpty, []nominatimv1alpha1.NominatimOperation{succeededBootstrap})).To(BeTrue())
+
+	// Running (not Succeeded) Bootstrap peer → still incomplete.
+	runningBootstrap := succeededBootstrap
+	runningBootstrap.Status.Phase = nominatimv1alpha1.NominatimOperationPhaseRunning
+	g.Expect(bootstrapComplete(parentEmpty, []nominatimv1alpha1.NominatimOperation{runningBootstrap})).To(BeFalse())
+
+	// Succeeded Bootstrap peer targeting a different Nominatim → still incomplete.
+	otherBootstrap := succeededBootstrap
+	otherBootstrap.Spec.NominatimRef.Name = "other-nom"
+	g.Expect(bootstrapComplete(parentEmpty, []nominatimv1alpha1.NominatimOperation{otherBootstrap})).To(BeFalse())
+
+	// Succeeded non-Bootstrap peer → still incomplete.
+	succeededUpdate := succeededBootstrap
+	succeededUpdate.Spec.Type = nominatimv1alpha1.NominatimOperationUpdate
+	g.Expect(bootstrapComplete(parentEmpty, []nominatimv1alpha1.NominatimOperation{succeededUpdate})).To(BeFalse())
+}
+
+func TestRequiresRegionGate(t *testing.T) {
+	g := NewWithT(t)
+	g.Expect(requiresRegionGate(nominatimv1alpha1.NominatimOperationAddRegions)).To(BeTrue())
+	g.Expect(requiresRegionGate(nominatimv1alpha1.NominatimOperationUpdate)).To(BeTrue())
+	g.Expect(requiresRegionGate(nominatimv1alpha1.NominatimOperationCatchUp)).To(BeTrue())
+	g.Expect(requiresRegionGate(nominatimv1alpha1.NominatimOperationBootstrap)).To(BeFalse())
+	g.Expect(requiresRegionGate(nominatimv1alpha1.NominatimOperationReimport)).To(BeFalse())
+	g.Expect(requiresRegionGate(nominatimv1alpha1.NominatimOperationRefresh)).To(BeFalse())
+}
+
 func TestConflictMessage(t *testing.T) {
 	g := NewWithT(t)
 	peer := &nominatimv1alpha1.NominatimOperation{
