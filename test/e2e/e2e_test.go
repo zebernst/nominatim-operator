@@ -597,11 +597,10 @@ func waitForAPIServing(ns, name string) {
 // countrycodes= filters are preferred for multi-region Bootstrap: a bare free-text probe can
 // pass when only one of several Spec regions actually landed in the database.
 //
-// The Service is always in the Monaco validation namespace (same fixture as the import e2e).
+// The import e2e Context always uses the nominatim-validation namespace.
 func assertNonEmptySearchQuery(svc, query string) {
-	const ns = "nominatim-validation"
 	By("probing /search?q=" + query + " until non-empty JSON")
-	pf := &portForward{ns: ns, svc: svc, local: apiLocalPort}
+	pf := &portForward{ns: "nominatim-validation", svc: svc, local: apiLocalPort}
 	defer pf.stop()
 
 	Eventually(func(g Gomega) {
