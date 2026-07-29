@@ -42,6 +42,12 @@ import (
 // RetryOnConflict wrappers surface it instead of retrying.
 var errInjected = errors.New("injected failure")
 
+const (
+	reimportTestUIDOld   = "uid-old"
+	reimportTestUIDNew   = "uid-new"
+	reimportTestUIDFresh = "uid-fresh"
+)
+
 func newOwnedCNPGDatabase(nom *nominatimv1alpha1.Nominatim, uid string, applied bool) *unstructured.Unstructured {
 	db := &unstructured.Unstructured{}
 	db.SetGroupVersionKind(CNPGDatabaseGVK)
@@ -220,7 +226,7 @@ func TestEnsureReimportDatabaseReset_SkipsNonOwnedCluster(t *testing.T) {
 func TestEnsureReimportDatabaseReset_DeletesThenRecreates(t *testing.T) {
 	scheme := testScheme(t)
 	parent := reimportParent("ri-reset")
-	oldDB := newOwnedCNPGDatabase(parent, "uid-old", true)
+	oldDB := newOwnedCNPGDatabase(parent, reimportTestUIDOld, true)
 	op := reimportOp("ri-op", parent, nil)
 
 	c := fake.NewClientBuilder().WithScheme(scheme).
@@ -236,7 +242,7 @@ func TestEnsureReimportDatabaseReset_DeletesThenRecreates(t *testing.T) {
 		t.Fatal("pass1: expected ready=false after requesting delete")
 	}
 	gotOp := getOperation(t, c, op)
-	if gotOp.Annotations[annotationReimportDBPrevUID] != "uid-old" {
+	if gotOp.Annotations[annotationReimportDBPrevUID] != reimportTestUIDOld {
 		t.Fatalf("prev uid annotation=%q", gotOp.Annotations[annotationReimportDBPrevUID])
 	}
 	db := &unstructured.Unstructured{}
@@ -267,7 +273,7 @@ func TestEnsureReimportDatabaseReset_DeletesThenRecreates(t *testing.T) {
 
 	// Simulate CNPG applying extensions on the new Database.
 	_ = unstructured.SetNestedField(db.Object, true, "status", "applied")
-	db.SetUID("uid-new")
+	db.SetUID(reimportTestUIDNew)
 	if err := c.Update(context.Background(), db); err != nil {
 		t.Fatalf("mark applied: %v", err)
 	}
@@ -323,7 +329,7 @@ func TestEnsureReimportDatabaseReset_ReadyWhenPrevUIDNoneAndApplied(t *testing.T
 	parent := reimportParent("ri-none-applied")
 	op := reimportOp("ri-none-applied-op", parent, pendingResetAnnotations(reimportDBPrevUIDNone))
 	c := fake.NewClientBuilder().WithScheme(scheme).
-		WithObjects(parent, op, newOwnedCNPGDatabase(parent, "uid-fresh", true)).Build()
+		WithObjects(parent, op, newOwnedCNPGDatabase(parent, reimportTestUIDFresh, true)).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 
 	ready, err := r.ensureReimportDatabaseReset(context.Background(), op, parent)
@@ -340,9 +346,9 @@ func TestEnsureReimportDatabaseReset_ReadyWhenPrevUIDNoneAndApplied(t *testing.T
 func TestEnsureReimportDatabaseReset_WaitsWhileUIDUnchanged(t *testing.T) {
 	scheme := testScheme(t)
 	parent := reimportParent("ri-same-uid")
-	op := reimportOp("ri-same-uid-op", parent, pendingResetAnnotations("uid-old"))
+	op := reimportOp("ri-same-uid-op", parent, pendingResetAnnotations(reimportTestUIDOld))
 	c := fake.NewClientBuilder().WithScheme(scheme).
-		WithObjects(parent, op, newOwnedCNPGDatabase(parent, "uid-old", true)).Build()
+		WithObjects(parent, op, newOwnedCNPGDatabase(parent, reimportTestUIDOld, true)).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 
 	ready, err := r.ensureReimportDatabaseReset(context.Background(), op, parent)
@@ -386,8 +392,8 @@ func TestEnsureReimportDatabaseReset_WaitsUntilReplacementApplied(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			scheme := testScheme(t)
 			parent := reimportParent("ri-pending")
-			op := reimportOp("ri-pending-op", parent, pendingResetAnnotations("uid-old"))
-			db := newOwnedCNPGDatabase(parent, "uid-new", false)
+			op := reimportOp("ri-pending-op", parent, pendingResetAnnotations(reimportTestUIDOld))
+			db := newOwnedCNPGDatabase(parent, reimportTestUIDNew, false)
 			tc.mutate(db)
 			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(parent, op, db).Build()
 			r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
@@ -437,7 +443,7 @@ func TestEnsureReimportDatabaseReset_FirstPassDatabaseVanishesAfterReclaim(t *te
 	parent := reimportParent("ri-vanish")
 	op := reimportOp("ri-vanish-op", parent, nil)
 	c := fake.NewClientBuilder().WithScheme(scheme).
-		WithObjects(parent, op, newOwnedCNPGDatabase(parent, "uid-old", true)).
+		WithObjects(parent, op, newOwnedCNPGDatabase(parent, reimportTestUIDOld, true)).
 		WithInterceptorFuncs(failDatabaseGetAfter(1, cnpgDatabaseNotFound(OwnedCNPGDatabaseName(parent)))).
 		Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
@@ -449,8 +455,8 @@ func TestEnsureReimportDatabaseReset_FirstPassDatabaseVanishesAfterReclaim(t *te
 	if ready {
 		t.Fatal("expected ready=false after the Database vanished")
 	}
-	if got := getOperation(t, c, op); got.Annotations[annotationReimportDBPrevUID] != "uid-old" {
-		t.Fatalf("prev uid annotation=%q want uid-old", got.Annotations[annotationReimportDBPrevUID])
+	if got := getOperation(t, c, op); got.Annotations[annotationReimportDBPrevUID] != reimportTestUIDOld {
+		t.Fatalf("prev uid annotation=%q want %q", got.Annotations[annotationReimportDBPrevUID], reimportTestUIDOld)
 	}
 }
 
@@ -534,14 +540,14 @@ func TestEnsureReimportDatabaseReset_SurfacesAPIErrors(t *testing.T) {
 		},
 		{
 			name:        "pending pass get",
-			annotations: pendingResetAnnotations("uid-old"),
+			annotations: pendingResetAnnotations(reimportTestUIDOld),
 			withDB:      true,
 			funcs:       failDatabaseGetAfter(0, errInjected),
 			wantMessage: errInjected.Error(),
 		},
 		{
 			name:        "recreate",
-			annotations: pendingResetAnnotations("uid-old"),
+			annotations: pendingResetAnnotations(reimportTestUIDOld),
 			funcs: interceptor.Funcs{
 				Create: func(
 					ctx context.Context,
@@ -556,7 +562,7 @@ func TestEnsureReimportDatabaseReset_SurfacesAPIErrors(t *testing.T) {
 		},
 		{
 			name:        "done annotation patch",
-			annotations: pendingResetAnnotations("uid-old"),
+			annotations: pendingResetAnnotations(reimportTestUIDOld),
 			withDB:      true,
 			funcs:       failOperationUpdate(errInjected),
 			wantMessage: errInjected.Error(),
@@ -570,7 +576,7 @@ func TestEnsureReimportDatabaseReset_SurfacesAPIErrors(t *testing.T) {
 			objs := []client.Object{parent, op}
 			if tc.withDB {
 				// A new UID means the "done annotation patch" case reaches the final patch.
-				db := newOwnedCNPGDatabase(parent, "uid-new", true)
+				db := newOwnedCNPGDatabase(parent, reimportTestUIDNew, true)
 				if tc.retainDB {
 					_ = unstructured.SetNestedField(db.Object, "retain", "spec", "databaseReclaimPolicy")
 				}
@@ -690,7 +696,7 @@ func TestPatchReimportResetAnnotations_SurfacesGetError(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(parent).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 
-	err := r.patchReimportResetAnnotations(context.Background(), op, reimportDBResetPending, "uid-old")
+	err := r.patchReimportResetAnnotations(context.Background(), op, reimportDBResetPending, reimportTestUIDOld)
 	if !apierrors.IsNotFound(err) {
 		t.Fatalf("err=%v want NotFound for an Operation that no longer exists", err)
 	}
@@ -908,7 +914,7 @@ func TestCNPGClusterReadyForJobs_SurfacesClusterGetError(t *testing.T) {
 func TestReconcileReimport_WaitsForDatabaseResetBeforeJob(t *testing.T) {
 	scheme := testScheme(t)
 	parent := reimportParent("ri-job")
-	oldDB := newOwnedCNPGDatabase(parent, "uid-old", true)
+	oldDB := newOwnedCNPGDatabase(parent, reimportTestUIDOld, true)
 	op := reimportOp("ri-job-op", parent, nil)
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(parent, &nominatimv1alpha1.NominatimOperation{}).
@@ -939,7 +945,7 @@ func TestReconcileReimport_RegistersActiveRefBeforeJob(t *testing.T) {
 	op := reimportOp("ri-ref-op", parent, nil)
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(parent, &nominatimv1alpha1.NominatimOperation{}).
-		WithObjects(parent, op, newOwnedCNPGDatabase(parent, "uid-old", true),
+		WithObjects(parent, op, newOwnedCNPGDatabase(parent, reimportTestUIDOld, true),
 			cnpgAppSecret(parent), readyOwnedCNPGCluster(parent)).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 
@@ -971,7 +977,7 @@ func TestEnsureReimportDatabaseReset_WaitsForAPIQuiesced(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(&nominatimv1alpha1.NominatimOperation{}).
-		WithObjects(parent, op, api, newOwnedCNPGDatabase(parent, "uid-old", true)).Build()
+		WithObjects(parent, op, api, newOwnedCNPGDatabase(parent, reimportTestUIDOld, true)).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 
 	ready, err := r.ensureReimportDatabaseReset(context.Background(), op, parent)
@@ -995,8 +1001,8 @@ func TestEnsureReimportDatabaseReset_WaitsForAPIQuiesced(t *testing.T) {
 	}, db); err != nil {
 		t.Fatalf("Database should still exist until the API is quiesced: %v", err)
 	}
-	if string(db.GetUID()) != "uid-old" {
-		t.Fatalf("uid=%q want uid-old (delete must wait for API drain)", db.GetUID())
+	if string(db.GetUID()) != reimportTestUIDOld {
+		t.Fatalf("uid=%q want %q (delete must wait for API drain)", db.GetUID(), reimportTestUIDOld)
 	}
 }
 
@@ -1005,7 +1011,7 @@ func TestEnsureReimportDatabaseReset_WaitsForAPIQuiesced(t *testing.T) {
 func TestReconcileOwnedCNPGDatabase_SkipsWhileReimportResetPending(t *testing.T) {
 	scheme := testScheme(t)
 	parent := reimportParent("ri-skip")
-	op := reimportOp("ri-skip-op", parent, pendingResetAnnotations("uid-old"))
+	op := reimportOp("ri-skip-op", parent, pendingResetAnnotations(reimportTestUIDOld))
 	op.Status.Phase = nominatimv1alpha1.NominatimOperationPhasePending
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(parent, op).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
@@ -1028,10 +1034,10 @@ func TestReconcileOwnedCNPGDatabase_SkipsWhileReimportResetPending(t *testing.T)
 func TestReconcileReimport_CreatesJobAfterDatabaseResetCompletes(t *testing.T) {
 	scheme := testScheme(t)
 	parent := reimportParent("ri-armed")
-	op := reimportOp("ri-armed-op", parent, pendingResetAnnotations("uid-old"))
+	op := reimportOp("ri-armed-op", parent, pendingResetAnnotations(reimportTestUIDOld))
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(parent, op).
-		WithObjects(parent, op, newOwnedCNPGDatabase(parent, "uid-new", true),
+		WithObjects(parent, op, newOwnedCNPGDatabase(parent, reimportTestUIDNew, true),
 			cnpgAppSecret(parent), readyOwnedCNPGCluster(parent)).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 
