@@ -147,6 +147,7 @@ func syncRegionsFromBootstrap(nom *nominatimv1alpha1.Nominatim, peers []nominati
 			})
 		}
 		nom.Status.Regions = statuses
+		sealObservedNominatimConfig(nom)
 		return
 	}
 }

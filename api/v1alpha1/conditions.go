@@ -22,6 +22,9 @@ const (
 	ConditionProgressing              = "Progressing"
 	ConditionRegionsDrift             = "RegionsDrift"
 	ConditionRegionRemovalUnsupported = "RegionRemovalUnsupported"
+	// ConditionImportConfigDrift is True when import-time Nominatim settings in spec
+	// differ from those sealed at Bootstrap (requires Reimport to apply).
+	ConditionImportConfigDrift = "ImportConfigDrift"
 )
 
 // NominatimFinalizer is added while the operator manages the instance.

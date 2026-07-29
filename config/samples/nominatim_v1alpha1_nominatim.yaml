@@ -12,6 +12,14 @@ spec:
   regions:
     - north-america/us
   regionChangePolicy: AddData
+  # Typed Nominatim settings (preferred over NOMINATIM_* in podSpec).
+  # ImportStyle/Tokenizer seal after Bootstrap; change requires Reimport.
+  # nominatim:
+  #   importStyle: extratags
+  #   tokenizer: icu
+  #   languages: ["en"]
+  #   replication:
+  #     updateIntervalSeconds: 86400
   database:
     clusterRef:
       name: nominatim-pg

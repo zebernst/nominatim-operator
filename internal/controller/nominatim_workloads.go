@@ -254,6 +254,8 @@ func apiVolumes(nom *nominatimv1alpha1.Nominatim, projectClaim, flatnodeClaim st
 		env = append(env, corev1.EnvVar{Name: flatnodeFileEnv, Value: flatnodeFilePath})
 	}
 
+	env = append(env, effectiveNominatimConfigEnv(nom)...)
+
 	return volumes, mounts, env
 }
 

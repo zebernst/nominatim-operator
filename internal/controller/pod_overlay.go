@@ -19,15 +19,16 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 )
 
-// operatorReservedEnvNames are env keys the operator always reseals after a podSpec overlay.
-// Includes exact names plus any NOMINATIM_* / PG* the operator writes (matched by prefix).
+// operatorReservedEnvExact are env keys the operator always reseals after a podSpec overlay.
+// Only operator-owned wiring is listed — do NOT blanket-reserve NOMINATIM_* (user/typed
+// Nominatim settings like IMPORT_STYLE / TOKENIZER must remain settable via spec.nominatim
+// or podSpec). Connection credentials stay exact-match only (not all PG*).
 var operatorReservedEnvExact = map[string]struct{}{
 	"OPERATION_TYPE":             {},
 	"PROJECT_DIR":                {},
@@ -45,13 +46,8 @@ var operatorReservedEnvExact = map[string]struct{}{
 }
 
 func isReservedEnvName(name string) bool {
-	if _, ok := operatorReservedEnvExact[name]; ok {
-		return true
-	}
-	if strings.HasPrefix(name, "NOMINATIM_") || strings.HasPrefix(name, "PG") {
-		return true
-	}
-	return false
+	_, ok := operatorReservedEnvExact[name]
+	return ok
 }
 
 // decodePodSpecOverlay decodes a RawExtension into a PodSpec. Nil/empty yields nil overlay.

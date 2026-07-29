@@ -231,4 +231,6 @@ func replaceRegionsStatus(nom *nominatimv1alpha1.Nominatim, regions []string) {
 		})
 	}
 	nom.Status.Regions = statuses
+	// Reimport rebuilds the DB — reseal import-time Nominatim settings from current spec.
+	sealObservedNominatimConfigForce(nom, true)
 }
