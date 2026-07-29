@@ -23,6 +23,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -33,6 +34,13 @@ import (
 
 	nominatimv1alpha1 "github.com/zebernst/nominatim-operator/api/v1alpha1"
 )
+
+func fakeConnectionSecret(name string) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Data:       map[string][]byte{"uri": []byte("postgresql://n:p@h/db")},
+	}
+}
 
 // Shared postgres profile values used across side-effects tests (goconst).
 const (
@@ -126,6 +134,10 @@ func newCNPGCluster(name string) *unstructured.Unstructured {
 	cluster.SetGroupVersionKind(CNPGClusterGVK)
 	cluster.SetName(name)
 	cluster.SetNamespace("default")
+	// Default Ready so Operation Jobs can proceed in unit tests unless a case overrides.
+	_ = unstructured.SetNestedSlice(cluster.Object, []interface{}{
+		map[string]interface{}{"type": "Ready", "status": "True"},
+	}, "status", "conditions")
 	return cluster
 }
 
@@ -318,7 +330,7 @@ func TestSetParentBackupPaused_Attached(t *testing.T) {
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
 	parent := baseNominatim("np-attached")
 	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{
-		Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg",
+		Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg", ConnectionSecretName: "pg-app",
 	}
 
 	if err := r.setParentBackupPaused(context.Background(), parent, true); err != nil {
@@ -350,7 +362,7 @@ func TestApplyParentPostgresProfile_Attached(t *testing.T) {
 	parent := baseNominatim("app-attached")
 	parent.Spec.Database.PostgresProfiles = &nominatimv1alpha1.PostgresProfiles{Import: map[string]string{"work_mem": testImportWorkMem}}
 	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{
-		Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg",
+		Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg", ConnectionSecretName: "pg-app",
 	}
 
 	if err := r.applyParentPostgresProfile(context.Background(), parent, "import"); err != nil {
@@ -384,7 +396,7 @@ func TestApplyPreJobCNPGEffects_PausesAndAppliesImport(t *testing.T) {
 		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactWriteHeavy,
 		PostgresProfiles:             &nominatimv1alpha1.PostgresProfiles{Import: map[string]string{"a": "b"}},
 	}
-	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg"}
+	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg", ConnectionSecretName: "pg-app"}
 	op := &nominatimv1alpha1.NominatimOperation{Spec: nominatimv1alpha1.NominatimOperationSpec{Type: nominatimv1alpha1.NominatimOperationBootstrap}}
 
 	if err := r.applyPreJobCNPGEffects(context.Background(), op, parent); err != nil {
@@ -417,7 +429,7 @@ func TestApplyPreJobCNPGEffects_ProfileErrorPropagates(t *testing.T) {
 		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactAll,
 		PostgresProfiles:             &nominatimv1alpha1.PostgresProfiles{Import: map[string]string{"a": "b"}},
 	}
-	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg"}
+	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg", ConnectionSecretName: "pg-app"}
 	op := &nominatimv1alpha1.NominatimOperation{Spec: nominatimv1alpha1.NominatimOperationSpec{Type: nominatimv1alpha1.NominatimOperationUpdate}}
 
 	if err := r.applyPreJobCNPGEffects(context.Background(), op, parent); err == nil {
@@ -449,7 +461,7 @@ func TestApplyTerminalCNPGEffects_ResumesAndAppliesRuntime(t *testing.T) {
 		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactAll,
 		PostgresProfiles:             &nominatimv1alpha1.PostgresProfiles{Runtime: map[string]string{"a": "b"}},
 	}
-	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg"}
+	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg", ConnectionSecretName: "pg-app"}
 	op := &nominatimv1alpha1.NominatimOperation{Spec: nominatimv1alpha1.NominatimOperationSpec{Type: nominatimv1alpha1.NominatimOperationUpdate}}
 
 	if err := r.applyTerminalCNPGEffects(context.Background(), op, parent); err != nil {
@@ -484,7 +496,7 @@ func TestApplyTerminalCNPGEffects_ProfileErrorPropagates(t *testing.T) {
 		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactAll,
 		PostgresProfiles:             &nominatimv1alpha1.PostgresProfiles{Runtime: map[string]string{"a": "b"}},
 	}
-	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg"}
+	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg", ConnectionSecretName: "pg-app"}
 	op := &nominatimv1alpha1.NominatimOperation{Spec: nominatimv1alpha1.NominatimOperationSpec{Type: nominatimv1alpha1.NominatimOperationUpdate}}
 
 	if err := r.applyTerminalCNPGEffects(context.Background(), op, parent); err == nil {
@@ -678,7 +690,7 @@ func TestOperationReconcile_WriteHeavyBootstrap_PauseImportThenTerminalResumeRun
 
 	parent := baseNominatim("vzw-write-heavy")
 	parent.Spec.Database = nominatimv1alpha1.DatabaseSpec{
-		ClusterRef:                   &nominatimv1alpha1.LocalObjectReference{Name: "pg"},
+		ClusterRef:                   &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
 		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactWriteHeavy,
 		PostgresProfiles: &nominatimv1alpha1.PostgresProfiles{
 			Import:  map[string]string{"shared_buffers": testImportSharedBuffers},
@@ -686,7 +698,7 @@ func TestOperationReconcile_WriteHeavyBootstrap_PauseImportThenTerminalResumeRun
 		},
 	}
 	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{
-		Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg",
+		Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg", ConnectionSecretName: "pg-app",
 	}
 
 	op := &nominatimv1alpha1.NominatimOperation{
@@ -698,7 +710,7 @@ func TestOperationReconcile_WriteHeavyBootstrap_PauseImportThenTerminalResumeRun
 	}
 
 	effects := &recordingCNPGEffects{}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent, op).WithObjects(parent, newCNPGCluster("pg"), op).Build()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent, op).WithObjects(parent, fakeConnectionSecret("pg-app"), newCNPGCluster("pg"), op).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
 
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: op.Name, Namespace: "default"}}
@@ -816,11 +828,11 @@ func TestOperationReconcile_NeverImpact_NoCNPGCallsButRefStillTracked(t *testing
 
 	parent := baseNominatim("vzw-never")
 	parent.Spec.Database = nominatimv1alpha1.DatabaseSpec{
-		ClusterRef:                   &nominatimv1alpha1.LocalObjectReference{Name: "pg"},
+		ClusterRef:                   &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
 		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactNever,
 	}
 	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{
-		Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg",
+		Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg", ConnectionSecretName: "pg-app",
 	}
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-never", Namespace: "default"},
@@ -830,7 +842,7 @@ func TestOperationReconcile_NeverImpact_NoCNPGCallsButRefStillTracked(t *testing
 		},
 	}
 	effects := &recordingCNPGEffects{}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent, op).WithObjects(parent, newCNPGCluster("pg"), op).Build()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent, op).WithObjects(parent, fakeConnectionSecret("pg-app"), newCNPGCluster("pg"), op).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
 
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: op.Name, Namespace: "default"}}
@@ -860,7 +872,7 @@ func TestOperationReconcile_DegradedParent_NoCNPGCalls(t *testing.T) {
 		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactWriteHeavy,
 	}
 	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{
-		Mode: nominatimv1alpha1.DatabaseModeConnectionSecret, Degraded: true,
+		Mode: nominatimv1alpha1.DatabaseModeConnectionSecret, Degraded: true, ConnectionSecretName: "ext-pg",
 	}
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-degraded", Namespace: "default"},
@@ -870,7 +882,7 @@ func TestOperationReconcile_DegradedParent_NoCNPGCalls(t *testing.T) {
 		},
 	}
 	effects := &recordingCNPGEffects{}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent, op).WithObjects(parent, op).Build()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent, op).WithObjects(parent, fakeConnectionSecret("ext-pg"), op).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
 
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: op.Name, Namespace: "default"}}
@@ -888,7 +900,7 @@ func TestOperationReconcile_ParentNotYetAttached_NoCNPGCallsNoError(t *testing.T
 
 	parent := baseNominatim("vzw-unattached")
 	parent.Spec.Database = nominatimv1alpha1.DatabaseSpec{
-		ClusterRef:                   &nominatimv1alpha1.LocalObjectReference{Name: "pg"},
+		ClusterRef:                   &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
 		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactWriteHeavy,
 	}
 	// parent.Status.Database left zero-value: the Nominatim controller hasn't reconciled yet.
@@ -904,8 +916,18 @@ func TestOperationReconcile_ParentNotYetAttached_NoCNPGCallsNoError(t *testing.T
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
 
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: op.Name, Namespace: "default"}}
-	if _, err := r.Reconcile(ctx, req); err != nil {
+	res, err := r.Reconcile(ctx, req)
+	if err != nil {
 		t.Fatalf("reconcile should not fail while parent database isn't attached yet: %v", err)
+	}
+	if res.RequeueAfter <= 0 {
+		t.Fatalf("expected requeue while waiting for parent connectionSecretName, got %#v", res)
+	}
+	job := &batchv1.Job{}
+	if err := c.Get(ctx, types.NamespacedName{Name: op.Name, Namespace: "default"}, job); err == nil {
+		t.Fatal("expected no Job before parent status.database.connectionSecretName is set")
+	} else if !apierrors.IsNotFound(err) {
+		t.Fatalf("get job: %v", err)
 	}
 	if effects.pauseCalls != 0 || effects.profileCalls != 0 {
 		t.Fatalf("expected no CNPG calls before parent attaches a database, got pause=%d profile=%d", effects.pauseCalls, effects.profileCalls)
@@ -974,7 +996,7 @@ func TestOperationReconcile_MainPathSyncParentSideEffectsErrorPropagates(t *test
 	ctx := context.Background()
 
 	parent := baseNominatim("vzw-main-parent-err")
-	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg"}
+	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg", ConnectionSecretName: "pg-app"}
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-main-parent-err", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
@@ -982,7 +1004,7 @@ func TestOperationReconcile_MainPathSyncParentSideEffectsErrorPropagates(t *test
 			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
 		},
 	}
-	base := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent, op).WithObjects(parent, newCNPGCluster("pg"), op).Build()
+	base := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent, op).WithObjects(parent, fakeConnectionSecret("pg-app"), newCNPGCluster("pg"), op).Build()
 	c := stubKindStatusClient{Client: base, failFor: &nominatimv1alpha1.Nominatim{}}
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme, CNPGEffects: &recordingCNPGEffects{}}
 
@@ -1017,7 +1039,7 @@ func TestOperationReconcile_ConflictFailure_SyncsParentSideEffectsWithoutError(t
 
 	parent := baseNominatim("vzw-conflict")
 	parent.Spec.Database = nominatimv1alpha1.DatabaseSpec{
-		ClusterRef:                   &nominatimv1alpha1.LocalObjectReference{Name: "pg"},
+		ClusterRef:                   &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
 		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactWriteHeavy,
 		PostgresProfiles: &nominatimv1alpha1.PostgresProfiles{
 			Import:  map[string]string{"shared_buffers": testImportSharedBuffers, "work_mem": testImportWorkMem},
@@ -1025,7 +1047,7 @@ func TestOperationReconcile_ConflictFailure_SyncsParentSideEffectsWithoutError(t
 		},
 	}
 	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{
-		Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg",
+		Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg", ConnectionSecretName: "pg-app",
 	}
 	running := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "op-running", Namespace: "default"},
@@ -1036,7 +1058,7 @@ func TestOperationReconcile_ConflictFailure_SyncsParentSideEffectsWithoutError(t
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseRunning},
 	}
 	effects := &recordingCNPGEffects{}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent, running).WithObjects(parent, newCNPGCluster("pg")).Build()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent, running).WithObjects(parent, fakeConnectionSecret("pg-app"), newCNPGCluster("pg")).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
 
 	if err := c.Create(ctx, running); err != nil {
@@ -1145,7 +1167,7 @@ func TestOperationReconcile_DeleteMidFlight_ClearsRefAndResumes(t *testing.T) {
 
 	parent := baseNominatim("vzw-delete")
 	parent.Spec.Database = nominatimv1alpha1.DatabaseSpec{
-		ClusterRef:                   &nominatimv1alpha1.LocalObjectReference{Name: "pg"},
+		ClusterRef:                   &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
 		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactWriteHeavy,
 		PostgresProfiles: &nominatimv1alpha1.PostgresProfiles{
 			Import:  map[string]string{"shared_buffers": testImportSharedBuffers},
@@ -1153,7 +1175,7 @@ func TestOperationReconcile_DeleteMidFlight_ClearsRefAndResumes(t *testing.T) {
 		},
 	}
 	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{
-		Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg",
+		Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg", ConnectionSecretName: "pg-app",
 	}
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-del", Namespace: "default"},
@@ -1163,7 +1185,7 @@ func TestOperationReconcile_DeleteMidFlight_ClearsRefAndResumes(t *testing.T) {
 		},
 	}
 	effects := &recordingCNPGEffects{}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent, op).WithObjects(parent, newCNPGCluster("pg"), op).Build()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent, op).WithObjects(parent, fakeConnectionSecret("pg-app"), newCNPGCluster("pg"), op).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
 
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: op.Name, Namespace: "default"}}

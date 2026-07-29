@@ -31,15 +31,21 @@ import (
 var (
 	// Optional Environment Variables:
 	// - CERT_MANAGER_INSTALL_SKIP=true: Skips CertManager installation during test setup.
+	// - E2E_IMPORT=1: Also build/load api+worker images and install CloudNativePG for Monaco import.
 	// These variables are useful if CertManager is already installed, avoiding
 	// re-installation and conflicts.
 	skipCertManagerInstall = os.Getenv("CERT_MANAGER_INSTALL_SKIP") == "true"
 	// isCertManagerAlreadyInstalled will be set true when CertManager CRDs be found on the cluster
 	isCertManagerAlreadyInstalled = false
 
+	runImportE2E = os.Getenv("E2E_IMPORT") == "1"
+
 	// projectImage is the name of the image which will be build and loaded
 	// with the code source changes to be tested.
 	projectImage = "example.com/nominatim-operator:v0.0.1"
+
+	apiImage    = "example.com/nominatim-api:e2e"
+	workerImage = "example.com/nominatim-worker:e2e"
 )
 
 // TestE2E runs the end-to-end (e2e) test suite for the project. These tests execute in an isolated,
@@ -66,6 +72,27 @@ var _ = BeforeSuite(func() {
 	By("loading the manager(Operator) image on Kind")
 	err = utils.LoadImageToKindClusterWithName(projectImage)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the manager(Operator) image into Kind")
+
+	if runImportE2E {
+		By("building api and worker images for Monaco import")
+		cmd = exec.Command("make", "docker-build-api", fmt.Sprintf("API_IMG=%s", apiImage))
+		_, err = utils.Run(cmd)
+		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the api image")
+		cmd = exec.Command("make", "docker-build-worker", fmt.Sprintf("WORKER_IMG=%s", workerImage))
+		_, err = utils.Run(cmd)
+		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the worker image")
+
+		By("loading api and worker images on Kind")
+		Expect(utils.LoadImageToKindClusterWithName(apiImage)).To(Succeed())
+		Expect(utils.LoadImageToKindClusterWithName(workerImage)).To(Succeed())
+
+		By("installing CloudNativePG for Monaco import")
+		if !utils.IsCloudNativePGInstalled() {
+			Expect(utils.InstallCloudNativePG()).To(Succeed(), "Failed to install CloudNativePG")
+		} else {
+			_, _ = fmt.Fprintf(GinkgoWriter, "CloudNativePG already installed; skipping install\n")
+		}
+	}
 
 	// The tests-e2e are intended to run on a temporary cluster that is created and destroyed for testing.
 	// To prevent errors when tests run in environments with CertManager already installed,

@@ -52,7 +52,7 @@ The worker entrypoint dispatches on `OPERATION_TYPE` (or the first CLI arg):
 |------|--------|------|
 | `Bootstrap` | `scripts/bootstrap.sh` | Fresh or resumed `nominatim import` |
 | `AddRegions` | `scripts/add-regions.sh` | `nominatim add-data` for new Geofabrik regions |
-| `Reimport` | `scripts/reimport.sh` | Clear markers + Bootstrap (`NOMINATIM_REIMPORT_CONFIRM=1`) |
+| `Reimport` | `scripts/reimport.sh` | Clear markers + Bootstrap (`NOMINATIM_REIMPORT_CONFIRM=1`). Operator drops/recreates the owned CNPG Database CR first so extensions are reinstalled on an empty DB. |
 | `Update` | `scripts/update.sh` | Geofabrik diffs via `pyosmium-get-changes` |
 | `CatchUp` | `scripts/catch-up.sh` | Update loop until idle |
 

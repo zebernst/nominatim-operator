@@ -56,6 +56,12 @@ var _ = Describe("NominatimOperation Controller", func() {
 		parent := minimalNominatim(parentName)
 		parent.Spec.Staging = &nominatimv1alpha1.StagingSpec{Size: "30Gi"}
 		Expect(k8sClient.Create(ctx, parent)).To(Succeed())
+		parent.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: "pg-secret"}
+		Expect(k8sClient.Status().Update(ctx, parent)).To(Succeed())
+		Expect(k8sClient.Create(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "pg-secret", Namespace: "default"},
+			Data:       map[string][]byte{"uri": []byte("postgresql://n:p@h/db")},
+		})).To(Succeed())
 	})
 
 	AfterEach(func() {
@@ -63,6 +69,68 @@ var _ = Describe("NominatimOperation Controller", func() {
 		// Second operation name used by conflict tests.
 		cleanupOperation(ctx, opName+"-b")
 		cleanupNominatim(ctx, parentName)
+		_ = k8sClient.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "pg-secret", Namespace: "default"}})
+	})
+
+	It("requeues Job creation until parent status.database.connectionSecretName is set", func() {
+		parent := &nominatimv1alpha1.Nominatim{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: parentName, Namespace: "default"}, parent)).To(Succeed())
+		parent.Status.Database = nominatimv1alpha1.DatabaseStatus{}
+		Expect(k8sClient.Status().Update(ctx, parent)).To(Succeed())
+
+		op := &nominatimv1alpha1.NominatimOperation{
+			ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: "default"},
+			Spec: nominatimv1alpha1.NominatimOperationSpec{
+				Type:         nominatimv1alpha1.NominatimOperationBootstrap,
+				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+			},
+		}
+		Expect(k8sClient.Create(ctx, op)).To(Succeed())
+
+		res, err := reconciler.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: opName, Namespace: "default"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.RequeueAfter).To(BeNumerically(">", 0))
+
+		job := &batchv1.Job{}
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, job)
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("requeues Job creation until the connection Secret exists", func() {
+		Expect(k8sClient.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "pg-secret", Namespace: "default"}})).To(Succeed())
+
+		op := &nominatimv1alpha1.NominatimOperation{
+			ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: "default"},
+			Spec: nominatimv1alpha1.NominatimOperationSpec{
+				Type:         nominatimv1alpha1.NominatimOperationBootstrap,
+				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+			},
+		}
+		Expect(k8sClient.Create(ctx, op)).To(Succeed())
+
+		res, err := reconciler.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: opName, Namespace: "default"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.RequeueAfter).To(BeNumerically(">", 0))
+
+		job := &batchv1.Job{}
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, job)
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+		Expect(k8sClient.Create(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "pg-secret", Namespace: "default"},
+			Data:       map[string][]byte{"uri": []byte("postgresql://n:p@h/db")},
+		})).To(Succeed())
+
+		_, err = reconciler.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: opName, Namespace: "default"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, job)).To(Succeed())
+		Expect(findEnvVar(job.Spec.Template.Spec.Containers[0].Env, "NOMINATIM_DATABASE_DSN")).NotTo(BeNil())
 	})
 
 	It("creates staging PVC and Job mounting project/staging volumes", func() {
@@ -90,7 +158,7 @@ var _ = Describe("NominatimOperation Controller", func() {
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, job)).To(Succeed())
 		Expect(metav1.IsControlledBy(job, op)).To(BeTrue())
 		c := job.Spec.Template.Spec.Containers[0]
-		Expect(c.Image).To(Equal(defaultWorkerImage))
+		Expect(c.Image).To(Equal(resolveImage(nil, defaultWorkerRepository)))
 		Expect(envValue(c.Env, "OPERATION_TYPE")).To(Equal("Update"))
 		Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(2)) // project + staging (no flatnode)
 

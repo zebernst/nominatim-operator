@@ -84,6 +84,10 @@ type NominatimOperationSpec struct {
 	// (size and/or storageClass). When unset, the parent Nominatim staging defaults apply.
 	// +optional
 	Staging *StagingSpec `json:"staging,omitempty"`
+
+	// Image overrides Nominatim.spec.worker.image for this Operation Job only.
+	// +optional
+	Image *ImageSpec `json:"image,omitempty"`
 }
 
 // NominatimOperationStatus defines the observed state of NominatimOperation.

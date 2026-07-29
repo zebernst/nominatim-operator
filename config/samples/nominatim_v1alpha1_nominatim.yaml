@@ -15,9 +15,18 @@ spec:
   database:
     clusterRef:
       name: nominatim-pg
+      # Optional: override the default CNPG "{name}-app" credentials Secret.
+      # connectionSecretRef:
+      #   name: nominatim-pg-app
   updates:
     enabled: true
     schedule: "0 3 * * *"
   api:
     replicas: 1
+    # Day-2 only (Never = keep API up during AddRegions/Update/…).
+    # Bootstrap does not use this: serving workloads wait for status.regions.
     suspendDuringOperations: Never
+  # worker:
+  #   image:
+  #     repository: ghcr.io/zebernst/nominatim-worker
+  #     tag: latest

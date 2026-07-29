@@ -367,7 +367,94 @@ var _ = Describe("Manager", Ordered, func() {
 			Expect(out).To(Equal("Running"))
 		})
 	})
+
+	Context("Monaco import", Ordered, func() {
+		const (
+			validationNamespace = "nominatim-validation"
+			nomName             = "monaco"
+		)
+
+		BeforeAll(func() {
+			if !runImportE2E {
+				Skip("set E2E_IMPORT=1 to run Monaco import e2e (CNPG + api/worker images)")
+			}
+
+			By("applying Monaco Nominatim fixture (database.cluster + regions)")
+			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-monaco.yaml")
+			cmd := exec.Command("kubectl", "apply", "-f", fixture)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply Monaco fixtures")
+		})
+
+		AfterAll(func() {
+			if !runImportE2E {
+				return
+			}
+			By("deleting Monaco validation fixtures")
+			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-monaco.yaml")
+			cmd := exec.Command("kubectl", "delete", "-f", fixture, "--ignore-not-found=true")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "ns", validationNamespace, "--ignore-not-found=true", "--wait=false")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("bootstraps Monaco and answers avenue pasteur search", func() {
+			By("waiting for CNPG Cluster Ready")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "cluster.postgresql.cnpg.io", nomName+"-pg",
+					"-n", validationNamespace,
+					"-o", "jsonpath={.status.conditions[?(@.type==\"Ready\")].status}")
+				out, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(out).To(Equal("True"))
+			}, 15*time.Minute, 10*time.Second).Should(Succeed())
+
+			By("waiting for Bootstrap NominatimOperation Succeeded")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "nominatimoperation", nomName+"-bootstrap",
+					"-n", validationNamespace,
+					"-o", "jsonpath={.status.phase}")
+				out, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(out).NotTo(Equal("Failed"), "Bootstrap should not Fail")
+				g.Expect(out).To(Equal("Succeeded"))
+			}, 40*time.Minute, 15*time.Second).Should(Succeed())
+
+			By("waiting for API Deployment Available")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "deploy", nomName+"-api",
+					"-n", validationNamespace,
+					"-o", "jsonpath={.status.availableReplicas}")
+				out, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(out).To(Equal("1"))
+			}, 10*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("probing /search?q=avenue%20pasteur until non-empty JSON")
+			assertNonEmptySearch(validationNamespace, nomName+"-api")
+		})
+	})
 })
+
+// assertNonEmptySearch port-forwards the API Service and retries until search returns hits
+// (parity with mediagis/nominatim-docker assert-non-empty-json).
+func assertNonEmptySearch(ns, svc string) {
+	By("starting port-forward to Nominatim API")
+	pf := exec.Command("kubectl", "-n", ns, "port-forward", "svc/"+svc, "18081:80")
+	Expect(pf.Start()).To(Succeed())
+	defer func() { _ = pf.Process.Kill() }()
+
+	Eventually(func(g Gomega) {
+		cmd := exec.Command("python3", "-c", `
+import json, urllib.request
+with urllib.request.urlopen("http://127.0.0.1:18081/search?q=avenue%20pasteur", timeout=30) as r:
+    data = json.loads(r.read())
+assert isinstance(data, list) and len(data) > 0, data
+`)
+		out, err := cmd.CombinedOutput()
+		g.Expect(err).NotTo(HaveOccurred(), string(out))
+	}, 10*time.Minute, 5*time.Second).Should(Succeed())
+}
 
 // serviceAccountToken returns a token for the specified service account in the given namespace.
 // It uses the Kubernetes TokenRequest API to generate a token by directly sending a request

@@ -169,7 +169,7 @@ func TestReconcileDatabase_ClusterRef_Attach(t *testing.T) {
 
 	nom := baseNominatim("attach")
 	nom.Spec.Database = nominatimv1alpha1.DatabaseSpec{
-		ClusterRef: &nominatimv1alpha1.LocalObjectReference{Name: "existing-pg"},
+		ClusterRef: &nominatimv1alpha1.DatabaseClusterRef{Name: "existing-pg"},
 		PostgresProfiles: &nominatimv1alpha1.PostgresProfiles{
 			Runtime: map[string]string{"max_connections": "200"},
 		},
@@ -213,11 +213,77 @@ func TestReconcileDatabase_ClusterRef_Attach(t *testing.T) {
 	}
 }
 
+func TestReconcileDatabase_ClusterRef_CustomConnectionSecret(t *testing.T) {
+	scheme := testScheme(t)
+	cluster := &unstructured.Unstructured{}
+	cluster.SetGroupVersionKind(CNPGClusterGVK)
+	cluster.SetName("existing-pg")
+	cluster.SetNamespace("default")
+	_ = unstructured.SetNestedField(cluster.Object, int64(1), "spec", "instances")
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "custom-pg-creds", Namespace: "default"},
+		Data:       map[string][]byte{"uri": []byte("postgresql://u:p@h/db")},
+	}
+
+	nom := baseNominatim("attach-custom-secret")
+	nom.Spec.Database = nominatimv1alpha1.DatabaseSpec{
+		ClusterRef: &nominatimv1alpha1.DatabaseClusterRef{
+			Name: "existing-pg",
+			ConnectionSecretRef: &nominatimv1alpha1.LocalObjectReference{
+				Name: "custom-pg-creds",
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, cluster, secret).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+
+	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
+		t.Fatalf("reconcileDatabase: %v", err)
+	}
+	if nom.Status.Database.Mode != nominatimv1alpha1.DatabaseModeClusterAttached {
+		t.Fatalf("mode=%q", nom.Status.Database.Mode)
+	}
+	if nom.Status.Database.ConnectionSecretName != "custom-pg-creds" {
+		t.Fatalf("secret=%q want custom-pg-creds", nom.Status.Database.ConnectionSecretName)
+	}
+	if nom.Status.Database.Degraded {
+		t.Fatal("custom secret on clusterRef must stay ClusterAttached (not degraded)")
+	}
+}
+
+func TestReconcileDatabase_ClusterRef_CustomConnectionSecretMissing(t *testing.T) {
+	scheme := testScheme(t)
+	cluster := &unstructured.Unstructured{}
+	cluster.SetGroupVersionKind(CNPGClusterGVK)
+	cluster.SetName("existing-pg")
+	cluster.SetNamespace("default")
+	_ = unstructured.SetNestedField(cluster.Object, int64(1), "spec", "instances")
+
+	nom := baseNominatim("attach-missing-secret")
+	nom.Spec.Database = nominatimv1alpha1.DatabaseSpec{
+		ClusterRef: &nominatimv1alpha1.DatabaseClusterRef{
+			Name: "existing-pg",
+			ConnectionSecretRef: &nominatimv1alpha1.LocalObjectReference{
+				Name: "missing-creds",
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, cluster).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+
+	if err := r.reconcileDatabase(context.Background(), nom); err == nil {
+		t.Fatal("expected error for missing clusterRef.connectionSecretRef")
+	}
+}
+
 func TestReconcileDatabase_ClusterRef_Missing(t *testing.T) {
 	scheme := testScheme(t)
 	nom := baseNominatim("missing-cl")
 	nom.Spec.Database = nominatimv1alpha1.DatabaseSpec{
-		ClusterRef: &nominatimv1alpha1.LocalObjectReference{Name: "gone"},
+		ClusterRef: &nominatimv1alpha1.DatabaseClusterRef{Name: "gone"},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
@@ -227,17 +293,14 @@ func TestReconcileDatabase_ClusterRef_Missing(t *testing.T) {
 	}
 }
 
-func TestReconcileDatabase_Cluster_CreateOwned(t *testing.T) {
-	scheme := testScheme(t)
-	sc := "fast-ssd"
-	nom := baseNominatim("owned")
-	instances := int32(2)
+func ownedClusterNominatim(name, storageClass string, instances int32) *nominatimv1alpha1.Nominatim {
+	nom := baseNominatim(name)
 	nom.Spec.Database = nominatimv1alpha1.DatabaseSpec{
 		Cluster: &nominatimv1alpha1.DatabaseClusterCreate{
 			Instances: &instances,
 			Storage: &nominatimv1alpha1.VolumeClaimTemplate{
 				Spec: corev1.PersistentVolumeClaimSpec{
-					StorageClassName: &sc,
+					StorageClassName: &storageClass,
 					AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 					Resources: corev1.VolumeResourceRequirements{
 						Requests: corev1.ResourceList{
@@ -248,16 +311,11 @@ func TestReconcileDatabase_Cluster_CreateOwned(t *testing.T) {
 			},
 		},
 	}
+	return nom
+}
 
-	effects := &recordingCNPGEffects{}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
-
-	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
-		t.Fatalf("reconcileDatabase: %v", err)
-	}
-
-	wantName := OwnedCNPGClusterName(nom)
+func assertOwnedClusterStatus(t *testing.T, nom *nominatimv1alpha1.Nominatim, wantName string) {
+	t.Helper()
 	if nom.Status.Database.Mode != nominatimv1alpha1.DatabaseModeClusterManaged {
 		t.Fatalf("mode=%q", nom.Status.Database.Mode)
 	}
@@ -270,13 +328,10 @@ func TestReconcileDatabase_Cluster_CreateOwned(t *testing.T) {
 	if nom.Status.Database.Degraded {
 		t.Fatal("expected degraded=false")
 	}
+}
 
-	got := &unstructured.Unstructured{}
-	got.SetGroupVersionKind(CNPGClusterGVK)
-	if err := c.Get(context.Background(), types.NamespacedName{Name: wantName, Namespace: "default"}, got); err != nil {
-		t.Fatalf("get created cluster: %v", err)
-	}
-
+func assertOwnedClusterStorageAndOwner(t *testing.T, got *unstructured.Unstructured, nom *nominatimv1alpha1.Nominatim) {
+	t.Helper()
 	inst, found, err := unstructured.NestedInt64(got.Object, "spec", "instances")
 	if err != nil || !found || inst != 2 {
 		t.Fatalf("instances=%v found=%v err=%v", inst, found, err)
@@ -294,10 +349,149 @@ func TestReconcileDatabase_Cluster_CreateOwned(t *testing.T) {
 	if len(owners) != 1 || owners[0].Name != nom.Name {
 		t.Fatalf("ownerRefs=%v", owners)
 	}
+}
 
-	// Idempotent second reconcile
+func assertOwnedClusterBootstrapAndRoles(t *testing.T, got *unstructured.Unstructured) {
+	t.Helper()
+	dbName, found, err := unstructured.NestedString(got.Object, "spec", "bootstrap", "initdb", "database")
+	if err != nil || !found || dbName != cnpgAppDatabaseName {
+		t.Fatalf("bootstrap.initdb.database=%q found=%v err=%v want %q", dbName, found, err, cnpgAppDatabaseName)
+	}
+	owner, found, err := unstructured.NestedString(got.Object, "spec", "bootstrap", "initdb", "owner")
+	if err != nil || !found || owner != cnpgAppOwnerName {
+		t.Fatalf("bootstrap.initdb.owner=%q found=%v err=%v want %q", owner, found, err, cnpgAppOwnerName)
+	}
+	img, found, err := unstructured.NestedString(got.Object, "spec", "imageName")
+	if err != nil || !found || img != cnpgDefaultPostGISImage {
+		t.Fatalf("imageName=%q found=%v err=%v want %q", img, found, err, cnpgDefaultPostGISImage)
+	}
+	postInit, found, err := unstructured.NestedStringSlice(got.Object, "spec", "bootstrap", "initdb", "postInitTemplateSQL")
+	if err != nil {
+		t.Fatalf("postInitTemplateSQL lookup: %v", err)
+	}
+	if found && len(postInit) > 0 {
+		t.Fatalf("postInitTemplateSQL=%v want unset (extensions via Database CR)", postInit)
+	}
+
+	roles, found, err := unstructured.NestedSlice(got.Object, "spec", "managed", "roles")
+	if err != nil || !found || len(roles) != 1 {
+		t.Fatalf("managed.roles=%v found=%v err=%v", roles, found, err)
+	}
+	role, ok := roles[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("managed.roles[0] type %T", roles[0])
+	}
+	if role["name"] != cnpgNominatimWebRole || role["ensure"] != "present" || role["login"] != false {
+		t.Fatalf("managed.roles[0]=%v want name=%s ensure=present login=false", role, cnpgNominatimWebRole)
+	}
+}
+
+func assertOwnedClusterCreate(t *testing.T, c client.Client, nom *nominatimv1alpha1.Nominatim, wantName string) {
+	t.Helper()
+	assertOwnedClusterStatus(t, nom, wantName)
+
+	got := &unstructured.Unstructured{}
+	got.SetGroupVersionKind(CNPGClusterGVK)
+	if err := c.Get(context.Background(), types.NamespacedName{Name: wantName, Namespace: "default"}, got); err != nil {
+		t.Fatalf("get created cluster: %v", err)
+	}
+	assertOwnedClusterStorageAndOwner(t, got, nom)
+	assertOwnedClusterBootstrapAndRoles(t, got)
+}
+
+func assertOwnedDatabaseCR(t *testing.T, c client.Client, nom *nominatimv1alpha1.Nominatim, wantName string) {
+	t.Helper()
+	dbCR := &unstructured.Unstructured{}
+	dbCR.SetGroupVersionKind(CNPGDatabaseGVK)
+	if err := c.Get(context.Background(), types.NamespacedName{Name: OwnedCNPGDatabaseName(nom), Namespace: "default"}, dbCR); err != nil {
+		t.Fatalf("get owned Database CR: %v", err)
+	}
+	exts, found, err := unstructured.NestedSlice(dbCR.Object, "spec", "extensions")
+	if err != nil || !found || len(exts) != len(cnpgNominatimExtensions) {
+		t.Fatalf("Database.spec.extensions=%v found=%v err=%v", exts, found, err)
+	}
+	for i, want := range cnpgNominatimExtensions {
+		ext, ok := exts[i].(map[string]interface{})
+		if !ok || ext["name"] != want || ext["ensure"] != "present" {
+			t.Fatalf("extensions[%d]=%v want name=%s ensure=present", i, exts[i], want)
+		}
+	}
+	gotDBName, _, _ := unstructured.NestedString(dbCR.Object, "spec", "name")
+	gotOwner, _, _ := unstructured.NestedString(dbCR.Object, "spec", "owner")
+	clusterRef, _, _ := unstructured.NestedString(dbCR.Object, "spec", "cluster", "name")
+	if gotDBName != cnpgAppDatabaseName || gotOwner != cnpgAppOwnerName || clusterRef != wantName {
+		t.Fatalf("Database spec name=%q owner=%q cluster=%q", gotDBName, gotOwner, clusterRef)
+	}
+	reclaim, _, _ := unstructured.NestedString(dbCR.Object, "spec", "databaseReclaimPolicy")
+	if reclaim != cnpgDatabaseReclaimDelete {
+		t.Fatalf("databaseReclaimPolicy=%q want %q", reclaim, cnpgDatabaseReclaimDelete)
+	}
+}
+
+func TestReconcileDatabase_Cluster_CreateOwned(t *testing.T) {
+	scheme := testScheme(t)
+	nom := ownedClusterNominatim("owned", "fast-ssd", 2)
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+
+	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
+		t.Fatalf("reconcileDatabase: %v", err)
+	}
+
+	wantName := OwnedCNPGClusterName(nom)
+	assertOwnedClusterCreate(t, c, nom, wantName)
+	assertOwnedDatabaseCR(t, c, nom, wantName)
+
 	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
 		t.Fatalf("second reconcile: %v", err)
+	}
+}
+
+func TestReconcileDatabase_Cluster_PreservesExpandedManagedRoles(t *testing.T) {
+	scheme := testScheme(t)
+	nom := ownedClusterNominatim("owned-roles", "fast-ssd", 2)
+	effects := &recordingCNPGEffects{}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
+
+	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
+		t.Fatalf("reconcileDatabase: %v", err)
+	}
+	wantName := OwnedCNPGClusterName(nom)
+
+	// Simulate CNPG expanding managed.roles defaults; reconciler must not replace them.
+	expanded := &unstructured.Unstructured{}
+	expanded.SetGroupVersionKind(CNPGClusterGVK)
+	if err := c.Get(context.Background(), types.NamespacedName{Name: wantName, Namespace: "default"}, expanded); err != nil {
+		t.Fatalf("get cluster for expand: %v", err)
+	}
+	if err := unstructured.SetNestedSlice(expanded.Object, []interface{}{
+		map[string]interface{}{
+			"name":            cnpgNominatimWebRole,
+			"ensure":          "present",
+			"login":           false,
+			"inherit":         true,
+			"connectionLimit": int64(-1),
+			"comment":         "Nominatim DATABASE_WEBUSER (read-only grants target)",
+		},
+	}, "spec", "managed", "roles"); err != nil {
+		t.Fatalf("expand roles: %v", err)
+	}
+	if err := c.Update(context.Background(), expanded); err != nil {
+		t.Fatalf("update expanded roles: %v", err)
+	}
+	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
+		t.Fatalf("reconcile after CNPG role expand: %v", err)
+	}
+	gotAfter := &unstructured.Unstructured{}
+	gotAfter.SetGroupVersionKind(CNPGClusterGVK)
+	if err := c.Get(context.Background(), types.NamespacedName{Name: wantName, Namespace: "default"}, gotAfter); err != nil {
+		t.Fatalf("get after expand reconcile: %v", err)
+	}
+	rolesAfter, _, _ := unstructured.NestedSlice(gotAfter.Object, "spec", "managed", "roles")
+	roleAfter, _ := rolesAfter[0].(map[string]interface{})
+	if roleAfter["connectionLimit"] != int64(-1) || roleAfter["inherit"] != true {
+		t.Fatalf("managed.roles churned away CNPG defaults: %v", roleAfter)
 	}
 
 	if err := r.SetBackupPaused(context.Background(), nom, false); err != nil {
@@ -347,7 +541,7 @@ func TestMapCNPGClusterToNominatim_OwnerAndClusterRef(t *testing.T) {
 	nomOwned := baseNominatim("owner-nom")
 	nomRef := baseNominatim("ref-nom")
 	nomRef.Spec.Database = nominatimv1alpha1.DatabaseSpec{
-		ClusterRef: &nominatimv1alpha1.LocalObjectReference{Name: "shared-pg"},
+		ClusterRef: &nominatimv1alpha1.DatabaseClusterRef{Name: "shared-pg"},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nomOwned, nomRef).Build()
 
@@ -376,7 +570,7 @@ func TestApplyPostgresProfile_UnknownWhich(t *testing.T) {
 	scheme := testScheme(t)
 	nom := baseNominatim("prof")
 	nom.Spec.Database = nominatimv1alpha1.DatabaseSpec{
-		ClusterRef: &nominatimv1alpha1.LocalObjectReference{Name: "pg"},
+		ClusterRef: &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
 	}
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{
 		Mode:        nominatimv1alpha1.DatabaseModeClusterAttached,
@@ -586,7 +780,7 @@ func TestMapCNPGClusterToNominatim_EdgeCases(t *testing.T) {
 	scheme := testScheme(t)
 	nom := baseNominatim("same")
 	nom.Spec.Database = nominatimv1alpha1.DatabaseSpec{
-		ClusterRef: &nominatimv1alpha1.LocalObjectReference{Name: "same-pg"},
+		ClusterRef: &nominatimv1alpha1.DatabaseClusterRef{Name: "same-pg"},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	cluster.SetName("same-pg")

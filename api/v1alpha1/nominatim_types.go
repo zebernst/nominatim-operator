@@ -109,6 +109,19 @@ type LocalObjectReference struct {
 	Name string `json:"name"`
 }
 
+// DatabaseClusterRef attaches an existing CNPG Cluster in the same namespace.
+type DatabaseClusterRef struct {
+	// Name of the CNPG Cluster.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// ConnectionSecretRef optionally names the Secret with Postgres credentials for
+	// API/worker (CNPG-shaped keys: uri, host, port, dbname, user, password).
+	// When unset, defaults to the Cluster's application Secret "{name}-app".
+	// +optional
+	ConnectionSecretRef *LocalObjectReference `json:"connectionSecretRef,omitempty"`
+}
+
 // DatabaseClusterCreate creates a postgresql.cnpg.io/v1 Cluster.
 type DatabaseClusterCreate struct {
 	// Storage for the CNPG Cluster (passthrough size/storageClass; no node-specific assumptions).
@@ -142,11 +155,12 @@ type DatabaseSpec struct {
 	Cluster *DatabaseClusterCreate `json:"cluster,omitempty"`
 
 	// ClusterRef attaches an existing CNPG Cluster (preferred when not creating).
+	// Optional clusterRef.connectionSecretRef overrides the default "{cluster}-app" Secret.
 	// +optional
-	ClusterRef *LocalObjectReference `json:"clusterRef,omitempty"`
+	ClusterRef *DatabaseClusterRef `json:"clusterRef,omitempty"`
 
 	// ConnectionSecretRef is a thin escape hatch to any Postgres (degraded: no Cluster manage,
-	// no param profiles, no backup pause).
+	// no param profiles, no backup pause). Mutually exclusive with cluster / clusterRef.
 	// +optional
 	ConnectionSecretRef *LocalObjectReference `json:"connectionSecretRef,omitempty"`
 
@@ -236,8 +250,10 @@ type APISpec struct {
 	// +optional
 	Route *RouteSpec `json:"route,omitempty"`
 
-	// SuspendDuringOperations controls scaling/suspending the API during operations.
-	// Default Never keeps the API up (homelab default).
+	// SuspendDuringOperations controls scaling the API during day-2 operations
+	// (AddRegions, Reimport, Update, …). Default Never keeps the API up.
+	// Day-0 Bootstrap is not covered here: API/UI are not created until Bootstrap
+	// has populated status.regions (see servingWorkloadsAllowed).
 	// +optional
 	// +kubebuilder:default="Never"
 	SuspendDuringOperations OperationImpact `json:"suspendDuringOperations,omitempty"`
@@ -257,6 +273,14 @@ type UISpec struct {
 	// Route configures Gateway API HTTPRoute when set.
 	// +optional
 	Route *RouteSpec `json:"route,omitempty"`
+}
+
+// WorkerSpec configures the NominatimOperation Job worker image used for
+// Bootstrap / AddRegions / Reimport / Update Jobs.
+type WorkerSpec struct {
+	// Image for Operation Job containers. Defaults to ghcr.io/zebernst/nominatim-worker:latest.
+	// +optional
+	Image *ImageSpec `json:"image,omitempty"`
 }
 
 // NominatimSpec defines the desired state of Nominatim (GitOps surface).
@@ -298,6 +322,10 @@ type NominatimSpec struct {
 	// UI configures an optional UI workload.
 	// +optional
 	UI *UISpec `json:"ui,omitempty"`
+
+	// Worker configures the image used by NominatimOperation Jobs.
+	// +optional
+	Worker *WorkerSpec `json:"worker,omitempty"`
 }
 
 // RegionStatus is the observed state of an imported region.

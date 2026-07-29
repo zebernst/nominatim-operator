@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Bootstrap: nominatim import (fresh or --continue) against external Postgres.
-# Knowledge from resume-import.sh / start-external.sh — phases only, no local PG.
+# Bootstrap: nominatim import against an externally provisioned Postgres database.
+# Never runs createdb — CNPG (or admin) must create the DB + extensions first.
+# Uses nominatim import --continue … so setup_database_skeleton is skipped.
 set -euo pipefail
 
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -9,9 +10,15 @@ source "${SCRIPTS_DIR}/common.sh"
 
 prepare_worker
 
+# A leftover import-finished on the project PVC must not succeed Bootstrap when the
+# database was recreated empty (false Succeeded unlocked API/UI early).
 if [ -f "${IMPORT_FINISHED}" ]; then
-  log "import-finished already present; Bootstrap is a no-op"
-  exit 0
+  if import_schema_ready; then
+    log "import-finished present and Nominatim schema ready; Bootstrap is a no-op"
+    exit 0
+  fi
+  log "Stale ${IMPORT_FINISHED} (schema incomplete); removing and continuing import"
+  rm -f "${IMPORT_FINISHED}"
 fi
 
 stage="$(detect_continue_at)"
@@ -23,19 +30,13 @@ case "${stage}" in
     log "Wrote ${IMPORT_FINISHED}"
     exit 0
     ;;
-  fresh)
-    osmfile="$(ensure_osm_file)"
-    link_staging_name "data.osm.pbf"
-    log "Running: nominatim import --osm-file ${osmfile}"
-    run_nominatim import \
-      --osm-file "${osmfile}" \
-      --project-dir "${PROJECT_DIR}" \
-      --threads "${THREADS}"
+  missing-db)
+    die "Database '${PGDATABASE}' does not exist on ${PGHOST}. Create it declaratively (CNPG Cluster bootstrap.initdb or Database CR) before Bootstrap; the worker does not run createdb."
     ;;
   import-from-file)
     osmfile="$(ensure_osm_file)"
     link_staging_name "data.osm.pbf"
-    log "Running: nominatim import --continue import-from-file"
+    log "Running: nominatim import --continue import-from-file (DB already exists; no createdb)"
     run_nominatim import \
       --continue import-from-file \
       --osm-file "${osmfile}" \
@@ -66,6 +67,10 @@ if [ "${#DESIRED_REGIONS[@]}" -gt 0 ]; then
     echo "${region}" >> "${IMPORTED_LIST}"
     seed_region_state "${region}" || log "Warning: could not seed update state for ${region}"
   done
+fi
+
+if ! import_schema_ready; then
+  die "Import finished without a ready Nominatim schema (placex / database_version missing)"
 fi
 
 touch "${IMPORT_FINISHED}"

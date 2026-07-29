@@ -34,6 +34,10 @@ const (
 
 	certmanagerVersion = "v1.16.3"
 	certmanagerURLTmpl = "https://github.com/cert-manager/cert-manager/releases/download/%s/cert-manager.yaml"
+
+	// CloudNativePG pin shared by local kind validation and CI Monaco import.
+	cnpgVersion = "1.26.1"
+	cnpgURLTmpl = "https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.26/releases/cnpg-%s.yaml"
 )
 
 func warnError(err error) {
@@ -163,6 +167,29 @@ func IsCertManagerCRDsInstalled() bool {
 	}
 
 	return false
+}
+
+// InstallCloudNativePG installs a pinned CloudNativePG release into the cluster.
+func InstallCloudNativePG() error {
+	url := fmt.Sprintf(cnpgURLTmpl, cnpgVersion)
+	cmd := exec.Command("kubectl", "apply", "--server-side", "--force-conflicts", "-f", url)
+	if _, err := Run(cmd); err != nil {
+		return err
+	}
+	cmd = exec.Command("kubectl", "wait", "deployment.apps/cnpg-controller-manager",
+		"--for", "condition=Available",
+		"--namespace", "cnpg-system",
+		"--timeout", "5m",
+	)
+	_, err := Run(cmd)
+	return err
+}
+
+// IsCloudNativePGInstalled reports whether the CNPG Cluster CRD is present.
+func IsCloudNativePGInstalled() bool {
+	cmd := exec.Command("kubectl", "get", "crd", "clusters.postgresql.cnpg.io")
+	_, err := Run(cmd)
+	return err == nil
 }
 
 // LoadImageToKindClusterWithName loads a local docker image to the kind cluster
