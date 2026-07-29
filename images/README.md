@@ -58,6 +58,18 @@ The worker entrypoint dispatches on `OPERATION_TYPE` (or the first CLI arg):
 
 These are thin phases invoked by `NominatimOperation` Jobs. Orchestration (mutex, scale API, pause backups, empty DB for Reimport) stays in the operator — not in bash.
 
+### Bootstrap multi-region: one import, multiple `--osm-file`
+
+When `NOMINATIM_REGIONS` lists more than one Geofabrik path (e.g. `europe/monaco,europe/andorra`),
+`bootstrap.sh` downloads **every** extract and passes multiple `--osm-file` flags to a single
+`nominatim import` — matching [upstream Advanced Installations](https://nominatim.org/release-docs/latest/admin/Advanced-Installations/).
+Do **not** use `add-data` during Bootstrap; it is far slower than initial import. Day-2 growth
+of the coverage set is `AddRegions` only.
+
+The CI import e2e (`make test-e2e-import`) bootstraps monaco+andorra and probes both countries
+with `countrycodes=` so a regression that only imported `regions[0]` while marking every Spec
+region `Imported` fails the search assertions even if `status.regions` looks complete.
+
 ### AddRegions Spec contract
 
 `NOMINATIM_REGIONS` (derived by the operator from `op.Spec.Regions`, falling back to `parent.Spec.Regions` when the Operation sets none) is the **exact** import set for an AddRegions Job: `add-regions.sh` imports every region listed there that is not already recorded in `imported-regions.txt`, then re-indexes once if anything changed. There is no per-run cap or "only this region" filter in the worker — chunking (e.g. one missing region per drift-driven Operation) is entirely the operator's responsibility. A manual AddRegions with multiple regions in its Spec imports all of them in one Job.

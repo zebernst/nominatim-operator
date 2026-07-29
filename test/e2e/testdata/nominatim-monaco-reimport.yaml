@@ -9,8 +9,11 @@ spec:
   type: Reimport
   nominatimRef:
     name: monaco
+  # Keep aligned with the parent Spec so Reimport does not leave Andorra as drift
+  # and spawn an AddRegions Operation mid-suite.
   regions:
     - europe/monaco
+    - europe/andorra
   image:
     repository: example.com/nominatim-worker
     tag: e2e
