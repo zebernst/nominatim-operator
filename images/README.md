@@ -64,6 +64,16 @@ These are thin phases invoked by `NominatimOperation` Jobs. Orchestration (mutex
 
 `add-regions.sh` still requires `IMPORT_FINISHED` (Bootstrap must have completed) and a non-empty `NOMINATIM_REGIONS` as bash-level belts, even though the operator also enforces these preconditions before creating the Job.
 
+### Bootstrap gate: PBF-only vs regions mode
+
+The operator only requires Bootstrap-done before creating AddRegions / Update / CatchUp Jobs when the parent `Nominatim` is in **regions mode** (`Spec.Regions` non-empty). In that mode, Bootstrap-done means `Status.Regions` is non-empty **or** a peer Bootstrap Operation for the same parent has already `Succeeded` (covers the brief window before status is persisted). **PBF-only** parents (`Spec.Regions` empty) skip this operator-side gate entirely; the worker's own `IMPORT_FINISHED` belt in `add-regions.sh` / `update.sh` remains the only guard against running before a Bootstrap has completed.
+
+### Postgres readiness: CNPG gate is primary, Job wait is last-mile
+
+Before creating any `NominatimOperation` Job, the operator checks CNPG Cluster/Database readiness (`cnpgClusterReadyForJobs`) and requeues rather than creating a Job until the owned or referenced CNPG Cluster is `Ready` (and, for owned Databases, applied). This is the **primary** readiness gate — by the time a Job starts, Postgres is expected to already be accepting connections.
+
+`wait_for_postgres` in `scripts/common.sh` is a **last-mile** check only: it covers the brief gap between Job scheduling and Postgres accepting connections (e.g. pod startup ordering), not a substitute for the operator's gate. It defaults to 15 attempts at a 2s sleep (~30s total) and can be tuned via `NOMINATIM_PG_WAIT_ATTEMPTS` if a deployment's last-mile gap is larger than the default covers.
+
 ```bash
 docker run --rm \
   -e OPERATION_TYPE=Bootstrap \

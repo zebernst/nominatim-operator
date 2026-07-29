@@ -5,6 +5,7 @@
 ### Changed
 
 * **worker:** `add-regions.sh` now imports every region in `NOMINATIM_REGIONS` (the operator's `Spec.Regions` contract) not already in `imported-regions.txt`, indexing once if any region changed. Removed the `NOMINATIM_IMPORT_MAX_REGIONS` / `NOMINATIM_IMPORT_ONLY_REGION` single-region deferral; the operator (not the worker) now owns AddRegions chunking. Deploy the operator and worker images together — see `images/README.md` for the Spec/`NOMINATIM_REGIONS` contract.
+* **worker:** `wait_for_postgres` in `scripts/common.sh` now defaults to 15 attempts at a 2s sleep (~30s, down from ~180s), honoring `NOMINATIM_PG_WAIT_ATTEMPTS` to override the attempt count. The operator's CNPG readiness gate (`cnpgClusterReadyForJobs`) is the primary check before a Job is created; this shortened loop is last-mile only. See `images/README.md` for the readiness split and the mode-aware Bootstrap-done gate (PBF-only vs regions mode).
 
 ## [0.1.1](https://github.com/zebernst/nominatim-operator/compare/0.1.0...0.1.1) (2026-07-27)
 

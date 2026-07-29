@@ -34,10 +34,15 @@ require_db_env() {
   export NOMINATIM_DATABASE_DSN PGHOST PGDATABASE PGUSER PGPASSWORD
 }
 
+# wait_for_postgres is a last-mile readiness check only: the operator's
+# cnpgClusterReadyForJobs gate already blocks Job creation until the CNPG
+# Cluster/Database is ready, so this loop only needs to cover the brief gap
+# between Job scheduling and Postgres accepting connections. Default is 15
+# attempts * 2s sleep = ~30s; override via NOMINATIM_PG_WAIT_ATTEMPTS.
 wait_for_postgres() {
   log "Waiting for PostgreSQL at ${PGHOST}"
-  local i
-  for i in $(seq 1 90); do
+  local i attempts="${NOMINATIM_PG_WAIT_ATTEMPTS:-15}"
+  for i in $(seq 1 "${attempts}"); do
     if pg_isready -h "${PGHOST}" -d "${PGDATABASE}" -U "${PGUSER}" -q; then
       return 0
     fi

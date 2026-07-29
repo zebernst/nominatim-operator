@@ -45,3 +45,26 @@ func TestAddRegionsKeepsBashBelts(t *testing.T) {
 		t.Error("add-regions.sh must still require NOMINATIM_REGIONS (regions belt)")
 	}
 }
+
+// TestWaitForPostgresDefaultIsShortened asserts common.sh's wait_for_postgres
+// default upper bound is 15 attempts (2s sleep -> ~30s), down from the prior
+// 90 attempts (~180s), and that it honors NOMINATIM_PG_WAIT_ATTEMPTS when set.
+// CNPG cluster/database readiness (cnpgClusterReadyForJobs) is the primary
+// gate before the Job is even created; this loop is last-mile only (R5).
+func TestWaitForPostgresDefaultIsShortened(t *testing.T) {
+	contents, err := os.ReadFile("common.sh")
+	if err != nil {
+		t.Fatalf("reading common.sh: %v", err)
+	}
+	script := string(contents)
+
+	if !strings.Contains(script, "NOMINATIM_PG_WAIT_ATTEMPTS") {
+		t.Error("common.sh wait_for_postgres must reference NOMINATIM_PG_WAIT_ATTEMPTS for operator/user override")
+	}
+	if !strings.Contains(script, `NOMINATIM_PG_WAIT_ATTEMPTS:-15`) {
+		t.Error(`common.sh wait_for_postgres must default to 15 attempts via "${NOMINATIM_PG_WAIT_ATTEMPTS:-15}" (~30s at 2s/attempt)`)
+	}
+	if strings.Contains(script, "seq 1 90") {
+		t.Error("common.sh wait_for_postgres must not retain the old 90-attempt (~180s) upper bound")
+	}
+}
