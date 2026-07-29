@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -706,6 +707,125 @@ func TestReconcileAPI_CustomImage(t *testing.T) {
 	}
 	if container.ImagePullPolicy != corev1.PullAlways {
 		t.Fatalf("pullPolicy=%q", container.ImagePullPolicy)
+	}
+}
+
+func TestReconcileAPI_PodSpecOverlay(t *testing.T) {
+	scheme := testScheme(t)
+	nom := nominatimWithConnectionSecret("api-podspec")
+	overlay, _ := json.Marshal(corev1.PodSpec{
+		NodeSelector: map[string]string{"disk": "nvme"},
+		Containers: []corev1.Container{{
+			Name:  "api",
+			Image: "evil:ignore-me",
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")},
+			},
+			LivenessProbe: &corev1.Probe{
+				ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/ready"}},
+			},
+			Env: []corev1.EnvVar{
+				{Name: "NOMINATIM_DATABASE_DSN", Value: "user-should-lose"},
+				{Name: "EXTRA", Value: "1"},
+			},
+		}},
+	})
+	nom.Spec.API = &nominatimv1alpha1.APISpec{
+		Image:   &nominatimv1alpha1.ImageSpec{Repository: "example.com/api", Tag: "sealed"},
+		PodSpec: &runtime.RawExtension{Raw: overlay},
+	}
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+
+	if err := r.reconcileAPI(context.Background(), nom, "project-pvc", ""); err != nil {
+		t.Fatalf("reconcileAPI: %v", err)
+	}
+	deploy := &appsv1.Deployment{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: APIName(nom), Namespace: "default"}, deploy); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	spec := deploy.Spec.Template.Spec
+	if spec.NodeSelector["disk"] != "nvme" {
+		t.Fatalf("nodeSelector=%v", spec.NodeSelector)
+	}
+	c0 := spec.Containers[0]
+	if c0.Image != "example.com/api:sealed" {
+		t.Fatalf("image seal=%q", c0.Image)
+	}
+	if len(c0.Ports) != 1 || c0.Ports[0].ContainerPort != workloadContainerPort {
+		t.Fatalf("ports=%v", c0.Ports)
+	}
+	if c0.Resources.Requests.Cpu().String() != "100m" {
+		t.Fatalf("cpu=%v", c0.Resources.Requests)
+	}
+	if c0.LivenessProbe == nil || c0.LivenessProbe.HTTPGet == nil || c0.LivenessProbe.HTTPGet.Path != "/ready" {
+		t.Fatalf("probe=%v", c0.LivenessProbe)
+	}
+	env := envMap(c0.Env)
+	if env["EXTRA"] != "1" {
+		t.Fatalf("extra env missing: %v", env)
+	}
+	if env["NOMINATIM_DATABASE_DSN"] == "user-should-lose" {
+		t.Fatal("reserved env must not take overlay value")
+	}
+}
+
+func TestReconcileAPI_PodSpecInvalidJSON(t *testing.T) {
+	scheme := testScheme(t)
+	nom := nominatimWithConnectionSecret("api-bad-podspec")
+	nom.Spec.API = &nominatimv1alpha1.APISpec{
+		PodSpec: &runtime.RawExtension{Raw: []byte(`{`)},
+	}
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	if err := r.reconcileAPI(context.Background(), nom, "project-pvc", ""); err == nil {
+		t.Fatal("expected error for invalid podSpec JSON")
+	}
+}
+
+func TestBuildOperationJob_WorkerPodSpecOverlay(t *testing.T) {
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "job-podspec", Namespace: "ns"},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
+		},
+	}
+	overlay, _ := json.Marshal(corev1.PodSpec{
+		Tolerations: []corev1.Toleration{{Key: "spot", Operator: corev1.TolerationOpExists}},
+		Containers: []corev1.Container{{
+			Name: "worker",
+			Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("2Gi")},
+			},
+		}},
+	})
+	parent := &nominatimv1alpha1.Nominatim{
+		ObjectMeta: metav1.ObjectMeta{Name: "mynom", Namespace: "ns"},
+		Spec: nominatimv1alpha1.NominatimSpec{
+			Project: nominatimv1alpha1.ProjectSpec{
+				Volume: nominatimv1alpha1.VolumeSource{ClaimName: "project-pvc"},
+			},
+			Worker: &nominatimv1alpha1.WorkerSpec{
+				PodSpec: &runtime.RawExtension{Raw: overlay},
+			},
+		},
+		Status: nominatimv1alpha1.NominatimStatus{
+			Database: nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: "db"},
+		},
+	}
+	job := mustBuildOperationJob(t, op, parent, "staging-pvc", "worker:v1", corev1.PullIfNotPresent)
+	spec := job.Spec.Template.Spec
+	if len(spec.Tolerations) != 1 || spec.Tolerations[0].Key != "spot" {
+		t.Fatalf("tolerations=%v", spec.Tolerations)
+	}
+	if spec.Containers[0].Image != "worker:v1" {
+		t.Fatalf("image=%q", spec.Containers[0].Image)
+	}
+	if spec.Containers[0].Resources.Limits.Memory().String() != "2Gi" {
+		t.Fatalf("memory=%v", spec.Containers[0].Resources.Limits)
 	}
 }
 

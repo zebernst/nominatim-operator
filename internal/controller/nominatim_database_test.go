@@ -502,6 +502,60 @@ func TestReconcileDatabase_Cluster_PreservesExpandedManagedRoles(t *testing.T) {
 	}
 }
 
+func TestReconcileDatabase_Cluster_InstanceTune(t *testing.T) {
+	scheme := testScheme(t)
+	nom := ownedClusterNominatim("tune", "fast-ssd", 1)
+	affinityJSON := []byte(`{"nodeSelector":{"node-role.kubernetes.io/postgres":""},"enablePodAntiAffinity":true,"topologyKey":"kubernetes.io/hostname"}`)
+	nom.Spec.Database.Cluster.Resources = &corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")},
+	}
+	nom.Spec.Database.Cluster.Affinity = &runtime.RawExtension{Raw: affinityJSON}
+	nom.Spec.Database.Cluster.TopologySpreadConstraints = []corev1.TopologySpreadConstraint{{
+		MaxSkew:           1,
+		TopologyKey:       "topology.kubernetes.io/zone",
+		WhenUnsatisfiable: corev1.DoNotSchedule,
+		LabelSelector:     &metav1.LabelSelector{MatchLabels: map[string]string{"app": "pg"}},
+	}}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+
+	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
+		t.Fatalf("reconcileDatabase: %v", err)
+	}
+	got := &unstructured.Unstructured{}
+	got.SetGroupVersionKind(CNPGClusterGVK)
+	if err := c.Get(context.Background(), types.NamespacedName{Name: OwnedCNPGClusterName(nom), Namespace: "default"}, got); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	mem, found, err := unstructured.NestedString(got.Object, "spec", "resources", "requests", "memory")
+	if err != nil || !found || mem != "1Gi" {
+		t.Fatalf("resources.memory=%q found=%v err=%v", mem, found, err)
+	}
+	ns, found, err := unstructured.NestedStringMap(got.Object, "spec", "affinity", "nodeSelector")
+	if err != nil || !found || ns["node-role.kubernetes.io/postgres"] != "" {
+		t.Fatalf("affinity.nodeSelector=%v found=%v err=%v", ns, found, err)
+	}
+	tsc, found, err := unstructured.NestedSlice(got.Object, "spec", "topologySpreadConstraints")
+	if err != nil || !found || len(tsc) != 1 {
+		t.Fatalf("topologySpreadConstraints=%v found=%v err=%v", tsc, found, err)
+	}
+	img, _, _ := unstructured.NestedString(got.Object, "spec", "imageName")
+	if img != cnpgDefaultPostGISImage {
+		t.Fatalf("imageName seal broken: %q", img)
+	}
+}
+
+func TestApplyOwnedCNPGClusterTune_InvalidAffinity(t *testing.T) {
+	cluster := &unstructured.Unstructured{Object: map[string]interface{}{}}
+	cluster.SetGroupVersionKind(CNPGClusterGVK)
+	err := applyOwnedCNPGClusterTune(cluster, &nominatimv1alpha1.DatabaseClusterCreate{
+		Affinity: &runtime.RawExtension{Raw: []byte(`{`)},
+	})
+	if err == nil {
+		t.Fatal("expected affinity decode error")
+	}
+}
+
 func TestReconcileDatabase_Cluster_NoHardcodedStorageClass(t *testing.T) {
 	scheme := testScheme(t)
 	nom := baseNominatim("nostorageclass")

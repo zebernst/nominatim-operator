@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 const (
@@ -122,7 +123,13 @@ type DatabaseClusterRef struct {
 	ConnectionSecretRef *LocalObjectReference `json:"connectionSecretRef,omitempty"`
 }
 
-// DatabaseClusterCreate creates a postgresql.cnpg.io/v1 Cluster.
+// DatabaseClusterCreate creates a postgresql.cnpg.io/v1 Cluster owned by this Nominatim.
+//
+// This is an instance-tune surface (instances, storage, resources, affinity,
+// topologySpreadConstraints) — not a full CNPG ClusterSpec. Operator-owned fields
+// (PostGIS imageName, create-only bootstrap.initdb, managed www-data role) are not
+// exposed here. For full CNPG control (backup, certificates, custom bootstrap), use
+// database.clusterRef to attach a hand-authored Cluster.
 type DatabaseClusterCreate struct {
 	// Storage for the CNPG Cluster (passthrough size/storageClass; no node-specific assumptions).
 	// +optional
@@ -133,6 +140,20 @@ type DatabaseClusterCreate struct {
 	// +kubebuilder:default=1
 	// +kubebuilder:validation:Minimum=1
 	Instances *int32 `json:"instances,omitempty"`
+
+	// Resources for every generated Postgres instance Pod (CNPG spec.resources).
+	// +optional
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// Affinity is a CNPG AffinityConfiguration overlay (nodeSelector, tolerations,
+	// enablePodAntiAffinity, topologyKey, …) written to spec.affinity.
+	// +optional
+	// +kubebuilder:pruning:PreserveUnknownFields
+	Affinity *runtime.RawExtension `json:"affinity,omitempty"`
+
+	// TopologySpreadConstraints maps to CNPG Cluster spec.topologySpreadConstraints.
+	// +optional
+	TopologySpreadConstraints []corev1.TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
 }
 
 // PostgresProfiles holds CNPG-oriented postgres parameter profiles (import vs runtime).
@@ -242,9 +263,15 @@ type APISpec struct {
 	// +kubebuilder:validation:Minimum=0
 	Replicas *int32 `json:"replicas,omitempty"`
 
-	// Image for the API container.
+	// Image for the API container (sole supported image hatch; podSpec.containers[].image is ignored).
 	// +optional
 	Image *ImageSpec `json:"image,omitempty"`
+
+	// PodSpec is a user overlay merged into the operator-built API PodSpec (affinity,
+	// tolerations, resources, probes, sidecars, …). Not a DeploymentSpec passthrough.
+	// +optional
+	// +kubebuilder:pruning:PreserveUnknownFields
+	PodSpec *runtime.RawExtension `json:"podSpec,omitempty"`
 
 	// Route configures Gateway API HTTPRoute when set.
 	// +optional
@@ -266,9 +293,14 @@ type UISpec struct {
 	// +kubebuilder:validation:Minimum=0
 	Replicas *int32 `json:"replicas,omitempty"`
 
-	// Image for the UI container.
+	// Image for the UI container (sole supported image hatch; podSpec.containers[].image is ignored).
 	// +optional
 	Image *ImageSpec `json:"image,omitempty"`
+
+	// PodSpec is a user overlay merged into the operator-built UI PodSpec.
+	// +optional
+	// +kubebuilder:pruning:PreserveUnknownFields
+	PodSpec *runtime.RawExtension `json:"podSpec,omitempty"`
 
 	// Route configures Gateway API HTTPRoute when set.
 	// +optional
@@ -279,8 +311,14 @@ type UISpec struct {
 // Bootstrap / AddRegions / Reimport / Update Jobs.
 type WorkerSpec struct {
 	// Image for Operation Job containers. Defaults to ghcr.io/zebernst/nominatim-worker:latest.
+	// Sole supported image hatch; podSpec.containers[].image is ignored.
 	// +optional
 	Image *ImageSpec `json:"image,omitempty"`
+
+	// PodSpec is a user overlay merged into Operation Job PodSpecs (including Update Jobs).
+	// +optional
+	// +kubebuilder:pruning:PreserveUnknownFields
+	PodSpec *runtime.RawExtension `json:"podSpec,omitempty"`
 }
 
 // NominatimSpec defines the desired state of Nominatim (GitOps surface).

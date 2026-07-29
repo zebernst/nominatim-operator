@@ -20,12 +20,22 @@ import (
 	"testing"
 
 	. "github.com/onsi/gomega"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	nominatimv1alpha1 "github.com/zebernst/nominatim-operator/api/v1alpha1"
 )
+
+func mustBuildOperationJob(t *testing.T, op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim, stagingClaim, image string, pullPolicy corev1.PullPolicy) *batchv1.Job { //nolint:unparam // mirrors buildOperationJob signature for call-site clarity
+	t.Helper()
+	job, err := buildOperationJob(op, parent, stagingClaim, image, pullPolicy)
+	if err != nil {
+		t.Fatalf("buildOperationJob: %v", err)
+	}
+	return job
+}
 
 func TestIsWriteHeavyOperation(t *testing.T) {
 	g := NewWithT(t)
@@ -224,7 +234,7 @@ func TestBuildOperationJob(t *testing.T) {
 			},
 		},
 	}
-	job := buildOperationJob(op, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
+	job := mustBuildOperationJob(t, op, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
 	g.Expect(job.Name).To(Equal("boot-1"))
 	g.Expect(job.Spec.Template.Spec.RestartPolicy).To(Equal(corev1.RestartPolicyNever))
 	g.Expect(job.Spec.Template.Spec.Containers).To(HaveLen(1))
@@ -240,7 +250,7 @@ func TestBuildOperationJob(t *testing.T) {
 	opNoRegions := op.DeepCopy()
 	opNoRegions.Spec.Regions = nil
 	parent.Spec.Regions = []string{"africa/morocco"}
-	job = buildOperationJob(opNoRegions, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
+	job = mustBuildOperationJob(t, opNoRegions, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
 	g.Expect(envValue(job.Spec.Template.Spec.Containers[0].Env, "NOMINATIM_REGIONS")).To(Equal("africa/morocco"))
 }
 
@@ -265,7 +275,7 @@ func TestBuildOperationJob_ReimportSetsConfirmEnv(t *testing.T) {
 			Database: nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: "pg-secret"},
 		},
 	}
-	job := buildOperationJob(op, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
+	job := mustBuildOperationJob(t, op, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
 	c := job.Spec.Template.Spec.Containers[0]
 	g.Expect(envValue(c.Env, "NOMINATIM_REIMPORT_CONFIRM")).To(Equal("1"))
 	g.Expect(envValue(c.Env, "OPERATION_TYPE")).To(Equal("Reimport"))
@@ -292,7 +302,7 @@ func TestBuildOperationJob_IncludesDBEnvAndPBFURLForBootstrap(t *testing.T) {
 			Database: nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: "pg-secret"},
 		},
 	}
-	job := buildOperationJob(op, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
+	job := mustBuildOperationJob(t, op, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
 	c := job.Spec.Template.Spec.Containers[0]
 
 	g.Expect(envValue(c.Env, "PBF_URL")).To(Equal("https://download.geofabrik.de/europe/monaco-latest.osm.pbf"))
@@ -329,7 +339,7 @@ func TestBuildOperationJob_NoPBFURLForNonWriteHeavyOperation(t *testing.T) {
 			},
 		},
 	}
-	job := buildOperationJob(op, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
+	job := mustBuildOperationJob(t, op, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
 	c := job.Spec.Template.Spec.Containers[0]
 	g.Expect(findEnvVar(c.Env, "PBF_URL")).To(BeNil())
 }
@@ -351,7 +361,7 @@ func TestBuildOperationJob_NoDBEnvWhenConnectionSecretNameEmpty(t *testing.T) {
 			},
 		},
 	}
-	job := buildOperationJob(op, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
+	job := mustBuildOperationJob(t, op, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
 	c := job.Spec.Template.Spec.Containers[0]
 	g.Expect(findEnvVar(c.Env, "NOMINATIM_DATABASE_DSN")).To(BeNil())
 }

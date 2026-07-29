@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
@@ -178,6 +179,9 @@ func (r *NominatimReconciler) reconcileDatabaseClusterCreate(ctx context.Context
 					}
 				}
 			}
+			if err := applyOwnedCNPGClusterTune(cluster, create); err != nil {
+				return err
+			}
 			if err := unstructured.SetNestedField(cluster.Object, cnpgDefaultPostGISImage, "spec", "imageName"); err != nil {
 				return err
 			}
@@ -214,6 +218,51 @@ func (r *NominatimReconciler) reconcileDatabaseClusterCreate(ctx context.Context
 		ClusterName:          clusterName,
 		ConnectionSecretName: CNPGAppSecretName(clusterName),
 		Degraded:             false,
+	}
+	return nil
+}
+
+// applyOwnedCNPGClusterTune writes instance-tune fields (resources, affinity,
+// topologySpreadConstraints) from DatabaseClusterCreate onto the Cluster unstructured.
+// Bootstrap / imageName / managed.roles are not accepted from the CR — they stay operator-owned.
+func applyOwnedCNPGClusterTune(cluster *unstructured.Unstructured, create *nominatimv1alpha1.DatabaseClusterCreate) error {
+	if create == nil {
+		return nil
+	}
+	if create.Resources != nil {
+		raw, err := json.Marshal(create.Resources)
+		if err != nil {
+			return fmt.Errorf("marshal cluster.resources: %w", err)
+		}
+		var asMap map[string]interface{}
+		if err := json.Unmarshal(raw, &asMap); err != nil {
+			return fmt.Errorf("decode cluster.resources: %w", err)
+		}
+		if err := unstructured.SetNestedMap(cluster.Object, asMap, "spec", "resources"); err != nil {
+			return err
+		}
+	}
+	if create.Affinity != nil && len(create.Affinity.Raw) > 0 {
+		var affinity map[string]interface{}
+		if err := json.Unmarshal(create.Affinity.Raw, &affinity); err != nil {
+			return fmt.Errorf("decode cluster.affinity: %w", err)
+		}
+		if err := unstructured.SetNestedMap(cluster.Object, affinity, "spec", "affinity"); err != nil {
+			return err
+		}
+	}
+	if len(create.TopologySpreadConstraints) > 0 {
+		raw, err := json.Marshal(create.TopologySpreadConstraints)
+		if err != nil {
+			return fmt.Errorf("marshal cluster.topologySpreadConstraints: %w", err)
+		}
+		var asSlice []interface{}
+		if err := json.Unmarshal(raw, &asSlice); err != nil {
+			return fmt.Errorf("decode cluster.topologySpreadConstraints: %w", err)
+		}
+		if err := unstructured.SetNestedSlice(cluster.Object, asSlice, "spec", "topologySpreadConstraints"); err != nil {
+			return err
+		}
 	}
 	return nil
 }
