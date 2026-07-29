@@ -373,7 +373,7 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 	})
 
-	Context("Monaco import", Ordered, func() {
+	Context("Monaco+Andorra import", Ordered, func() {
 		const (
 			validationNamespace = "nominatim-validation"
 			nomName             = "monaco"
@@ -383,14 +383,14 @@ var _ = Describe("Manager", Ordered, func() {
 
 		BeforeAll(func() {
 			if !runImportE2E {
-				Skip("set E2E_IMPORT=1 to run Monaco import e2e (CNPG + api/worker images)")
+				Skip("set E2E_IMPORT=1 to run Monaco+Andorra import e2e (CNPG + api/worker images)")
 			}
 
-			By("applying Monaco Nominatim fixture (database.cluster + regions)")
-			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-monaco.yaml")
+			By("applying Monaco+Andorra Nominatim fixture (database.cluster + regions)")
+			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-monaco-andorra.yaml")
 			cmd := exec.Command("kubectl", "apply", "-f", fixture)
 			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to apply Monaco fixtures")
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply Monaco+Andorra fixtures")
 		})
 
 		AfterEach(func() {
@@ -404,18 +404,18 @@ var _ = Describe("Manager", Ordered, func() {
 			if !runImportE2E {
 				return
 			}
-			By("deleting Monaco validation fixtures")
+			By("deleting Monaco+Andorra validation fixtures")
 			reimport := filepath.Join("test", "e2e", "testdata", "nominatim-monaco-reimport.yaml")
 			cmd := exec.Command("kubectl", "delete", "-f", reimport, "--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
-			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-monaco.yaml")
+			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-monaco-andorra.yaml")
 			cmd = exec.Command("kubectl", "delete", "-f", fixture, "--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 			cmd = exec.Command("kubectl", "delete", "ns", validationNamespace, "--ignore-not-found=true", "--wait=false")
 			_, _ = utils.Run(cmd)
 		})
 
-		It("bootstraps Monaco and answers avenue pasteur search", func() {
+		It("bootstraps monaco+andorra, syncs status.regions, and serves both countries", func() {
 			By("waiting for CNPG Cluster Ready")
 			Eventually(func(g Gomega) {
 				cmd := exec.Command("kubectl", "get", "cluster.postgresql.cnpg.io", nomName+"-pg",
@@ -437,10 +437,27 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(out).To(Equal("Succeeded"))
 			}, 40*time.Minute, 15*time.Second).Should(Succeed())
 
+			By("asserting status.regions lists both Spec regions")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "nominatim", nomName,
+					"-n", validationNamespace,
+					"-o", "jsonpath={.status.regions[*].name}")
+				out, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				names := strings.Fields(out)
+				g.Expect(names).To(ContainElement("europe/monaco"))
+				g.Expect(names).To(ContainElement("europe/andorra"))
+			}, 2*time.Minute, 5*time.Second).Should(Succeed())
+
 			waitForAPIServing(validationNamespace, nomName+"-api")
 
-			By("probing /search?q=avenue%20pasteur until non-empty JSON")
-			assertNonEmptySearch(validationNamespace, nomName+"-api")
+			// status.regions alone can lie (copied from Spec after Bootstrap Succeeded).
+			// Country-scoped probes fail if only one extract landed in the database.
+			By("probing Monaco-scoped and Andorra-scoped search until both return hits")
+			assertNonEmptySearchQuery(validationNamespace, nomName+"-api",
+				"avenue%20pasteur&countrycodes=mc")
+			assertNonEmptySearchQuery(validationNamespace, nomName+"-api",
+				"andorra%20la%20vella&countrycodes=ad")
 		})
 
 		// Reimport must start from an empty application database so CNPG (as superuser)
@@ -474,8 +491,11 @@ var _ = Describe("Manager", Ordered, func() {
 			// the operator scales serving back up once the Operation reaches a terminal phase.
 			waitForAPIServing(validationNamespace, nomName+"-api")
 
-			By("probing /search?q=avenue%20pasteur again after Reimport")
-			assertNonEmptySearch(validationNamespace, nomName+"-api")
+			By("probing both countries again after Reimport")
+			assertNonEmptySearchQuery(validationNamespace, nomName+"-api",
+				"avenue%20pasteur&countrycodes=mc")
+			assertNonEmptySearchQuery(validationNamespace, nomName+"-api",
+				"andorra%20la%20vella&countrycodes=ad")
 		})
 	})
 })
@@ -571,16 +591,20 @@ func waitForAPIServing(ns, name string) {
 	}, 10*time.Minute, 5*time.Second).Should(Succeed())
 }
 
-// assertNonEmptySearch port-forwards the API Service and retries until search returns hits
-// (parity with mediagis/nominatim-docker assert-non-empty-json).
-func assertNonEmptySearch(ns, svc string) {
+// assertNonEmptySearchQuery port-forwards the API Service and retries until /search returns
+// hits for the given query string (already URL-encoded, without the leading "q=").
+//
+// countrycodes= filters are preferred for multi-region Bootstrap: a bare free-text probe can
+// pass when only one of several Spec regions actually landed in the database.
+func assertNonEmptySearchQuery(ns, svc, query string) {
+	By("probing /search?q=" + query + " until non-empty JSON")
 	pf := &portForward{ns: ns, svc: svc, local: apiLocalPort}
 	defer pf.stop()
 
 	Eventually(func(g Gomega) {
 		g.Expect(pf.ensure()).To(Succeed(), "could not port-forward svc/%s: %s", svc, pf.lastExit())
 
-		out, err := searchAvenuePasteur(apiLocalPort)
+		out, err := searchQuery(apiLocalPort, query)
 		if err != nil {
 			// A tunnel can also survive its backend and refuse every connection, so rebuild
 			// it before the next attempt instead of retrying against a dead local port.
@@ -591,15 +615,15 @@ func assertNonEmptySearch(ns, svc string) {
 	}, 10*time.Minute, 5*time.Second).Should(Succeed())
 }
 
-// searchAvenuePasteur queries the forwarded API and fails unless the response is a non-empty
+// searchQuery queries the forwarded API and fails unless the response is a non-empty
 // JSON array of results.
-func searchAvenuePasteur(port int) (string, error) {
+func searchQuery(port int, query string) (string, error) {
 	probe := fmt.Sprintf(`
 import json, urllib.request
-with urllib.request.urlopen("http://127.0.0.1:%d/search?q=avenue%%20pasteur", timeout=30) as r:
+with urllib.request.urlopen("http://127.0.0.1:%d/search?q=%s", timeout=30) as r:
     data = json.loads(r.read())
 assert isinstance(data, list) and len(data) > 0, data
-`, port)
+`, port, query)
 	out, err := exec.Command("python3", "-c", probe).CombinedOutput()
 	return string(out), err
 }

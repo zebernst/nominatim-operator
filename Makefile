@@ -79,10 +79,10 @@ test-e2e: manifests generate fmt vet ## Run e2e on Kind: build/load image, insta
 	}
 	go test ./test/e2e/ -v -ginkgo.v -timeout 40m
 
-# Monaco import e2e (CNPG + api/worker images + Geofabrik), including the Reimport
-# drop/recreate handshake. Longer timeout; set E2E_IMPORT=1.
+# Monaco+Andorra import e2e (CNPG + api/worker images + Geofabrik multi --osm-file),
+# including the Reimport drop/recreate handshake. Longer timeout; set E2E_IMPORT=1.
 .PHONY: test-e2e-import
-test-e2e-import: manifests generate fmt vet ## Run Monaco import e2e on Kind (requires Docker + network).
+test-e2e-import: manifests generate fmt vet ## Run Monaco+Andorra import e2e on Kind (requires Docker + network).
 	@command -v $(KIND) >/dev/null 2>&1 || { \
 		echo "Kind is not installed. Please install Kind (https://kind.sigs.k8s.io/)."; \
 		exit 1; \

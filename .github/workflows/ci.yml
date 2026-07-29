@@ -92,7 +92,7 @@ jobs:
   e2e-import:
     name: E2E Import
     runs-on: ubuntu-latest
-    # Bootstrap + Reimport both run a full Monaco import; the go test timeout (110m in
+    # Bootstrap + Reimport both run a full monaco+andorra import; the go test timeout (110m in
     # test-e2e-import) is deliberately lower so Ginkgo reports before the job is killed.
     timeout-minutes: 120
     steps:
@@ -124,7 +124,7 @@ jobs:
       - name: Create kind cluster
         run: kind create cluster --name kind --wait 120s
 
-      - name: E2E Import (CNPG + Monaco Bootstrap + search probe + Reimport DB reset)
+      - name: E2E Import (CNPG + monaco+andorra Bootstrap + country probes + Reimport DB reset)
         run: |
           go mod tidy
           make test-e2e-import

@@ -1,8 +1,13 @@
 # Kind validation lab
 
-Canonical Monaco Nominatim fixture (shared with CI import e2e):
+Canonical Monaco Nominatim fixture (shared with the kind validation lab):
 
 [`../e2e/testdata/nominatim-monaco.yaml`](../e2e/testdata/nominatim-monaco.yaml)
+
+CI import e2e uses a separate multi-region fixture
+([`nominatim-monaco-andorra.yaml`](../e2e/testdata/nominatim-monaco-andorra.yaml)) so Bootstrap
+exercises multiple `--osm-file` flags. The lab keeps monaco-only Bootstrap and grows coverage
+via day-2 **AddRegions** (`RUN_ADD_REGIONS=1`).
 
 ## Quick start
 
