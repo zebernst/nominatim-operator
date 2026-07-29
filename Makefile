@@ -60,6 +60,10 @@ vet: ## Run go vet against code.
 .PHONY: test
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+	./hack/check-coverage.sh cover.out
+
+.PHONY: coverage
+coverage: test ## Alias: run tests and enforce .coverage-thresholds.json.
 
 # E2E assumes Kind. Creates a local 'kind' cluster when none exists (CI creates it explicitly).
 # CertManager is installed by default; skip with CERT_MANAGER_INSTALL_SKIP=true.

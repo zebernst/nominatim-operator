@@ -51,6 +51,9 @@ jobs:
           go mod tidy
           make test
 
+      - name: Coverage gate
+        run: ./hack/check-coverage.sh cover.out
+
   e2e:
     name: E2E
     runs-on: ubuntu-latest
