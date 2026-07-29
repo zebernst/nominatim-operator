@@ -71,3 +71,28 @@ func TestWaitForPostgresDefaultIsShortened(t *testing.T) {
 		t.Error("common.sh wait_for_postgres must not retain the old 90-attempt (~180s) upper bound")
 	}
 }
+
+// TestSequenceReportHelperWired asserts workers report Geofabrik sequence.state
+// back to the NominatimOperation annotation after Bootstrap/AddRegions/Update.
+func TestSequenceReportHelperWired(t *testing.T) {
+	common, err := os.ReadFile("common.sh")
+	if err != nil {
+		t.Fatalf("reading common.sh: %v", err)
+	}
+	if !strings.Contains(string(common), "report_sequence_states()") {
+		t.Error("common.sh must define report_sequence_states")
+	}
+	if !strings.Contains(string(common), "nominatim.zebernst.dev/sequence-report") {
+		t.Error("common.sh must PATCH nominatim.zebernst.dev/sequence-report")
+	}
+
+	for _, name := range []string{"bootstrap.sh", "update.sh", "add-regions.sh"} {
+		contents, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		if !strings.Contains(string(contents), "report_sequence_states") {
+			t.Errorf("%s must call report_sequence_states", name)
+		}
+	}
+}

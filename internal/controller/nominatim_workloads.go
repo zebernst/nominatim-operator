@@ -107,6 +107,10 @@ func (r *NominatimReconciler) reconcileWorkloads(ctx context.Context, nom *nomin
 		}
 	}
 
+	if err := r.ensureWorkerReporterRBAC(ctx, nom); err != nil {
+		return fmt.Errorf("reconcile worker reporter RBAC: %w", err)
+	}
+
 	if err := r.reconcileAPI(ctx, nom, projectClaim, flatnodeClaim); err != nil {
 		return err
 	}

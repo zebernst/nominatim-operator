@@ -25,6 +25,7 @@ finish_bootstrap() {
 
   touch "${IMPORT_FINISHED}"
   log "Bootstrap complete; wrote ${IMPORT_FINISHED}"
+  report_sequence_states
 }
 
 # A leftover import-finished on the project PVC must not succeed Bootstrap when the

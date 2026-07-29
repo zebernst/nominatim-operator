@@ -241,8 +241,12 @@ func TestBuildOperationJob(t *testing.T) {
 	c := job.Spec.Template.Spec.Containers[0]
 	g.Expect(c.Image).To(Equal(resolveImage(nil, defaultWorkerRepository)))
 	g.Expect(envValue(c.Env, "OPERATION_TYPE")).To(Equal("Bootstrap"))
+	g.Expect(envValue(c.Env, "NOMINATIM_OPERATION_NAME")).To(Equal("boot-1"))
 	g.Expect(envValue(c.Env, "NOMINATIM_REGIONS")).To(Equal("europe/monaco"))
 	g.Expect(envValue(c.Env, "NOMINATIM_FLATNODE_FILE")).To(Equal(flatnodeFilePath))
+	g.Expect(job.Spec.Template.Spec.ServiceAccountName).To(Equal("mynom-worker"))
+	g.Expect(job.Spec.Template.Spec.AutomountServiceAccountToken).NotTo(BeNil())
+	g.Expect(*job.Spec.Template.Spec.AutomountServiceAccountToken).To(BeTrue())
 	g.Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(3))
 	g.Expect(c.VolumeMounts).To(HaveLen(3))
 

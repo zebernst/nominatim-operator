@@ -46,3 +46,5 @@ if [ "${CHANGED}" = "true" ]; then
 else
   log "No new regions imported"
 fi
+
+report_sequence_states

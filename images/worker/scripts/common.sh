@@ -412,6 +412,131 @@ assert_imported_list_complete() {
   fi
 }
 
+# format_sequence_state reads a Geofabrik state.txt / sequence.state and prints
+# "sequenceNumber@timestamp" (timestamp backslashes stripped). Empty if unreadable.
+format_sequence_state() {
+  local state_file="$1"
+  if [ ! -f "${state_file}" ]; then
+    return 0
+  fi
+  local seq ts
+  seq="$(grep -E '^sequenceNumber=' "${state_file}" | head -n1 | cut -d= -f2- || true)"
+  ts="$(grep -E '^timestamp=' "${state_file}" | head -n1 | cut -d= -f2- | tr -d '\\' || true)"
+  if [ -z "${seq}" ]; then
+    return 0
+  fi
+  if [ -n "${ts}" ]; then
+    printf '%s@%s\n' "${seq}" "${ts}"
+  else
+    printf '%s\n' "${seq}"
+  fi
+}
+
+# report_sequence_states PATCHes nominatim.zebernst.dev/sequence-report onto the
+# current NominatimOperation (NOMINATIM_OPERATION_NAME) so the operator can copy
+# values into status.regions[].sequenceState. Best-effort: missing SA token or
+# API errors are logged and ignored so import/update success is not blocked.
+report_sequence_states() {
+  local op_name="${NOMINATIM_OPERATION_NAME:-}"
+  local token_file="${KUBERNETES_SERVICEACCOUNT_TOKEN:-/var/run/secrets/kubernetes.io/serviceaccount/token}"
+  local ca_file="${KUBERNETES_SERVICEACCOUNT_CA:-/var/run/secrets/kubernetes.io/serviceaccount/ca.crt}"
+  local ns_file="${KUBERNETES_SERVICEACCOUNT_NAMESPACE:-/var/run/secrets/kubernetes.io/serviceaccount/namespace}"
+  local api_host="${KUBERNETES_SERVICE_HOST:-}"
+  local api_port="${KUBERNETES_SERVICE_PORT_HTTPS:-${KUBERNETES_SERVICE_PORT:-443}}"
+
+  if [ -z "${op_name}" ]; then
+    log "Skipping sequence report: NOMINATIM_OPERATION_NAME unset"
+    return 0
+  fi
+  if [ ! -f "${token_file}" ] || [ ! -f "${ns_file}" ]; then
+    log "Skipping sequence report: service account credentials not mounted"
+    return 0
+  fi
+  if [ -z "${api_host}" ]; then
+    log "Skipping sequence report: KUBERNETES_SERVICE_HOST unset"
+    return 0
+  fi
+
+  parse_regions
+  local desired_csv=""
+  if [ "${#DESIRED_REGIONS[@]}" -gt 0 ]; then
+    desired_csv="$(IFS=,; echo "${DESIRED_REGIONS[*]}")"
+  fi
+  local report
+  report="$(
+    PROJECT_DIR="${PROJECT_DIR}" DESIRED_CSV="${desired_csv}" python3 - <<'PY'
+import json, os, pathlib, re
+
+project = pathlib.Path(os.environ["PROJECT_DIR"])
+desired = [r for r in os.environ.get("DESIRED_CSV", "").split(",") if r]
+if desired:
+    regions = desired
+else:
+    regions = sorted(
+        str(p.parent.relative_to(project / "update"))
+        for p in (project / "update").glob("**/sequence.state")
+    )
+
+out = {}
+for region in regions:
+    state = project / "update" / region / "sequence.state"
+    if not state.is_file():
+        continue
+    text = state.read_text(encoding="utf-8", errors="replace")
+    seq_m = re.search(r"^sequenceNumber=(.+)$", text, re.M)
+    ts_m = re.search(r"^timestamp=(.+)$", text, re.M)
+    if not seq_m:
+        continue
+    seq = seq_m.group(1).strip()
+    if ts_m:
+        ts = ts_m.group(1).strip().replace("\\", "")
+        out[region] = f"{seq}@{ts}"
+    else:
+        out[region] = seq
+print(json.dumps(out, separators=(",", ":")))
+PY
+  )" || {
+    log "Warning: failed to build sequence report JSON"
+    return 0
+  }
+
+  if [ "${report}" = "{}" ] || [ -z "${report}" ]; then
+    log "No sequence.state files to report"
+    return 0
+  fi
+
+  local ns token
+  ns="$(cat "${ns_file}")"
+  token="$(cat "${token_file}")"
+  local url="https://${api_host}:${api_port}/apis/nominatim.zebernst.dev/v1alpha1/namespaces/${ns}/nominatimoperations/${op_name}"
+  local body
+  body="$(REPORT_JSON="${report}" python3 - <<'PY'
+import json, os
+report = os.environ["REPORT_JSON"]
+print(json.dumps({
+    "metadata": {
+        "annotations": {
+            "nominatim.zebernst.dev/sequence-report": report,
+        }
+    }
+}))
+PY
+)"
+
+  if ! curl -fsS \
+      --connect-timeout 5 --max-time 30 \
+      -X PATCH \
+      -H "Authorization: Bearer ${token}" \
+      -H "Content-Type: application/merge-patch+json" \
+      --cacert "${ca_file}" \
+      -d "${body}" \
+      "${url}" >/dev/null; then
+    log "Warning: failed to PATCH sequence-report onto NominatimOperation ${op_name}"
+    return 0
+  fi
+  log "Reported sequence state for $(echo "${report}" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))') region(s)"
+}
+
 prepare_worker() {
   require_db_env
   mkdir -p "${STAGING_DIR}" "${PROJECT_DIR}" "${PROJECT_DIR}/update"

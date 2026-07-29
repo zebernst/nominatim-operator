@@ -1490,8 +1490,10 @@ spec:
                         Updating, Error).
                       type: string
                     sequenceState:
-                      description: SequenceState reflects the last known update sequence
-                        identity when available.
+                      description: |-
+                        SequenceState is the last known Geofabrik update identity for this region
+                        (typically "sequenceNumber@timestamp" from update/<region>/sequence.state),
+                        reported by the worker after Bootstrap/AddRegions/Update/CatchUp.
                       type: string
                   required:
                   - name

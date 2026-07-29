@@ -438,7 +438,9 @@ type RegionStatus struct {
 	// +optional
 	Phase string `json:"phase,omitempty"`
 
-	// SequenceState reflects the last known update sequence identity when available.
+	// SequenceState is the last known Geofabrik update identity for this region
+	// (typically "sequenceNumber@timestamp" from update/<region>/sequence.state),
+	// reported by the worker after Bootstrap/AddRegions/Update/CatchUp.
 	// +optional
 	SequenceState string `json:"sequenceState,omitempty"`
 

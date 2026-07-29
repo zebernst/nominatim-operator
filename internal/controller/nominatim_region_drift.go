@@ -43,6 +43,7 @@ func (r *NominatimReconciler) reconcileRegionDrift(ctx context.Context, nom *nom
 	}
 
 	syncRegionsFromDriftOps(nom, ops)
+	applySequenceReports(nom, ops)
 
 	// Bootstrap owns the empty→first-import path.
 	if len(nom.Status.Regions) == 0 {

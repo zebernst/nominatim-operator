@@ -73,3 +73,5 @@ if [ -n "${NOMINATIM_UPDATE_FLAG:-}" ]; then
     rm -f "${NOMINATIM_UPDATE_FLAG}"
   fi
 fi
+
+report_sequence_states

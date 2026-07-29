@@ -49,6 +49,7 @@ func (r *NominatimReconciler) reconcileBootstrap(ctx context.Context, nom *nomin
 	}
 
 	syncRegionsFromBootstrap(nom, ops)
+	applySequenceReports(nom, ops)
 
 	return r.ensureBootstrapOperation(ctx, nom, ops)
 }

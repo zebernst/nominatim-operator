@@ -292,6 +292,7 @@ func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominat
 		{Name: "OPERATION_TYPE", Value: string(op.Spec.Type)},
 		{Name: "PROJECT_DIR", Value: projectMountPath},
 		{Name: "IMPORT_STAGING", Value: stagingMountPath},
+		{Name: "NOMINATIM_OPERATION_NAME", Value: op.Name},
 	}
 	if op.Spec.Type == nominatimv1alpha1.NominatimOperationReimport {
 		// Worker refuses Reimport unless the operator explicitly arms it after
@@ -328,8 +329,11 @@ func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominat
 	}
 
 	backoff := int32(2)
+	automount := true
 	podSpec := corev1.PodSpec{
-		RestartPolicy: corev1.RestartPolicyNever,
+		RestartPolicy:                corev1.RestartPolicyNever,
+		ServiceAccountName:           workerReporterSAName(parent),
+		AutomountServiceAccountToken: &automount,
 		Containers: []corev1.Container{{
 			Name:            "worker",
 			Image:           image,

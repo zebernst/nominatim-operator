@@ -86,6 +86,22 @@ Before creating any `NominatimOperation` Job, the operator checks CNPG Cluster/D
 
 `wait_for_postgres` in `scripts/common.sh` is a **last-mile** check only: it covers the brief gap between Job scheduling and Postgres accepting connections (e.g. pod startup ordering), not a substitute for the operator's gate. It defaults to 15 attempts at a 2s sleep (~30s total) and can be tuned via `NOMINATIM_PG_WAIT_ATTEMPTS` if a deployment's last-mile gap is larger than the default covers.
 
+### Update lag / `status.regions[].sequenceState`
+
+Per-region Geofabrik replication state lives on the project PVC at
+`update/<region>/sequence.state` (seeded at Bootstrap/AddRegions; advanced by
+`pyosmium-get-changes` during Update/CatchUp). The operator cannot read that PVC,
+so the worker **best-effort** PATCHes a JSON map onto the NominatimOperation
+annotation `nominatim.zebernst.dev/sequence-report`. The Nominatim reconciler
+copies those values into `status.regions[].sequenceState` (format
+`sequenceNumber@timestamp`) when the Operation Succeeds.
+
+This is **not** Nominatim's built-in `NOMINATIM_REPLICATION_*` / `nominatim replication`
+lag: multi-extract installs update each Geofabrik region independently via pyosmium.
+`spec.nominatim.replication` (when set) still configures Nominatim's single
+replication URL for tooling that expects it; `sequenceState` is the operator-visible
+per-region pyosmium cursor.
+
 ```bash
 docker run --rm \
   -e OPERATION_TYPE=Bootstrap \
