@@ -371,6 +371,55 @@ var _ = Describe("Manager", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(out).To(Equal("Running"))
 		})
+
+		// Cluster-level counterpart to the envtest NotImplemented fail-fast (nominatim-5et.16 /
+		// nominatim-5et.22): reserved types must not arm a Job or staging PVC.
+		It("fails Refresh/Migrate/Freeze as NotImplemented without creating PVC or Job", func() {
+			By("creating reserved NominatimOperation types against the smoke parent")
+			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-smoke-notimplemented.yaml")
+			cmd := exec.Command("kubectl", "apply", "-f", fixture)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func() {
+				cmd := exec.Command("kubectl", "delete", "-f", fixture, "--ignore-not-found=true")
+				_, _ = utils.Run(cmd)
+			})
+
+			for _, name := range []string{"smoke-refresh", "smoke-migrate", "smoke-freeze"} {
+				By("waiting for " + name + " to Fail with NotImplemented")
+				Eventually(func(g Gomega) {
+					cmd := exec.Command("kubectl", "get", "nominatimoperation", name,
+						"-n", appNamespace,
+						"-o", "jsonpath={.status.phase}")
+					phase, err := utils.Run(cmd)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(phase).To(Equal("Failed"))
+
+					cmd = exec.Command("kubectl", "get", "nominatimoperation", name,
+						"-n", appNamespace,
+						"-o", "jsonpath={.status.message}")
+					msg, err := utils.Run(cmd)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(msg).To(ContainSubstring("NotImplemented"))
+				}, 2*time.Minute, time.Second).Should(Succeed())
+
+				By("asserting " + name + " created neither a Job nor a staging PVC")
+				cmd := exec.Command("kubectl", "get", "job", name,
+					"-n", appNamespace, "--ignore-not-found",
+					"-o", "jsonpath={.metadata.name}")
+				job, err := utils.Run(cmd)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(strings.TrimSpace(job)).To(BeEmpty(), "NotImplemented Op must not create Job %s", name)
+
+				cmd = exec.Command("kubectl", "get", "pvc", name+"-staging",
+					"-n", appNamespace, "--ignore-not-found",
+					"-o", "jsonpath={.metadata.name}")
+				pvc, err := utils.Run(cmd)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(strings.TrimSpace(pvc)).To(BeEmpty(),
+					"NotImplemented Op must not create staging PVC %s-staging", name)
+			}
+		})
 	})
 
 	Context("Monaco+Andorra import", Ordered, func() {
@@ -454,10 +503,8 @@ var _ = Describe("Manager", Ordered, func() {
 			// status.regions alone can lie (copied from Spec after Bootstrap Succeeded).
 			// Country-scoped probes fail if only one extract landed in the database.
 			By("probing Monaco-scoped and Andorra-scoped search until both return hits")
-			assertNonEmptySearchQuery(nomName+"-api",
-				"avenue%20pasteur&countrycodes=mc")
-			assertNonEmptySearchQuery(nomName+"-api",
-				"andorra%20la%20vella&countrycodes=ad")
+			assertNonEmptySearchQuery("avenue%20pasteur&countrycodes=mc")
+			assertNonEmptySearchQuery("andorra%20la%20vella&countrycodes=ad")
 		})
 
 		// Reimport must start from an empty application database so CNPG (as superuser)
@@ -499,10 +546,8 @@ var _ = Describe("Manager", Ordered, func() {
 			waitForAPIServing(validationNamespace, nomName+"-api")
 
 			By("probing both countries again after Reimport")
-			assertNonEmptySearchQuery(nomName+"-api",
-				"avenue%20pasteur&countrycodes=mc")
-			assertNonEmptySearchQuery(nomName+"-api",
-				"andorra%20la%20vella&countrycodes=ad")
+			assertNonEmptySearchQuery("avenue%20pasteur&countrycodes=mc")
+			assertNonEmptySearchQuery("andorra%20la%20vella&countrycodes=ad")
 		})
 	})
 })
@@ -625,21 +670,19 @@ func waitForAPIServing(ns, name string) {
 	}, 10*time.Minute, 5*time.Second).Should(Succeed())
 }
 
-// assertNonEmptySearchQuery port-forwards the API Service and retries until /search returns
-// hits for the given query string (already URL-encoded, without the leading "q=").
+// assertNonEmptySearchQuery port-forwards monaco-api in nominatim-validation and retries
+// until /search returns hits for the given query string (already URL-encoded, without the
+// leading "q=").
 //
 // countrycodes= filters are preferred for multi-region Bootstrap: a bare free-text probe can
 // pass when only one of several Spec regions actually landed in the database.
-//
-// The Service is always in the Monaco validation namespace (same fixture as the import e2e).
-func assertNonEmptySearchQuery(svc, query string) {
-	const ns = "nominatim-validation"
+func assertNonEmptySearchQuery(query string) {
 	By("probing /search?q=" + query + " until non-empty JSON")
-	pf := &portForward{ns: ns, svc: svc, local: apiLocalPort}
+	pf := &portForward{ns: "nominatim-validation", svc: "monaco-api", local: apiLocalPort}
 	defer pf.stop()
 
 	Eventually(func(g Gomega) {
-		g.Expect(pf.ensure()).To(Succeed(), "could not port-forward svc/%s: %s", svc, pf.lastExit())
+		g.Expect(pf.ensure()).To(Succeed(), "could not port-forward svc/%s: %s", pf.svc, pf.lastExit())
 
 		out, err := searchQuery(apiLocalPort, query)
 		if err != nil {
