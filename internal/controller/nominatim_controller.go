@@ -246,6 +246,7 @@ func (r *NominatimReconciler) syncStatus(ctx context.Context, nom *nominatimv1al
 
 	nom.Status.Conditions = conds
 	nom.Status.ObservedGeneration = nom.Generation
+	syncImportConfigDriftCondition(nom)
 	return r.Status().Update(ctx, nom)
 }
 

@@ -901,6 +901,50 @@ spec:
                 required:
                 - volume
                 type: object
+              nominatim:
+                description: |-
+                  Nominatim is typed Nominatim dotenv/settings (import style, tokenizer, languages, replication).
+                  Prefer this over setting NOMINATIM_* via podSpec; reserved operator env keys remain sealed.
+                properties:
+                  importStyle:
+                    description: |-
+                      ImportStyle is NOMINATIM_IMPORT_STYLE (admin, street, address, full, extratags, or a path).
+                      Immutable after Bootstrap. Image default is extratags when unset.
+                    type: string
+                  languages:
+                    description: Languages is NOMINATIM_LANGUAGES (joined with commas).
+                    items:
+                      type: string
+                    type: array
+                  replication:
+                    description: Replication holds optional replication URL / interval
+                      / maxDiff settings.
+                    properties:
+                      maxDiff:
+                        description: MaxDiff is NOMINATIM_REPLICATION_MAX_DIFF.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      recheckIntervalSeconds:
+                        description: RecheckIntervalSeconds is NOMINATIM_REPLICATION_RECHECK_INTERVAL.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      updateIntervalSeconds:
+                        description: UpdateIntervalSeconds is NOMINATIM_REPLICATION_UPDATE_INTERVAL.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      url:
+                        description: URL is NOMINATIM_REPLICATION_URL (upstream extract
+                          update base).
+                        type: string
+                    type: object
+                  tokenizer:
+                    description: Tokenizer is NOMINATIM_TOKENIZER (e.g. icu). Immutable
+                      after Bootstrap.
+                    type: string
+                type: object
               project:
                 description: Project is the Nominatim project directory settings (required
                   volume).
@@ -1411,6 +1455,19 @@ spec:
                 description: ObservedGeneration is the last reconciled generation.
                 format: int64
                 type: integer
+              observedNominatim:
+                description: ObservedNominatim records import-time Nominatim settings
+                  sealed at Bootstrap.
+                properties:
+                  importStyle:
+                    description: ImportStyle sealed at Bootstrap (empty means image
+                      default was used).
+                    type: string
+                  tokenizer:
+                    description: Tokenizer sealed at Bootstrap (empty means image
+                      default was used).
+                    type: string
+                type: object
               regions:
                 description: Regions is the source of truth for imported regions (replaces
                   imported-regions.txt).

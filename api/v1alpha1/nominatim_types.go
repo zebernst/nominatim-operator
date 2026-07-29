@@ -321,6 +321,64 @@ type WorkerSpec struct {
 	PodSpec *runtime.RawExtension `json:"podSpec,omitempty"`
 }
 
+// NominatimReplicationSpec maps to Nominatim replication-related dotenv settings.
+type NominatimReplicationSpec struct {
+	// URL is NOMINATIM_REPLICATION_URL (upstream extract update base).
+	// +optional
+	URL string `json:"url,omitempty"`
+
+	// MaxDiff is NOMINATIM_REPLICATION_MAX_DIFF.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	MaxDiff *int32 `json:"maxDiff,omitempty"`
+
+	// UpdateIntervalSeconds is NOMINATIM_REPLICATION_UPDATE_INTERVAL.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	UpdateIntervalSeconds *int32 `json:"updateIntervalSeconds,omitempty"`
+
+	// RecheckIntervalSeconds is NOMINATIM_REPLICATION_RECHECK_INTERVAL.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	RecheckIntervalSeconds *int32 `json:"recheckIntervalSeconds,omitempty"`
+}
+
+// NominatimConfigSpec is the typed Nominatim settings surface (dotenv / NOMINATIM_* env).
+//
+// Import-time fields (ImportStyle, Tokenizer) cannot be changed after Bootstrap without
+// a Reimport — the controller seals observed values into status and surfaces
+// ImportConfigDrift when spec diverges. Runtime fields (Languages, Replication) apply
+// on every reconcile.
+type NominatimConfigSpec struct {
+	// ImportStyle is NOMINATIM_IMPORT_STYLE (admin, street, address, full, extratags, or a path).
+	// Immutable after Bootstrap. Image default is extratags when unset.
+	// +optional
+	ImportStyle string `json:"importStyle,omitempty"`
+
+	// Tokenizer is NOMINATIM_TOKENIZER (e.g. icu). Immutable after Bootstrap.
+	// +optional
+	Tokenizer string `json:"tokenizer,omitempty"`
+
+	// Languages is NOMINATIM_LANGUAGES (joined with commas).
+	// +optional
+	Languages []string `json:"languages,omitempty"`
+
+	// Replication holds optional replication URL / interval / maxDiff settings.
+	// +optional
+	Replication *NominatimReplicationSpec `json:"replication,omitempty"`
+}
+
+// ObservedNominatimConfig records import-time settings sealed when Bootstrap first succeeded.
+type ObservedNominatimConfig struct {
+	// ImportStyle sealed at Bootstrap (empty means image default was used).
+	// +optional
+	ImportStyle string `json:"importStyle,omitempty"`
+
+	// Tokenizer sealed at Bootstrap (empty means image default was used).
+	// +optional
+	Tokenizer string `json:"tokenizer,omitempty"`
+}
+
 // NominatimSpec defines the desired state of Nominatim (GitOps surface).
 type NominatimSpec struct {
 	// Project is the Nominatim project directory settings (required volume).
@@ -344,6 +402,11 @@ type NominatimSpec struct {
 	// +optional
 	// +kubebuilder:default="AddData"
 	RegionChangePolicy RegionChangePolicy `json:"regionChangePolicy,omitempty"`
+
+	// Nominatim is typed Nominatim dotenv/settings (import style, tokenizer, languages, replication).
+	// Prefer this over setting NOMINATIM_* via podSpec; reserved operator env keys remain sealed.
+	// +optional
+	Nominatim *NominatimConfigSpec `json:"nominatim,omitempty"`
 
 	// Database attaches or creates Postgres for this instance.
 	// +kubebuilder:validation:Required
@@ -446,6 +509,10 @@ type NominatimStatus struct {
 	// cursor so fires are not double-created across reconciles.
 	// +optional
 	LastUpdateScheduleTime *metav1.Time `json:"lastUpdateScheduleTime,omitempty"`
+
+	// ObservedNominatim records import-time Nominatim settings sealed at Bootstrap.
+	// +optional
+	ObservedNominatim *ObservedNominatimConfig `json:"observedNominatim,omitempty"`
 }
 
 // +kubebuilder:object:root=true
