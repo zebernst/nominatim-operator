@@ -66,7 +66,13 @@ var _ = BeforeSuite(func() {
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+		CRDDirectoryPaths: []string{
+			filepath.Join("..", "..", "config", "crd", "bases"),
+			// Vendored CNPG + Gateway API schemas so the operator's unstructured
+			// Cluster/Database/HTTPRoute writes get real API server validation.
+			// Pins are documented in test/crds/README.md; no third-party controller runs.
+			filepath.Join("..", "..", "test", "crds"),
+		},
 		ErrorIfCRDPathMissing: true,
 	}
 
