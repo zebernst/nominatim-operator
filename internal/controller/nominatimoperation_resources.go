@@ -42,11 +42,33 @@ const (
 	flatnodeMountPath = "/flatnode"
 	flatnodeFilePath  = "/flatnode/flatnode.file"
 
+<<<<<<< HEAD
 	reasonConflict            = "Conflict"
 	reasonParentNotFound      = "ParentNotFound"
 	reasonRegionsRequired     = "RegionsRequired"
 	reasonBootstrapIncomplete = "BootstrapIncomplete"
+=======
+	reasonConflict       = "Conflict"
+	reasonParentNotFound = "ParentNotFound"
+	reasonNotImplemented = "NotImplemented"
+>>>>>>> origin/main
 )
+
+// isOperationTypeImplemented reports whether the worker entrypoint can run this type.
+// Refresh/Migrate/Freeze remain in the CRD enum for forward compatibility but must fail
+// fast in the controller (no staging PVC / Job) until their scripts exist.
+func isOperationTypeImplemented(t nominatimv1alpha1.NominatimOperationType) bool {
+	switch t {
+	case nominatimv1alpha1.NominatimOperationBootstrap,
+		nominatimv1alpha1.NominatimOperationAddRegions,
+		nominatimv1alpha1.NominatimOperationReimport,
+		nominatimv1alpha1.NominatimOperationUpdate,
+		nominatimv1alpha1.NominatimOperationCatchUp:
+		return true
+	default:
+		return false
+	}
+}
 
 // Mutex policy for NominatimOperations targeting the same Nominatim:
 //
@@ -286,8 +308,9 @@ func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominat
 	if len(regions) > 0 {
 		env = append(env, corev1.EnvVar{Name: "NOMINATIM_REGIONS", Value: strings.Join(regions, ",")})
 		if isWriteHeavyOperation(op.Spec.Type) {
-			// First region drives the initial PBF download; multi-region imports add the
-			// rest via NOMINATIM_REGIONS (already set above).
+			// PBF_URL is regions[0] for back-compat / first extract URL. The worker
+			// downloads every NOMINATIM_REGIONS path and passes multiple --osm-file
+			// flags to nominatim import (not add-data — that path is AddRegions only).
 			env = append(env, corev1.EnvVar{Name: "PBF_URL", Value: pbfURLForRegion(regions[0])})
 		}
 	}
@@ -295,6 +318,7 @@ func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominat
 	if parent.Status.Database.ConnectionSecretName != "" {
 		env = append(env, dbEnvVars(parent.Status.Database.ConnectionSecretName)...)
 	}
+	env = append(env, effectiveNominatimConfigEnv(parent)...)
 
 	if parent.Spec.Flatnode != nil {
 		flatClaim := volumeClaimName(parent.Spec.Flatnode.Volume, parent.Name+"-flatnode")
@@ -349,9 +373,9 @@ func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominat
 	}, nil
 }
 
-// pbfURLForRegion builds the Geofabrik download URL for a single region path. Only the
-// first region drives the initial PBF download; additional regions are imported via
-// NOMINATIM_REGIONS (worker-side), not additional PBF_URL values.
+// pbfURLForRegion builds the Geofabrik download URL for a single region path.
+// Bootstrap/Reimport Jobs set PBF_URL from regions[0]; the worker still downloads
+// all NOMINATIM_REGIONS extracts and passes them as multiple --osm-file flags.
 func pbfURLForRegion(region string) string {
 	return fmt.Sprintf("https://download.geofabrik.de/%s-latest.osm.pbf", region)
 }

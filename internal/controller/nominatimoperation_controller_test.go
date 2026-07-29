@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -674,6 +675,40 @@ var _ = Describe("NominatimOperation Controller", func() {
 			NamespacedName: types.NamespacedName{Name: "does-not-exist", Namespace: "default"},
 		})
 		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("fails Refresh/Migrate/Freeze as NotImplemented without creating PVC or Job", func() {
+		for _, typ := range []nominatimv1alpha1.NominatimOperationType{
+			nominatimv1alpha1.NominatimOperationRefresh,
+			nominatimv1alpha1.NominatimOperationMigrate,
+			nominatimv1alpha1.NominatimOperationFreeze,
+		} {
+			name := opName + "-" + strings.ToLower(string(typ))
+			op := &nominatimv1alpha1.NominatimOperation{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+				Spec: nominatimv1alpha1.NominatimOperationSpec{
+					Type:         typ,
+					NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+				},
+			}
+			Expect(k8sClient.Create(ctx, op)).To(Succeed())
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: name, Namespace: "default"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, op)).To(Succeed())
+			Expect(op.Status.Phase).To(Equal(nominatimv1alpha1.NominatimOperationPhaseFailed))
+			Expect(op.Status.Message).To(ContainSubstring("NotImplemented"))
+
+			job := &batchv1.Job{}
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, job)
+			Expect(errors.IsNotFound(err)).To(BeTrue(), "type %s should not create a Job", typ)
+
+			pvc := &corev1.PersistentVolumeClaim{}
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: name + "-staging", Namespace: "default"}, pvc)
+			Expect(errors.IsNotFound(err)).To(BeTrue(), "type %s should not create a staging PVC", typ)
+		}
 	})
 
 	It("registers with the manager", func() {

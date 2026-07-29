@@ -115,6 +115,10 @@ func (r *NominatimReconciler) ensureBootstrapOperation(ctx context.Context, nom 
 // syncRegionsFromBootstrap populates nom.Status.Regions (in-memory; persisted by the
 // caller's later Status().Update, e.g. syncStatus) once a Bootstrap Operation targeting
 // this parent has Succeeded. It is a no-op when status.regions is already populated.
+//
+// A Succeeded Bootstrap Job is required to have imported every region listed on the
+// Operation via nominatim import with multiple --osm-file flags. Marking the full
+// region list here is therefore accurate — not a blind copy of an unfinished import.
 func syncRegionsFromBootstrap(nom *nominatimv1alpha1.Nominatim, peers []nominatimv1alpha1.NominatimOperation) {
 	if len(nom.Status.Regions) > 0 {
 		return
@@ -147,6 +151,7 @@ func syncRegionsFromBootstrap(nom *nominatimv1alpha1.Nominatim, peers []nominati
 			})
 		}
 		nom.Status.Regions = statuses
+		sealObservedNominatimConfig(nom)
 		return
 	}
 }

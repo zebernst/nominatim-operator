@@ -305,6 +305,9 @@ func TestBuildOperationJob_IncludesDBEnvAndPBFURLForBootstrap(t *testing.T) {
 	job := mustBuildOperationJob(t, op, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
 	c := job.Spec.Template.Spec.Containers[0]
 
+	// Worker downloads every NOMINATIM_REGIONS extract and runs nominatim import with
+	// multiple --osm-file flags (PBF_URL remains regions[0] for the first URL).
+	g.Expect(envValue(c.Env, "NOMINATIM_REGIONS")).To(Equal("europe/monaco,africa/morocco"))
 	g.Expect(envValue(c.Env, "PBF_URL")).To(Equal("https://download.geofabrik.de/europe/monaco-latest.osm.pbf"))
 
 	dsn := findEnvVar(c.Env, "NOMINATIM_DATABASE_DSN")
@@ -478,4 +481,17 @@ func findEnvVar(env []corev1.EnvVar, name string) *corev1.EnvVar {
 		}
 	}
 	return nil
+}
+
+func TestIsOperationTypeImplemented(t *testing.T) {
+	g := NewWithT(t)
+	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationBootstrap)).To(BeTrue())
+	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationAddRegions)).To(BeTrue())
+	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationReimport)).To(BeTrue())
+	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationUpdate)).To(BeTrue())
+	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationCatchUp)).To(BeTrue())
+	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationRefresh)).To(BeFalse())
+	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationMigrate)).To(BeFalse())
+	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationFreeze)).To(BeFalse())
+	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationType("Nope"))).To(BeFalse())
 }

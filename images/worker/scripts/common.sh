@@ -307,6 +307,111 @@ parse_regions() {
   done < <(echo "${raw}" | tr ',' ' ' | tr ' ' '\n' | sed '/^[[:space:]]*$/d')
 }
 
+region_already_imported() {
+  local region="$1"
+  [ -f "${IMPORTED_LIST}" ] && grep -qxF "${region}" "${IMPORTED_LIST}"
+}
+
+# Download a Geofabrik extract and nominatim add-data it. Appends to IMPORTED_LIST and
+# seeds update/<region>/sequence.state. Used by AddRegions only — never for Bootstrap.
+# (Initial multi-region load must use nominatim import with multiple --osm-file flags.)
+import_geofabrik_region() {
+  local region="$1"
+  local import_file="${STAGING_DIR}/$(echo "${region}" | tr '/' '-')-latest.osm.pbf"
+  log "Downloading and add-data importing region ${region}"
+  curl -L -C - -A "${CURL_USER_AGENT}" --fail-with-body \
+    "${DOWNURL}/${region}-latest.osm.pbf" -o "${import_file}"
+  run_nominatim add-data --project-dir "${PROJECT_DIR}" --file "${import_file}"
+  seed_region_state "${region}" || log "Warning: could not seed update state for ${region}"
+  echo "${region}" >> "${IMPORTED_LIST}"
+  rm -f "${import_file}"
+}
+
+region_staging_pbf() {
+  local region="$1"
+  echo "${STAGING_DIR}/$(echo "${region}" | tr '/' '-')-latest.osm.pbf"
+}
+
+# Populate OSM_FILES with local PBF paths for the Bootstrap/Reimport import command.
+# When NOMINATIM_REGIONS is set, download every Geofabrik extract (resume-friendly).
+# Otherwise fall back to ensure_osm_file (PBF_URL / PBF_PATH / data.osm.pbf).
+ensure_import_osm_files() {
+  OSM_FILES=()
+  parse_regions
+  if [ "${#DESIRED_REGIONS[@]}" -eq 0 ]; then
+    OSM_FILES+=("$(ensure_osm_file)")
+    return 0
+  fi
+
+  mkdir -p "${STAGING_DIR}"
+  local region path url
+  local i=0
+  for region in "${DESIRED_REGIONS[@]}"; do
+    path="$(region_staging_pbf "${region}")"
+    if [ -f "${path}" ] && [ -s "${path}" ]; then
+      log "Using existing extract for ${region}: ${path}"
+    else
+      url="${DOWNURL}/${region}-latest.osm.pbf"
+      # Controller sets PBF_URL from regions[0]; prefer it when present.
+      if [ "${i}" -eq 0 ] && [ -n "${PBF_URL:-}" ]; then
+        url="${PBF_URL}"
+      fi
+      log "Downloading OSM extract for ${region} from ${url}"
+      curl -L -A "${CURL_USER_AGENT}" --fail-with-body -C - --create-dirs \
+        --connect-timeout 30 --max-time 21600 \
+        -o "${path}" "${url}"
+    fi
+    OSM_FILES+=("${path}")
+    i=$((i + 1))
+  done
+}
+
+# Build OSM_FILE_ARGS as: --osm-file path1 --osm-file path2 ...
+build_osm_file_args() {
+  OSM_FILE_ARGS=()
+  local f
+  if [ "${#OSM_FILES[@]}" -eq 0 ]; then
+    die "OSM_FILES is empty; call ensure_import_osm_files first"
+  fi
+  for f in "${OSM_FILES[@]}"; do
+    OSM_FILE_ARGS+=(--osm-file "${f}")
+  done
+}
+
+# After a successful multi-file (or single-file) import, record every desired region and
+# seed Geofabrik update state. Does not call add-data.
+record_imported_regions_from_spec() {
+  parse_regions
+  if [ "${#DESIRED_REGIONS[@]}" -eq 0 ]; then
+    return 0
+  fi
+  : > "${IMPORTED_LIST}"
+  local region
+  for region in "${DESIRED_REGIONS[@]}"; do
+    echo "${region}" >> "${IMPORTED_LIST}"
+    seed_region_state "${region}" || log "Warning: could not seed update state for ${region}"
+  done
+}
+
+# Resume/no-op guard: schema ready must already list every desired region. If an older
+# Bootstrap only imported regions[0], refuse to paper over with add-data — operator should
+# Reimport with a multi --osm-file Bootstrap.
+assert_imported_list_complete() {
+  parse_regions
+  if [ "${#DESIRED_REGIONS[@]}" -eq 0 ]; then
+    return 0
+  fi
+  local region missing=()
+  for region in "${DESIRED_REGIONS[@]}"; do
+    if ! region_already_imported "${region}"; then
+      missing+=("${region}")
+    fi
+  done
+  if [ "${#missing[@]}" -gt 0 ]; then
+    die "Nominatim schema is ready but imported-regions.txt is missing: ${missing[*]}. Create a Reimport Operation so Bootstrap can load all regions via nominatim import --osm-file … (add-data is not used for initial multi-region load)."
+  fi
+}
+
 prepare_worker() {
   require_db_env
   mkdir -p "${STAGING_DIR}" "${PROJECT_DIR}" "${PROJECT_DIR}/update"
