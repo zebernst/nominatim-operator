@@ -17,6 +17,7 @@ limitations under the License.
 package e2e
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -42,6 +43,9 @@ const metricsServiceName = "nominatim-operator-controller-manager-metrics-servic
 
 // metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
 const metricsRoleBindingName = "nominatim-operator-metrics-binding"
+
+// apiLocalPort is the loopback port the Nominatim API Service is forwarded to while probing.
+const apiLocalPort = 18081
 
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
@@ -389,6 +393,13 @@ var _ = Describe("Manager", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred(), "Failed to apply Monaco fixtures")
 		})
 
+		AfterEach(func() {
+			if !runImportE2E || !CurrentSpecReport().Failed() {
+				return
+			}
+			dumpValidationDiagnostics(validationNamespace)
+		})
+
 		AfterAll(func() {
 			if !runImportE2E {
 				return
@@ -426,15 +437,7 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(out).To(Equal("Succeeded"))
 			}, 40*time.Minute, 15*time.Second).Should(Succeed())
 
-			By("waiting for API Deployment Available")
-			Eventually(func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "deploy", nomName+"-api",
-					"-n", validationNamespace,
-					"-o", "jsonpath={.status.availableReplicas}")
-				out, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(out).To(Equal("1"))
-			}, 10*time.Minute, 5*time.Second).Should(Succeed())
+			waitForAPIServing(validationNamespace, nomName+"-api")
 
 			By("probing /search?q=avenue%20pasteur until non-empty JSON")
 			assertNonEmptySearch(validationNamespace, nomName+"-api")
@@ -466,6 +469,10 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(out).NotTo(Equal("Failed"), "Reimport should not Fail")
 				g.Expect(out).To(Equal("Succeeded"))
 			}, 40*time.Minute, 15*time.Second).Should(Succeed())
+
+			// Reimport quiesces the API so DROP DATABASE can proceed, so this also asserts
+			// the operator scales serving back up once the Operation reaches a terminal phase.
+			waitForAPIServing(validationNamespace, nomName+"-api")
 
 			By("probing /search?q=avenue%20pasteur again after Reimport")
 			assertNonEmptySearch(validationNamespace, nomName+"-api")
@@ -539,24 +546,175 @@ func expectDatabaseReplacedBeforeJob(ns, dbName, opName, oldUID string) {
 	Expect(cnpgDatabaseField(ns, dbName, "metadata.uid")).NotTo(Equal(oldUID))
 }
 
+// waitForAPIServing waits until the API Deployment's current generation is fully rolled out
+// and its Service publishes a ready endpoint.
+//
+// status.availableReplicas alone is not enough: it can still describe the outgoing ReplicaSet
+// while a new one is starting, so a probe can attach to a pod that is about to disappear.
+// kubectl rollout status waits on the observed generation instead, and the endpoint check
+// confirms the Service the probe forwards to actually has a backend.
+func waitForAPIServing(ns, name string) {
+	By("waiting for the API Deployment rollout to settle and publish endpoints")
+	Eventually(func(g Gomega) {
+		cmd := exec.Command("kubectl", "rollout", "status", "deploy/"+name,
+			"-n", ns, "--timeout=30s")
+		_, err := utils.Run(cmd)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		cmd = exec.Command("kubectl", "get", "endpointslices",
+			"-n", ns, "-l", "kubernetes.io/service-name="+name,
+			"-o", "jsonpath={.items[*].endpoints[*].conditions.ready}")
+		out, err := utils.Run(cmd)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(strings.Fields(out)).To(ContainElement("true"),
+			"Service %s/%s has no ready endpoints", ns, name)
+	}, 10*time.Minute, 5*time.Second).Should(Succeed())
+}
+
 // assertNonEmptySearch port-forwards the API Service and retries until search returns hits
 // (parity with mediagis/nominatim-docker assert-non-empty-json).
 func assertNonEmptySearch(ns, svc string) {
-	By("starting port-forward to Nominatim API")
-	pf := exec.Command("kubectl", "-n", ns, "port-forward", "svc/"+svc, "18081:80")
-	Expect(pf.Start()).To(Succeed())
-	defer func() { _ = pf.Process.Kill() }()
+	pf := &portForward{ns: ns, svc: svc, local: apiLocalPort}
+	defer pf.stop()
 
 	Eventually(func(g Gomega) {
-		cmd := exec.Command("python3", "-c", `
+		g.Expect(pf.ensure()).To(Succeed(), "could not port-forward svc/%s: %s", svc, pf.lastExit())
+
+		out, err := searchAvenuePasteur(apiLocalPort)
+		if err != nil {
+			// A tunnel can also survive its backend and refuse every connection, so rebuild
+			// it before the next attempt instead of retrying against a dead local port.
+			pf.stop()
+		}
+		g.Expect(err).NotTo(HaveOccurred(), "search probe failed: %s\nport-forward said: %s",
+			out, pf.lastExit())
+	}, 10*time.Minute, 5*time.Second).Should(Succeed())
+}
+
+// searchAvenuePasteur queries the forwarded API and fails unless the response is a non-empty
+// JSON array of results.
+func searchAvenuePasteur(port int) (string, error) {
+	probe := fmt.Sprintf(`
 import json, urllib.request
-with urllib.request.urlopen("http://127.0.0.1:18081/search?q=avenue%20pasteur", timeout=30) as r:
+with urllib.request.urlopen("http://127.0.0.1:%d/search?q=avenue%%20pasteur", timeout=30) as r:
     data = json.loads(r.read())
 assert isinstance(data, list) and len(data) > 0, data
-`)
-		out, err := cmd.CombinedOutput()
-		g.Expect(err).NotTo(HaveOccurred(), string(out))
-	}, 10*time.Minute, 5*time.Second).Should(Succeed())
+`, port)
+	out, err := exec.Command("python3", "-c", probe).CombinedOutput()
+	return string(out), err
+}
+
+// portForward keeps a kubectl port-forward to a Service alive across a probe loop.
+//
+// kubectl binds the tunnel to one pod and exits for good when that pod goes away, which
+// happens routinely here because the operator scales and rolls the API Deployment around
+// Operations. Starting the tunnel once turns any such restart into a permanent stream of
+// connection-refused errors, so ensure re-establishes it on every iteration that finds the
+// process gone.
+type portForward struct {
+	ns    string
+	svc   string
+	local int
+
+	cmd    *exec.Cmd
+	output *bytes.Buffer
+	exited chan error
+	exit   string
+}
+
+// ensure starts a tunnel if none is running, giving kubectl a moment to bind the local port.
+func (p *portForward) ensure() error {
+	if p.running() {
+		return nil
+	}
+
+	p.output = &bytes.Buffer{}
+	p.exited = make(chan error, 1)
+	cmd := exec.Command("kubectl", "-n", p.ns, "port-forward",
+		"svc/"+p.svc, fmt.Sprintf("%d:80", p.local))
+	// exec shares one copier for Stdout and Stderr when they are the same writer, so the
+	// buffer is only written from a single goroutine.
+	cmd.Stdout = p.output
+	cmd.Stderr = p.output
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	p.cmd = cmd
+	go func() { p.exited <- cmd.Wait() }()
+
+	By("started port-forward to " + p.svc)
+	time.Sleep(2 * time.Second)
+	return nil
+}
+
+// running reports whether the tunnel is still up, reaping it if kubectl has exited on its own.
+func (p *portForward) running() bool {
+	if p.cmd == nil {
+		return false
+	}
+	select {
+	case err := <-p.exited:
+		p.reap(err)
+		return false
+	default:
+		return true
+	}
+}
+
+func (p *portForward) stop() {
+	if p.cmd == nil {
+		return
+	}
+	_ = p.cmd.Process.Kill()
+	p.reap(<-p.exited)
+}
+
+// reap records what kubectl reported before the tunnel ended. Reading the buffer here is safe:
+// Wait has returned, so kubectl's output has been fully copied.
+func (p *portForward) reap(err error) {
+	p.exit = strings.TrimSpace(p.output.String())
+	if p.exit == "" && err != nil {
+		p.exit = err.Error()
+	}
+	p.cmd = nil
+}
+
+// lastExit returns what the most recent tunnel reported, for failure messages.
+func (p *portForward) lastExit() string {
+	if p.exit == "" {
+		return "(nothing; tunnel still running)"
+	}
+	return p.exit
+}
+
+// dumpValidationDiagnostics prints the cluster state the Monaco specs depend on. The suite's
+// generic AfterEach only covers the operator namespace, which leaves an API that never became
+// reachable with no evidence in the CI log.
+func dumpValidationDiagnostics(ns string) {
+	By("dumping " + ns + " diagnostics")
+	dumps := []struct {
+		label string
+		args  []string
+	}{
+		{"pods", []string{"get", "pods", "-o", "wide"}},
+		{"deployments", []string{"get", "deploy", "-o", "wide"}},
+		{"endpointslices", []string{"get", "endpointslices"}},
+		{"nominatims", []string{"get", "nominatims", "-o", "yaml"}},
+		{"operations", []string{"get", "nominatimoperations"}},
+		{"jobs", []string{"get", "jobs"}},
+		{"events", []string{"get", "events", "--sort-by=.lastTimestamp"}},
+		{"api logs", []string{"logs", "-l", "app.kubernetes.io/component=api", "--tail=200"}},
+		{"api logs (previous)", []string{"logs", "-l", "app.kubernetes.io/component=api",
+			"--previous", "--tail=200"}},
+	}
+	for _, d := range dumps {
+		out, err := utils.Run(exec.Command("kubectl", append(d.args, "-n", ns)...))
+		if err != nil {
+			_, _ = fmt.Fprintf(GinkgoWriter, "%s %s: %s\n", ns, d.label, err)
+			continue
+		}
+		_, _ = fmt.Fprintf(GinkgoWriter, "%s %s:\n%s\n", ns, d.label, out)
+	}
 }
 
 // serviceAccountToken returns a token for the specified service account in the given namespace.
