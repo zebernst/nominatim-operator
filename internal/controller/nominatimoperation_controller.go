@@ -91,6 +91,11 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return ctrl.Result{}, nil
 	}
 
+	if !isOperationTypeImplemented(op.Spec.Type) {
+		return ctrl.Result{}, r.failOperation(ctx, op, reasonNotImplemented,
+			fmt.Sprintf("operation type %q is reserved but not implemented yet (no Job will be created)", op.Spec.Type))
+	}
+
 	parent := &nominatimv1alpha1.Nominatim{}
 	parentKey := types.NamespacedName{Name: op.Spec.NominatimRef.Name, Namespace: op.Namespace}
 	if err := r.Get(ctx, parentKey, parent); err != nil {

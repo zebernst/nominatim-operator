@@ -32,7 +32,7 @@ for region in "${DESIRED_REGIONS[@]}"; do
   if [ -n "${IMPORT_ONLY_REGION}" ] && [ "${region}" != "${IMPORT_ONLY_REGION}" ]; then
     continue
   fi
-  if grep -qxF "${region}" "${IMPORTED_LIST}"; then
+  if region_already_imported "${region}"; then
     log "Region ${region} already imported; skipping"
     continue
   fi
@@ -41,19 +41,15 @@ for region in "${DESIRED_REGIONS[@]}"; do
     break
   fi
 
-  import_file="${STAGING_DIR}/$(echo "${region}" | tr '/' '-')-latest.osm.pbf"
-  log "Downloading and importing region ${region}"
-  curl -L -C - -A "${CURL_USER_AGENT}" --fail-with-body \
-    "${DOWNURL}/${region}-latest.osm.pbf" -o "${import_file}"
-  run_nominatim add-data --project-dir "${PROJECT_DIR}" --file "${import_file}"
-  seed_region_state "${region}"
-  echo "${region}" >> "${IMPORTED_LIST}"
-  rm -f "${import_file}"
+  import_geofabrik_region "${region}"
   imported=$((imported + 1))
   CHANGED=true
 done
 
 if [ "${CHANGED}" = "true" ]; then
+  # Upstream Advanced-Installations: refresh --postcodes after add-data, then index.
+  log "Running nominatim refresh --postcodes after AddRegions"
+  run_nominatim refresh --postcodes --project-dir "${PROJECT_DIR}" || true
   log "Re-indexing after AddRegions"
   run_nominatim index --project-dir "${PROJECT_DIR}" --threads "${THREADS}"
 else
