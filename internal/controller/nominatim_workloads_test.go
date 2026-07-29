@@ -794,7 +794,8 @@ func TestBuildOperationJob_WorkerPodSpecOverlay(t *testing.T) {
 		},
 	}
 	overlay, _ := json.Marshal(corev1.PodSpec{
-		Tolerations: []corev1.Toleration{{Key: "spot", Operator: corev1.TolerationOpExists}},
+		RestartPolicy: corev1.RestartPolicyAlways,
+		Tolerations:   []corev1.Toleration{{Key: "spot", Operator: corev1.TolerationOpExists}},
 		Containers: []corev1.Container{{
 			Name: "worker",
 			Resources: corev1.ResourceRequirements{
@@ -826,6 +827,12 @@ func TestBuildOperationJob_WorkerPodSpecOverlay(t *testing.T) {
 	}
 	if spec.Containers[0].Resources.Limits.Memory().String() != "2Gi" {
 		t.Fatalf("memory=%v", spec.Containers[0].Resources.Limits)
+	}
+	if len(spec.Containers[0].Ports) != 0 {
+		t.Fatalf("worker overlay must not invent ports, got %+v", spec.Containers[0].Ports)
+	}
+	if spec.RestartPolicy != corev1.RestartPolicyNever {
+		t.Fatalf("restartPolicy=%q", spec.RestartPolicy)
 	}
 }
 

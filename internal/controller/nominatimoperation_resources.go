@@ -284,6 +284,8 @@ func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominat
 	if err != nil {
 		return nil, err
 	}
+	// Jobs require RestartPolicyNever; do not allow podSpec overlays to change it.
+	merged.RestartPolicy = corev1.RestartPolicyNever
 
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{

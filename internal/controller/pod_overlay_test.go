@@ -204,6 +204,37 @@ func TestMergePodSpecOverlay_SidecarAndVolumeUnion(t *testing.T) {
 	}
 }
 
+func TestMergePodSpecOverlay_WorkerDoesNotInventPorts(t *testing.T) {
+	base := corev1.PodSpec{
+		RestartPolicy: corev1.RestartPolicyNever,
+		Containers: []corev1.Container{{
+			Name:  "worker",
+			Image: "worker:base",
+			Env:   []corev1.EnvVar{{Name: "OPERATION_TYPE", Value: "Update"}},
+		}},
+	}
+	overlay := corev1.PodSpec{
+		Containers: []corev1.Container{{
+			Name:  "worker",
+			Image: "evil",
+			Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 9999}},
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("50m")},
+			},
+		}},
+	}
+	got, err := mergePodSpecOverlay(base, mustPodSpecRaw(t, overlay), "worker", "worker:v1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Containers[0].Ports) != 0 {
+		t.Fatalf("expected no ports from empty base, got %+v", got.Containers[0].Ports)
+	}
+	if got.Containers[0].Image != "worker:v1" {
+		t.Fatalf("image=%q", got.Containers[0].Image)
+	}
+}
+
 func TestIsReservedEnvName(t *testing.T) {
 	cases := map[string]bool{
 		"NOMINATIM_DATABASE_DSN": true,

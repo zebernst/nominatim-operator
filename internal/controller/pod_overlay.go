@@ -282,11 +282,9 @@ func sealManagedContainer(spec *corev1.PodSpec, managedName, image string, pullP
 		}
 		spec.Containers[i].Image = image
 		spec.Containers[i].ImagePullPolicy = pullPolicy
-		spec.Containers[i].Ports = []corev1.ContainerPort{{
-			Name:          "http",
-			ContainerPort: workloadContainerPort,
-		}}
 		if base, ok := baseByName[managedName]; ok {
+			// Reseal ports from the operator base (API/UI have http:8080; worker has none).
+			spec.Containers[i].Ports = append([]corev1.ContainerPort(nil), base.Ports...)
 			spec.Containers[i].Env = mergeEnvReservedWin(base.Env, spec.Containers[i].Env)
 			spec.Containers[i].VolumeMounts = unionVolumeMounts(base.VolumeMounts, spec.Containers[i].VolumeMounts)
 		}
