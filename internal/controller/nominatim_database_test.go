@@ -556,6 +556,39 @@ func TestApplyOwnedCNPGClusterTune_InvalidAffinity(t *testing.T) {
 	}
 }
 
+func TestApplyOwnedCNPGClusterTune_AffinityCannotInjectBootstrapOrImageName(t *testing.T) {
+	cluster := &unstructured.Unstructured{Object: map[string]interface{}{
+		"spec": map[string]interface{}{
+			"imageName": "keep-me",
+			"bootstrap": map[string]interface{}{
+				"initdb": map[string]interface{}{
+					"database": "nominatim",
+				},
+			},
+		},
+	}}
+	cluster.SetGroupVersionKind(CNPGClusterGVK)
+	// Deliberately place bootstrap/imageName keys inside affinity JSON — they must stay scoped.
+	affinityJSON := []byte(`{"enablePodAntiAffinity":true,"bootstrap":{"initdb":{"database":"evil"}},"imageName":"evil:latest"}`)
+	if err := applyOwnedCNPGClusterTune(cluster, &nominatimv1alpha1.DatabaseClusterCreate{
+		Affinity: &runtime.RawExtension{Raw: affinityJSON},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	img, _, _ := unstructured.NestedString(cluster.Object, "spec", "imageName")
+	if img != "keep-me" {
+		t.Fatalf("spec.imageName mutated: %q", img)
+	}
+	db, _, _ := unstructured.NestedString(cluster.Object, "spec", "bootstrap", "initdb", "database")
+	if db != "nominatim" {
+		t.Fatalf("spec.bootstrap mutated: %q", db)
+	}
+	nestedImg, found, _ := unstructured.NestedString(cluster.Object, "spec", "affinity", "imageName")
+	if !found || nestedImg != "evil:latest" {
+		t.Fatalf("expected junk to remain under spec.affinity only, got found=%v img=%q", found, nestedImg)
+	}
+}
+
 func TestReconcileDatabase_Cluster_NoHardcodedStorageClass(t *testing.T) {
 	scheme := testScheme(t)
 	nom := baseNominatim("nostorageclass")

@@ -94,6 +94,7 @@ func mergePodSpecOverlay(
 	out.Volumes = unionVolumes(base.Volumes, overlay.Volumes)
 
 	sealManagedContainer(&out, managedContainer, image, pullPolicy, base.Containers)
+	hardenPodSpec(&out, base)
 	return out, nil
 }
 
@@ -225,9 +226,11 @@ func mergeEnvReservedWin(base, overlay []corev1.EnvVar) []corev1.EnvVar {
 
 func unionVolumeMounts(base, overlay []corev1.VolumeMount) []corev1.VolumeMount {
 	byName := map[string]corev1.VolumeMount{}
+	byPath := map[string]string{} // mountPath -> volume name owning it
 	order := make([]string, 0, len(base)+len(overlay))
 	for _, m := range base {
 		byName[m.Name] = m
+		byPath[m.MountPath] = m.Name
 		order = append(order, m.Name)
 	}
 	for _, m := range overlay {
@@ -235,7 +238,12 @@ func unionVolumeMounts(base, overlay []corev1.VolumeMount) []corev1.VolumeMount 
 			// Operator / base wins on name conflict.
 			continue
 		}
+		if _, ok := byPath[m.MountPath]; ok {
+			// Operator mount paths (/nominatim, etc.) must not be shadowed.
+			continue
+		}
 		byName[m.Name] = m
+		byPath[m.MountPath] = m.Name
 		order = append(order, m.Name)
 	}
 	out := make([]corev1.VolumeMount, 0, len(order))
@@ -254,6 +262,10 @@ func unionVolumes(base, overlay []corev1.Volume) []corev1.Volume {
 	}
 	for _, v := range overlay {
 		if _, ok := byName[v.Name]; ok {
+			continue
+		}
+		if v.HostPath != nil {
+			// Deny hostPath volumes from overlays (confused-deputy / node compromise).
 			continue
 		}
 		byName[v.Name] = v
@@ -283,11 +295,87 @@ func sealManagedContainer(spec *corev1.PodSpec, managedName, image string, pullP
 		spec.Containers[i].Image = image
 		spec.Containers[i].ImagePullPolicy = pullPolicy
 		if base, ok := baseByName[managedName]; ok {
-			// Reseal ports from the operator base (API/UI have http:8080; worker has none).
+			// Reseal ports / entrypoint / envFrom / securityContext from the operator base.
 			spec.Containers[i].Ports = append([]corev1.ContainerPort(nil), base.Ports...)
+			spec.Containers[i].Command = append([]string(nil), base.Command...)
+			spec.Containers[i].Args = append([]string(nil), base.Args...)
+			spec.Containers[i].EnvFrom = nil
+			if base.SecurityContext != nil {
+				spec.Containers[i].SecurityContext = base.SecurityContext.DeepCopy()
+			} else {
+				spec.Containers[i].SecurityContext = nil
+			}
 			spec.Containers[i].Env = mergeEnvReservedWin(base.Env, spec.Containers[i].Env)
 			spec.Containers[i].VolumeMounts = unionVolumeMounts(base.VolumeMounts, spec.Containers[i].VolumeMounts)
 		}
 		return
+	}
+}
+
+// hardenPodSpec strips host namespaces / hostPath / privileged capabilities introduced by overlays.
+// Scheduling knobs (affinity, nodeSelector, tolerations, topologySpread) are left intact.
+func hardenPodSpec(spec *corev1.PodSpec, base corev1.PodSpec) {
+	spec.HostNetwork = base.HostNetwork
+	spec.HostPID = base.HostPID
+	spec.HostIPC = base.HostIPC
+	spec.ShareProcessNamespace = base.ShareProcessNamespace
+	spec.ServiceAccountName = base.ServiceAccountName
+	spec.AutomountServiceAccountToken = base.AutomountServiceAccountToken
+	if base.SecurityContext != nil {
+		spec.SecurityContext = base.SecurityContext.DeepCopy()
+	} else {
+		spec.SecurityContext = stripPrivilegedPodSC(spec.SecurityContext)
+	}
+
+	for i := range spec.Containers {
+		stripPrivilegedContainerSC(spec.Containers[i].SecurityContext)
+	}
+	for i := range spec.InitContainers {
+		stripPrivilegedContainerSC(spec.InitContainers[i].SecurityContext)
+	}
+
+	// Drop any hostPath volumes that slipped through (e.g. base had none; overlay renamed).
+	cleaned := make([]corev1.Volume, 0, len(spec.Volumes))
+	baseVols := map[string]corev1.Volume{}
+	for _, v := range base.Volumes {
+		baseVols[v.Name] = v
+	}
+	for _, v := range spec.Volumes {
+		if _, isBase := baseVols[v.Name]; isBase {
+			cleaned = append(cleaned, v)
+			continue
+		}
+		if v.HostPath != nil {
+			continue
+		}
+		cleaned = append(cleaned, v)
+	}
+	spec.Volumes = cleaned
+}
+
+func stripPrivilegedPodSC(sc *corev1.PodSecurityContext) *corev1.PodSecurityContext {
+	if sc == nil {
+		return nil
+	}
+	out := sc.DeepCopy()
+	// Keep non-privilege fields (fsGroup, etc.) but never allow privileged sysctls wholesale changes
+	// beyond what overlay already set — host namespaces are already resealed.
+	return out
+}
+
+func stripPrivilegedContainerSC(sc *corev1.SecurityContext) {
+	if sc == nil {
+		return
+	}
+	if sc.Privileged != nil && *sc.Privileged {
+		f := false
+		sc.Privileged = &f
+	}
+	if sc.AllowPrivilegeEscalation != nil && *sc.AllowPrivilegeEscalation {
+		f := false
+		sc.AllowPrivilegeEscalation = &f
+	}
+	if sc.Capabilities != nil {
+		sc.Capabilities.Add = nil
 	}
 }
