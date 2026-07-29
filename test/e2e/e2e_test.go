@@ -599,7 +599,7 @@ func assertNonEmptySearchQuery(query string) {
 	defer pf.stop()
 
 	Eventually(func(g Gomega) {
-		g.Expect(pf.ensure()).To(Succeed(), "could not port-forward svc/%s: %s", svc, pf.lastExit())
+		g.Expect(pf.ensure()).To(Succeed(), "could not port-forward svc/%s: %s", pf.svc, pf.lastExit())
 
 		out, err := searchQuery(apiLocalPort, query)
 		if err != nil {
