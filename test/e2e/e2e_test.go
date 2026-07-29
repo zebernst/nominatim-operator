@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -372,6 +373,8 @@ var _ = Describe("Manager", Ordered, func() {
 		const (
 			validationNamespace = "nominatim-validation"
 			nomName             = "monaco"
+			ownedDatabaseName   = nomName + "-pg-nominatim"
+			reimportName        = nomName + "-reimport"
 		)
 
 		BeforeAll(func() {
@@ -391,8 +394,11 @@ var _ = Describe("Manager", Ordered, func() {
 				return
 			}
 			By("deleting Monaco validation fixtures")
+			reimport := filepath.Join("test", "e2e", "testdata", "nominatim-monaco-reimport.yaml")
+			cmd := exec.Command("kubectl", "delete", "-f", reimport, "--ignore-not-found=true")
+			_, _ = utils.Run(cmd)
 			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-monaco.yaml")
-			cmd := exec.Command("kubectl", "delete", "-f", fixture, "--ignore-not-found=true")
+			cmd = exec.Command("kubectl", "delete", "-f", fixture, "--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 			cmd = exec.Command("kubectl", "delete", "ns", validationNamespace, "--ignore-not-found=true", "--wait=false")
 			_, _ = utils.Run(cmd)
@@ -433,8 +439,105 @@ var _ = Describe("Manager", Ordered, func() {
 			By("probing /search?q=avenue%20pasteur until non-empty JSON")
 			assertNonEmptySearch(validationNamespace, nomName+"-api")
 		})
+
+		// Reimport must start from an empty application database so CNPG (as superuser)
+		// reinstalls PostGIS/hstore. The controller drops and recreates the owned Database
+		// CR and only arms the worker Job once the replacement reports applied=true.
+		It("drops and recreates the owned CNPG Database before arming the Reimport Job", func() {
+			By("recording the current owned CNPG Database UID")
+			oldUID := cnpgDatabaseField(validationNamespace, ownedDatabaseName, "metadata.uid")
+			Expect(oldUID).NotTo(BeEmpty(), "Bootstrap should have left an owned CNPG Database")
+
+			By("creating the Reimport NominatimOperation")
+			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-monaco-reimport.yaml")
+			cmd := exec.Command("kubectl", "apply", "-f", fixture)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create the Reimport NominatimOperation")
+
+			expectDatabaseReplacedBeforeJob(validationNamespace, ownedDatabaseName, reimportName, oldUID)
+
+			By("waiting for Reimport NominatimOperation Succeeded")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "nominatimoperation", reimportName,
+					"-n", validationNamespace,
+					"-o", "jsonpath={.status.phase}")
+				out, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(out).NotTo(Equal("Failed"), "Reimport should not Fail")
+				g.Expect(out).To(Equal("Succeeded"))
+			}, 40*time.Minute, 15*time.Second).Should(Succeed())
+
+			By("probing /search?q=avenue%20pasteur again after Reimport")
+			assertNonEmptySearch(validationNamespace, nomName+"-api")
+		})
 	})
 })
+
+// cnpgDatabaseField reads a jsonpath field off the owned CNPG Database, returning "" while
+// the object is absent (the window between the drop and the recreate).
+func cnpgDatabaseField(ns, name, path string) string {
+	cmd := exec.Command("kubectl", "get", "database.postgresql.cnpg.io", name,
+		"-n", ns, "--ignore-not-found", "-o", "jsonpath={."+path+"}")
+	out, err := utils.Run(cmd)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// expectDatabaseReplacedBeforeJob asserts the drop/recreate handshake: the Reimport Job may
+// only appear once the owned Database is a different object (new UID) reporting
+// status.applied=true, with the Operation's handshake annotations recording the swap.
+//
+// Polling can miss a short-lived violation, so the loop fails fast whenever it observes a
+// Job alongside the pre-Reimport UID, and the annotation assertions afterwards are the
+// deterministic evidence that the handshake ran rather than being skipped.
+func expectDatabaseReplacedBeforeJob(ns, dbName, opName, oldUID string) {
+	By("asserting the Reimport Job is not created until the Database is replaced and applied")
+	const (
+		resetAnnotation   = "nominatim.zebernst.dev/reimport-db-reset"
+		prevUIDAnnotation = "nominatim.zebernst.dev/reimport-db-prev-uid"
+	)
+
+	armed := false
+	deadline := time.Now().Add(15 * time.Minute)
+	for !armed && time.Now().Before(deadline) {
+		uid := cnpgDatabaseField(ns, dbName, "metadata.uid")
+		applied := cnpgDatabaseField(ns, dbName, "status.applied")
+
+		cmd := exec.Command("kubectl", "get", "job", opName,
+			"-n", ns, "--ignore-not-found", "-o", "jsonpath={.metadata.name}")
+		jobName, err := utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred())
+
+		if strings.TrimSpace(jobName) == "" {
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		Expect(uid).NotTo(Equal(oldUID),
+			"Reimport Job was armed while the pre-Reimport CNPG Database was still present")
+		Expect(applied).To(Equal("true"),
+			"Reimport Job was armed before the replacement CNPG Database reported applied=true")
+		armed = true
+	}
+	Expect(armed).To(BeTrue(), "timed out waiting for the Reimport Job to be armed")
+
+	By("asserting the Operation recorded the drop/recreate handshake")
+	cmd := exec.Command("kubectl", "get", "nominatimoperation", opName, "-n", ns,
+		"-o", "jsonpath={.metadata.annotations."+strings.ReplaceAll(resetAnnotation, ".", "\\.")+"}")
+	reset, err := utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(strings.TrimSpace(reset)).To(Equal("done"))
+
+	cmd = exec.Command("kubectl", "get", "nominatimoperation", opName, "-n", ns,
+		"-o", "jsonpath={.metadata.annotations."+strings.ReplaceAll(prevUIDAnnotation, ".", "\\.")+"}")
+	prevUID, err := utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(strings.TrimSpace(prevUID)).To(Equal(oldUID),
+		"the Operation should record the UID of the Database it dropped")
+
+	Expect(cnpgDatabaseField(ns, dbName, "metadata.uid")).NotTo(Equal(oldUID))
+}
 
 // assertNonEmptySearch port-forwards the API Service and retries until search returns hits
 // (parity with mediagis/nominatim-docker assert-non-empty-json).

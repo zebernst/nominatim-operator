@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -121,6 +122,12 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return ctrl.Result{}, err
 	}
 
+	// Register the Operation as active before any Reimport Database drop so the parent
+	// can scale the API to zero (Reimport always suspends) and CNPG can reclaim-delete.
+	if err := r.syncParentActiveOperationRef(ctx, op, true); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	if result, wait, err := r.waitForJobPrerequisites(ctx, op, parent); wait || err != nil {
 		return result, err
 	}
@@ -208,6 +215,16 @@ func (r *NominatimOperationReconciler) waitForJobPrerequisites(
 		return ctrl.Result{}, false, err
 	}
 
+	// Reimport reset must run before cnpgClusterReadyForJobs: after the drop the owned
+	// Database is absent / not-applied, and the Operation (not readiness gating) recreates it.
+	if ready, err := r.ensureReimportDatabaseReset(ctx, op, parent); err != nil {
+		return ctrl.Result{}, false, err
+	} else if !ready {
+		log.Info("waiting for owned CNPG Database drop/recreate before Reimport Job",
+			"nominatim", parent.Name, "database", OwnedCNPGDatabaseName(parent))
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, true, nil
+	}
+
 	if ready, err := r.cnpgClusterReadyForJobs(ctx, parent); err != nil {
 		return ctrl.Result{}, false, err
 	} else if !ready {
@@ -215,14 +232,6 @@ func (r *NominatimOperationReconciler) waitForJobPrerequisites(
 			"nominatim", parent.Name, "cluster", parent.Status.Database.ClusterName,
 			"mode", parent.Status.Database.Mode)
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, true, nil
-	}
-
-	if ready, err := r.ensureReimportDatabaseReset(ctx, op, parent); err != nil {
-		return ctrl.Result{}, false, err
-	} else if !ready {
-		log.Info("waiting for owned CNPG Database drop/recreate before Reimport Job",
-			"nominatim", parent.Name, "database", OwnedCNPGDatabaseName(parent))
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, true, nil
 	}
 
 	return ctrl.Result{}, false, nil
@@ -432,6 +441,14 @@ func (r *NominatimOperationReconciler) ensureReimportDatabaseReset(
 		return true, nil
 	}
 
+	// Wait for the API Deployment to reach zero replicas before DROP DATABASE. The parent
+	// scales it down once this Operation is in activeOperationRefs (Reimport always suspends).
+	if quiesced, err := r.apiQuiescedForReimport(ctx, parent); err != nil {
+		return false, err
+	} else if !quiesced {
+		return false, nil
+	}
+
 	dbName := OwnedCNPGDatabaseName(parent)
 	clusterName := parent.Status.Database.ClusterName
 	if clusterName == "" {
@@ -506,6 +523,41 @@ func (r *NominatimOperationReconciler) ensureReimportDatabaseReset(
 		}
 		return true, nil
 	}
+}
+
+// apiQuiescedForReimport reports whether the owned API Deployment has no pods left that
+// could hold connections open against the application database. Missing Deployments are
+// treated as quiesced (pre-bootstrap / never created). When a Deployment still requests
+// replicas, this scales it to zero so DROP DATABASE is not blocked waiting on the parent
+// reconciler to observe activeOperationRefs.
+func (r *NominatimOperationReconciler) apiQuiescedForReimport(ctx context.Context, parent *nominatimv1alpha1.Nominatim) (bool, error) {
+	deploy := &appsv1.Deployment{}
+	key := types.NamespacedName{Name: APIName(parent), Namespace: parent.Namespace}
+	err := r.Get(ctx, key, deploy)
+	if apierrors.IsNotFound(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if deploy.Spec.Replicas == nil || *deploy.Spec.Replicas != 0 {
+		return false, retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			current := &appsv1.Deployment{}
+			if err := r.Get(ctx, key, current); err != nil {
+				return client.IgnoreNotFound(err)
+			}
+			if current.Spec.Replicas != nil && *current.Spec.Replicas == 0 {
+				return nil
+			}
+			zero := int32(0)
+			current.Spec.Replicas = &zero
+			return r.Update(ctx, current)
+		})
+	}
+	if deploy.Status.Replicas > 0 || deploy.Status.ReadyReplicas > 0 || deploy.Status.AvailableReplicas > 0 {
+		return false, nil
+	}
+	return true, nil
 }
 
 func ensureDatabaseReclaimDelete(ctx context.Context, c client.Client, db *unstructured.Unstructured) error {

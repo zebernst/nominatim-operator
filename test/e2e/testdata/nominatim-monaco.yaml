@@ -57,7 +57,9 @@ spec:
   api:
     replicas: 1
     # Day-2 only. Bootstrap never creates API/UI until status.regions is set.
-    suspendDuringOperations: Never
+    # Reimport always quiesces the API (DROP DATABASE), but BootstrapReimport also
+    # covers day-2 Bootstrap-style work when suspendDuringOperations is honored.
+    suspendDuringOperations: BootstrapReimport
     image:
       repository: example.com/nominatim-api
       tag: e2e

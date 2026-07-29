@@ -1,0 +1,17 @@
+apiVersion: nominatim.zebernst.dev/v1alpha1
+kind: NominatimOperation
+metadata:
+  name: monaco-reimport
+  namespace: nominatim-validation
+  labels:
+    app.kubernetes.io/part-of: nominatim-validation
+spec:
+  type: Reimport
+  nominatimRef:
+    name: monaco
+  regions:
+    - europe/monaco
+  image:
+    repository: example.com/nominatim-worker
+    tag: e2e
+    pullPolicy: IfNotPresent
