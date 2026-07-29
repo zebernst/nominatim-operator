@@ -345,23 +345,35 @@ func (r *NominatimReconciler) reconcileAPI(ctx context.Context, nom *nominatimv1
 		deploy.Labels = labels
 		deploy.Spec.Replicas = &replicas
 		deploy.Spec.Selector = &metav1.LabelSelector{MatchLabels: labels}
+
+		podSpec := corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name:            "api",
+					Image:           resolveImage(apiSpec.Image, DefaultAPIRepository),
+					ImagePullPolicy: resolvePullPolicy(apiSpec.Image),
+					Ports: []corev1.ContainerPort{
+						{Name: "http", ContainerPort: workloadContainerPort},
+					},
+					Env:          env,
+					VolumeMounts: mounts,
+				},
+			},
+			Volumes: volumes,
+		}
+		merged, merr := mergePodSpecOverlay(
+			podSpec,
+			apiSpec.PodSpec,
+			"api",
+			resolveImage(apiSpec.Image, DefaultAPIRepository),
+			resolvePullPolicy(apiSpec.Image),
+		)
+		if merr != nil {
+			return merr
+		}
 		deploy.Spec.Template = corev1.PodTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{Labels: labels},
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{
-					{
-						Name:            "api",
-						Image:           resolveImage(apiSpec.Image, DefaultAPIRepository),
-						ImagePullPolicy: resolvePullPolicy(apiSpec.Image),
-						Ports: []corev1.ContainerPort{
-							{Name: "http", ContainerPort: workloadContainerPort},
-						},
-						Env:          env,
-						VolumeMounts: mounts,
-					},
-				},
-				Volumes: volumes,
-			},
+			Spec:       merged,
 		}
 		return nil
 	})
@@ -415,20 +427,32 @@ func (r *NominatimReconciler) reconcileUI(ctx context.Context, nom *nominatimv1a
 		deploy.Labels = labels
 		deploy.Spec.Replicas = &replicas
 		deploy.Spec.Selector = &metav1.LabelSelector{MatchLabels: labels}
-		deploy.Spec.Template = corev1.PodTemplateSpec{
-			ObjectMeta: metav1.ObjectMeta{Labels: labels},
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{
-					{
-						Name:            "ui",
-						Image:           resolveImage(uiSpec.Image, DefaultUIRepository),
-						ImagePullPolicy: resolvePullPolicy(uiSpec.Image),
-						Ports: []corev1.ContainerPort{
-							{Name: "http", ContainerPort: workloadContainerPort},
-						},
+
+		podSpec := corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name:            "ui",
+					Image:           resolveImage(uiSpec.Image, DefaultUIRepository),
+					ImagePullPolicy: resolvePullPolicy(uiSpec.Image),
+					Ports: []corev1.ContainerPort{
+						{Name: "http", ContainerPort: workloadContainerPort},
 					},
 				},
 			},
+		}
+		merged, merr := mergePodSpecOverlay(
+			podSpec,
+			uiSpec.PodSpec,
+			"ui",
+			resolveImage(uiSpec.Image, DefaultUIRepository),
+			resolvePullPolicy(uiSpec.Image),
+		)
+		if merr != nil {
+			return merr
+		}
+		deploy.Spec.Template = corev1.PodTemplateSpec{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels},
+			Spec:       merged,
 		}
 		return nil
 	})

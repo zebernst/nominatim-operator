@@ -26,7 +26,31 @@ spec:
     # Day-2 only (Never = keep API up during AddRegions/Update/…).
     # Bootstrap does not use this: serving workloads wait for status.regions.
     suspendDuringOperations: Never
+    # Optional podSpec overlay (affinity/resources/probes/…). Sibling image seals container image.
+    # podSpec:
+    #   nodeSelector:
+    #     disktype: ssd
   # worker:
   #   image:
   #     repository: ghcr.io/zebernst/nominatim-worker
   #     tag: latest
+  #   # Optional Job podSpec overlay (also used by Update Jobs).
+  #   # podSpec:
+  #   #   tolerations: []
+  # Owned Cluster create (alternative to clusterRef) also accepts resources/affinity/
+  # topologySpreadConstraints. For full CNPG (backup, custom bootstrap), use clusterRef.
+  # database:
+  #   cluster:
+  #     instances: 1
+  #     storage:
+  #       spec:
+  #         accessModes: [ReadWriteOnce]
+  #         resources:
+  #           requests:
+  #             storage: 50Gi
+  #     resources:
+  #       requests:
+  #         memory: 1Gi
+  #     affinity:
+  #       nodeSelector:
+  #         node-role.kubernetes.io/postgres: ""

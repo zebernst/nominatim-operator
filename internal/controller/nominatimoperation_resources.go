@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	nominatimv1alpha1 "github.com/zebernst/nominatim-operator/api/v1alpha1"
 )
@@ -201,7 +202,7 @@ func operationLabels(op *nominatimv1alpha1.NominatimOperation) map[string]string
 	}
 }
 
-func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim, stagingClaim, image string, pullPolicy corev1.PullPolicy) *batchv1.Job {
+func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim, stagingClaim, image string, pullPolicy corev1.PullPolicy) (*batchv1.Job, error) {
 	projectClaim := volumeClaimName(parent.Spec.Project.Volume, parent.Name+"-project")
 
 	volumes := []corev1.Volume{
@@ -264,6 +265,28 @@ func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominat
 	}
 
 	backoff := int32(2)
+	podSpec := corev1.PodSpec{
+		RestartPolicy: corev1.RestartPolicyNever,
+		Containers: []corev1.Container{{
+			Name:            "worker",
+			Image:           image,
+			ImagePullPolicy: pullPolicy,
+			Env:             env,
+			VolumeMounts:    mounts,
+		}},
+		Volumes: volumes,
+	}
+	var workerPodSpec *runtime.RawExtension
+	if parent.Spec.Worker != nil {
+		workerPodSpec = parent.Spec.Worker.PodSpec
+	}
+	merged, err := mergePodSpecOverlay(podSpec, workerPodSpec, "worker", image, pullPolicy)
+	if err != nil {
+		return nil, err
+	}
+	// Jobs require RestartPolicyNever; do not allow podSpec overlays to change it.
+	merged.RestartPolicy = corev1.RestartPolicyNever
+
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      op.Name,
@@ -276,20 +299,10 @@ func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominat
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: operationLabels(op),
 				},
-				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
-					Containers: []corev1.Container{{
-						Name:            "worker",
-						Image:           image,
-						ImagePullPolicy: pullPolicy,
-						Env:             env,
-						VolumeMounts:    mounts,
-					}},
-					Volumes: volumes,
-				},
+				Spec: merged,
 			},
 		},
-	}
+	}, nil
 }
 
 // pbfURLForRegion builds the Geofabrik download URL for a single region path. Only the

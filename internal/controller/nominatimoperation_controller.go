@@ -235,13 +235,16 @@ func (r *NominatimOperationReconciler) ensureStagingPVC(ctx context.Context, op 
 }
 
 func (r *NominatimOperationReconciler) ensureJob(ctx context.Context, op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim) error {
-	desired := buildOperationJob(op, parent, stagingPVCName(op), workerImageForOperation(op, parent), workerPullPolicyForOperation(op, parent))
+	desired, err := buildOperationJob(op, parent, stagingPVCName(op), workerImageForOperation(op, parent), workerPullPolicyForOperation(op, parent))
+	if err != nil {
+		return fmt.Errorf("build Operation Job: %w", err)
+	}
 	if err := controllerutil.SetControllerReference(op, desired, r.Scheme); err != nil {
 		return err
 	}
 
 	existing := &batchv1.Job{}
-	err := r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing)
+	err = r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing)
 	if err == nil {
 		// Jobs are mostly immutable. If an earlier race created a Job without DB env,
 		// delete it so the next reconcile can recreate with NOMINATIM_DATABASE_DSN.
