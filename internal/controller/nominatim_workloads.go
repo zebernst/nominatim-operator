@@ -278,12 +278,13 @@ func operationImpactMatches(impact nominatimv1alpha1.OperationImpact, opType nom
 // shouldSuspendAPI checks the parent's active operation refs against impact, fetching
 // each NominatimOperation to inspect its Type. Missing operations (already completed and
 // pruned) are skipped rather than treated as errors.
+//
+// Reimport always suspends the API regardless of suspendDuringOperations: the Operation
+// drops the owned CNPG Database (reclaim=delete) before the worker Job starts, and open
+// API connections block DROP DATABASE indefinitely.
 func (r *NominatimReconciler) shouldSuspendAPI(ctx context.Context, nom *nominatimv1alpha1.Nominatim, impact nominatimv1alpha1.OperationImpact) (bool, error) {
 	if impact == "" {
 		impact = nominatimv1alpha1.OperationImpactNever
-	}
-	if impact == nominatimv1alpha1.OperationImpactNever {
-		return false, nil
 	}
 	for _, ref := range nom.Status.ActiveOperationRefs {
 		op := &nominatimv1alpha1.NominatimOperation{}
@@ -293,6 +294,12 @@ func (r *NominatimReconciler) shouldSuspendAPI(ctx context.Context, nom *nominat
 		}
 		if err != nil {
 			return false, fmt.Errorf("get active operation %q: %w", ref.Name, err)
+		}
+		if op.Spec.Type == nominatimv1alpha1.NominatimOperationReimport {
+			return true, nil
+		}
+		if impact == nominatimv1alpha1.OperationImpactNever {
+			continue
 		}
 		if operationImpactMatches(impact, op.Spec.Type) {
 			return true, nil

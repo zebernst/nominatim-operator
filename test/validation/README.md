@@ -28,6 +28,12 @@ PostGIS/hstore as superuser. The controller therefore drops the owned `Database`
 recreates it, and only arms the worker Job once the replacement is a different object
 (new `metadata.uid`) reporting `status.applied=true`.
 
+Before that drop, the Operation registers itself on `status.activeOperationRefs` and
+quiesces the API Deployment (Reimport always suspends, even when
+`suspendDuringOperations: Never`) so open connections cannot block `DROP DATABASE`.
+While `nominatim.zebernst.dev/reimport-db-reset=pending`, the Nominatim reconciler
+skips recreating the owned Database so it does not fight the delete.
+
 That ordering is asserted in three places:
 
 | Where | What it covers |

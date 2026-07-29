@@ -494,6 +494,31 @@ func TestShouldSuspendAPI_ImpactMatrix(t *testing.T) {
 	}
 }
 
+// Reimport drops the application database; open API connections block CNPG reclaim=delete.
+// Even suspendDuringOperations=Never must quiesce the API while a Reimport is active.
+func TestShouldSuspendAPI_ReimportAlwaysSuspendsEvenWithNever(t *testing.T) {
+	scheme := testScheme(t)
+	nom := baseNominatim("suspend-reimport")
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "op-reimport", Namespace: "default"},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationReimport,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+		},
+	}
+	nom.Status.ActiveOperationRefs = []corev1.ObjectReference{{Name: "op-reimport"}}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, op).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+
+	got, err := r.shouldSuspendAPI(context.Background(), nom, nominatimv1alpha1.OperationImpactNever)
+	if err != nil {
+		t.Fatalf("shouldSuspendAPI: %v", err)
+	}
+	if !got {
+		t.Fatal("active Reimport must suspend the API even when suspendDuringOperations=Never")
+	}
+}
+
 func TestShouldSuspendAPI_SkipsMissingOperations(t *testing.T) {
 	scheme := testScheme(t)
 	nom := baseNominatim("suspend-missing")

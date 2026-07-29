@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -910,7 +911,7 @@ func TestReconcileReimport_WaitsForDatabaseResetBeforeJob(t *testing.T) {
 	oldDB := newOwnedCNPGDatabase(parent, "uid-old", true)
 	op := reimportOp("ri-job-op", parent, nil)
 	c := fake.NewClientBuilder().WithScheme(scheme).
-		WithStatusSubresource(&nominatimv1alpha1.NominatimOperation{}).
+		WithStatusSubresource(parent, &nominatimv1alpha1.NominatimOperation{}).
 		WithObjects(parent, op, oldDB, cnpgAppSecret(parent), readyOwnedCNPGCluster(parent)).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 
@@ -927,6 +928,98 @@ func TestReconcileReimport_WaitsForDatabaseResetBeforeJob(t *testing.T) {
 	err = c.Get(context.Background(), types.NamespacedName{Name: op.Name, Namespace: parent.Namespace}, job)
 	if err == nil {
 		t.Fatal("Job must not exist before Database reset completes")
+	}
+}
+
+// activeOperationRefs must be registered before the Job exists so the parent can scale the
+// API to zero and CNPG can DROP DATABASE under reclaim=delete.
+func TestReconcileReimport_RegistersActiveRefBeforeJob(t *testing.T) {
+	scheme := testScheme(t)
+	parent := reimportParent("ri-ref")
+	op := reimportOp("ri-ref-op", parent, nil)
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithStatusSubresource(parent, &nominatimv1alpha1.NominatimOperation{}).
+		WithObjects(parent, op, newOwnedCNPGDatabase(parent, "uid-old", true),
+			cnpgAppSecret(parent), readyOwnedCNPGCluster(parent)).Build()
+	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
+
+	if _, err := r.Reconcile(context.Background(), reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: op.Name, Namespace: parent.Namespace},
+	}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	got := &nominatimv1alpha1.Nominatim{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: parent.Name, Namespace: parent.Namespace}, got); err != nil {
+		t.Fatalf("get parent: %v", err)
+	}
+	if len(got.Status.ActiveOperationRefs) != 1 || got.Status.ActiveOperationRefs[0].Name != op.Name {
+		t.Fatalf("activeOperationRefs=%v want [%s] before the Job is armed", got.Status.ActiveOperationRefs, op.Name)
+	}
+}
+
+// DROP DATABASE cannot proceed while the API Deployment still has pods.
+func TestEnsureReimportDatabaseReset_WaitsForAPIQuiesced(t *testing.T) {
+	scheme := testScheme(t)
+	parent := reimportParent("ri-api")
+	op := reimportOp("ri-api-op", parent, nil)
+	replicas := int32(1)
+	api := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: APIName(parent), Namespace: parent.Namespace},
+		Spec:       appsv1.DeploymentSpec{Replicas: &replicas},
+		Status:     appsv1.DeploymentStatus{Replicas: 1, ReadyReplicas: 1},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithStatusSubresource(&nominatimv1alpha1.NominatimOperation{}).
+		WithObjects(parent, op, api, newOwnedCNPGDatabase(parent, "uid-old", true)).Build()
+	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
+
+	ready, err := r.ensureReimportDatabaseReset(context.Background(), op, parent)
+	if err != nil {
+		t.Fatalf("ensureReimportDatabaseReset: %v", err)
+	}
+	if ready {
+		t.Fatal("expected ready=false while the API Deployment still has ReadyReplicas")
+	}
+	gotAPI := &appsv1.Deployment{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: APIName(parent), Namespace: parent.Namespace}, gotAPI); err != nil {
+		t.Fatalf("get API: %v", err)
+	}
+	if gotAPI.Spec.Replicas == nil || *gotAPI.Spec.Replicas != 0 {
+		t.Fatalf("API replicas=%v want 0 (Operation must scale down before DROP DATABASE)", gotAPI.Spec.Replicas)
+	}
+	db := &unstructured.Unstructured{}
+	db.SetGroupVersionKind(CNPGDatabaseGVK)
+	if err := c.Get(context.Background(), types.NamespacedName{
+		Name: OwnedCNPGDatabaseName(parent), Namespace: parent.Namespace,
+	}, db); err != nil {
+		t.Fatalf("Database should still exist until the API is quiesced: %v", err)
+	}
+	if string(db.GetUID()) != "uid-old" {
+		t.Fatalf("uid=%q want uid-old (delete must wait for API drain)", db.GetUID())
+	}
+}
+
+// The Nominatim reconciler must not CreateOrUpdate the owned Database while a Reimport is
+// mid drop/recreate, or it will fight the Operation's Delete under the pre-Reimport UID.
+func TestReconcileOwnedCNPGDatabase_SkipsWhileReimportResetPending(t *testing.T) {
+	scheme := testScheme(t)
+	parent := reimportParent("ri-skip")
+	op := reimportOp("ri-skip-op", parent, pendingResetAnnotations("uid-old"))
+	op.Status.Phase = nominatimv1alpha1.NominatimOperationPhasePending
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(parent, op).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+
+	if err := r.reconcileOwnedCNPGDatabase(context.Background(), parent, OwnedCNPGClusterName(parent)); err != nil {
+		t.Fatalf("reconcileOwnedCNPGDatabase: %v", err)
+	}
+	db := &unstructured.Unstructured{}
+	db.SetGroupVersionKind(CNPGDatabaseGVK)
+	err := c.Get(context.Background(), types.NamespacedName{
+		Name: OwnedCNPGDatabaseName(parent), Namespace: parent.Namespace,
+	}, db)
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("expected no Database recreate while reset=pending, got err=%v", err)
 	}
 }
 
