@@ -58,6 +58,12 @@ The worker entrypoint dispatches on `OPERATION_TYPE` (or the first CLI arg):
 
 These are thin phases invoked by `NominatimOperation` Jobs. Orchestration (mutex, scale API, pause backups, empty DB for Reimport) stays in the operator — not in bash.
 
+### AddRegions Spec contract
+
+`NOMINATIM_REGIONS` (derived by the operator from `op.Spec.Regions`, falling back to `parent.Spec.Regions` when the Operation sets none) is the **exact** import set for an AddRegions Job: `add-regions.sh` imports every region listed there that is not already recorded in `imported-regions.txt`, then re-indexes once if anything changed. There is no per-run cap or "only this region" filter in the worker — chunking (e.g. one missing region per drift-driven Operation) is entirely the operator's responsibility. A manual AddRegions with multiple regions in its Spec imports all of them in one Job.
+
+`add-regions.sh` still requires `IMPORT_FINISHED` (Bootstrap must have completed) and a non-empty `NOMINATIM_REGIONS` as bash-level belts, even though the operator also enforces these preconditions before creating the Job.
+
 ```bash
 docker run --rm \
   -e OPERATION_TYPE=Bootstrap \
