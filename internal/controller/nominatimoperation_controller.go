@@ -139,41 +139,8 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return ctrl.Result{}, err
 	}
 
-	if parent.Status.Database.ConnectionSecretName == "" {
-		log.Info("waiting for parent status.database.connectionSecretName before creating Job",
-			"nominatim", parent.Name)
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-	}
-
-	secret := &corev1.Secret{}
-	secretKey := types.NamespacedName{
-		Name:      parent.Status.Database.ConnectionSecretName,
-		Namespace: parent.Namespace,
-	}
-	if err := r.Get(ctx, secretKey, secret); err != nil {
-		if apierrors.IsNotFound(err) {
-			log.Info("waiting for database connection Secret before creating Job",
-				"secret", secretKey.Name, "nominatim", parent.Name)
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-		}
-		return ctrl.Result{}, err
-	}
-
-	if ready, err := r.cnpgClusterReadyForJobs(ctx, parent); err != nil {
-		return ctrl.Result{}, err
-	} else if !ready {
-		log.Info("waiting for CNPG Cluster/Database readiness before creating Job",
-			"nominatim", parent.Name, "cluster", parent.Status.Database.ClusterName,
-			"mode", parent.Status.Database.Mode)
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-	}
-
-	if ready, err := r.ensureReimportDatabaseReset(ctx, op, parent); err != nil {
-		return ctrl.Result{}, err
-	} else if !ready {
-		log.Info("waiting for owned CNPG Database drop/recreate before Reimport Job",
-			"nominatim", parent.Name, "database", OwnedCNPGDatabaseName(parent))
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	if result, wait, err := r.waitForJobPrerequisites(ctx, op, parent); wait || err != nil {
+		return result, err
 	}
 
 	if err := r.ensureJob(ctx, op, parent); err != nil {
@@ -189,6 +156,56 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// waitForJobPrerequisites blocks Job creation until the connection Secret exists, the CNPG
+// Cluster/Database is ready, and (for Reimport) the owned Database has been drop/recreated.
+// wait=true means the caller should return result without creating the Job.
+func (r *NominatimOperationReconciler) waitForJobPrerequisites(
+	ctx context.Context,
+	op *nominatimv1alpha1.NominatimOperation,
+	parent *nominatimv1alpha1.Nominatim,
+) (result ctrl.Result, wait bool, err error) {
+	log := logf.FromContext(ctx)
+
+	if parent.Status.Database.ConnectionSecretName == "" {
+		log.Info("waiting for parent status.database.connectionSecretName before creating Job",
+			"nominatim", parent.Name)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, true, nil
+	}
+
+	secret := &corev1.Secret{}
+	secretKey := types.NamespacedName{
+		Name:      parent.Status.Database.ConnectionSecretName,
+		Namespace: parent.Namespace,
+	}
+	if err := r.Get(ctx, secretKey, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("waiting for database connection Secret before creating Job",
+				"secret", secretKey.Name, "nominatim", parent.Name)
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, true, nil
+		}
+		return ctrl.Result{}, false, err
+	}
+
+	if ready, err := r.cnpgClusterReadyForJobs(ctx, parent); err != nil {
+		return ctrl.Result{}, false, err
+	} else if !ready {
+		log.Info("waiting for CNPG Cluster/Database readiness before creating Job",
+			"nominatim", parent.Name, "cluster", parent.Status.Database.ClusterName,
+			"mode", parent.Status.Database.Mode)
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, true, nil
+	}
+
+	if ready, err := r.ensureReimportDatabaseReset(ctx, op, parent); err != nil {
+		return ctrl.Result{}, false, err
+	} else if !ready {
+		log.Info("waiting for owned CNPG Database drop/recreate before Reimport Job",
+			"nominatim", parent.Name, "database", OwnedCNPGDatabaseName(parent))
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, true, nil
+	}
+
+	return ctrl.Result{}, false, nil
 }
 
 // reconcileOperationDelete clears parent ActiveOperationRefs and resumes CNPG side-effects
