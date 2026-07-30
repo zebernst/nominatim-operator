@@ -438,7 +438,9 @@ type RegionStatus struct {
 	// +optional
 	Phase string `json:"phase,omitempty"`
 
-	// SequenceState reflects the last known update sequence identity when available.
+	// SequenceState is the last known Geofabrik update identity for this region
+	// (typically "sequenceNumber@timestamp" from update/<region>/sequence.state),
+	// filled by an operator-owned probe Job after Succeeded write Operations.
 	// +optional
 	SequenceState string `json:"sequenceState,omitempty"`
 

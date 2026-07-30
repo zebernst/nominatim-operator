@@ -22,6 +22,7 @@ import (
 	"slices"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -53,7 +54,7 @@ type NominatimReconciler struct {
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatims/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatims/finalizers,verbs=update
-// +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatimoperations,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatimoperations,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=databases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
@@ -121,6 +122,11 @@ func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
 		log.Error(err, "failed to reconcile Nominatim region drift")
+		return ctrl.Result{}, err
+	}
+
+	if err := r.reconcileSequenceObservation(ctx, nom); err != nil {
+		log.Error(err, "failed to reconcile Nominatim sequence observation")
 		return ctrl.Result{}, err
 	}
 
@@ -334,6 +340,8 @@ func (r *NominatimReconciler) setupWithManager(mgr ctrl.Manager, mapper meta.RES
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.PersistentVolumeClaim{}).
+		Owns(&batchv1.Job{}).
+		Owns(&corev1.ConfigMap{}).
 		Watches(
 			&nominatimv1alpha1.NominatimOperation{},
 			handler.EnqueueRequestsFromMapFunc(mapOperationToNominatim),

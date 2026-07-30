@@ -88,3 +88,24 @@ func TestWaitForPostgresDefaultIsShortened(t *testing.T) {
 		t.Error("common.sh wait_for_postgres must not retain the old 90-attempt (~180s) upper bound")
 	}
 }
+
+// TestReportSequenceScriptIsProbeOnly asserts sequence reporting is a dedicated
+// script for the operator probe Job, not wired into Update/Bootstrap (5et.35.3).
+func TestReportSequenceScriptIsProbeOnly(t *testing.T) {
+	report, err := os.ReadFile("report-sequence.sh")
+	if err != nil {
+		t.Fatalf("reading report-sequence.sh: %v", err)
+	}
+	if !strings.Contains(string(report), "report.json") {
+		t.Error("report-sequence.sh must patch ConfigMap report.json")
+	}
+	for _, name := range []string{"update.sh", "bootstrap.sh", "add-regions.sh"} {
+		contents, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		if strings.Contains(string(contents), "report-sequence") {
+			t.Errorf("%s must not invoke report-sequence (operator probe owns that)", name)
+		}
+	}
+}

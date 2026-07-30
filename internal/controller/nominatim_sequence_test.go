@@ -1,0 +1,182 @@
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package controller
+
+import (
+	"context"
+	"testing"
+
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	nominatimv1alpha1 "github.com/zebernst/nominatim-operator/api/v1alpha1"
+)
+
+func TestParseSequenceReport(t *testing.T) {
+	t.Parallel()
+	got, err := parseSequenceReport(`{"europe/monaco":"4862@2026-07-28T20:21:00Z"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["europe/monaco"] != "4862@2026-07-28T20:21:00Z" {
+		t.Fatalf("got %q", got["europe/monaco"])
+	}
+	if _, err := parseSequenceReport(`nope`); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestApplySequenceReportMap(t *testing.T) {
+	t.Parallel()
+	nom := &nominatimv1alpha1.Nominatim{
+		Status: nominatimv1alpha1.NominatimStatus{
+			Regions: []nominatimv1alpha1.RegionStatus{
+				{Name: "europe/monaco", Phase: regionPhaseImported},
+				{Name: "europe/andorra", Phase: regionPhaseImported},
+			},
+		},
+	}
+	applySequenceReportMap(nom, map[string]string{
+		"europe/monaco": "1@t",
+		"europe/france": "ignored",
+	}, nil)
+	if nom.Status.Regions[0].SequenceState != "1@t" {
+		t.Fatalf("monaco=%q", nom.Status.Regions[0].SequenceState)
+	}
+	if nom.Status.Regions[1].SequenceState != "" {
+		t.Fatalf("andorra unexpectedly set")
+	}
+	if len(nom.Status.Regions) != 2 {
+		t.Fatal("must not invent regions")
+	}
+}
+
+func TestSequenceProbeOperation(t *testing.T) {
+	t.Parallel()
+	op := &nominatimv1alpha1.NominatimOperation{
+		Spec:   nominatimv1alpha1.NominatimOperationSpec{Type: nominatimv1alpha1.NominatimOperationUpdate},
+		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
+	}
+	if !sequenceProbeOperation(op) {
+		t.Fatal("Update Succeeded should probe")
+	}
+	op.Status.Phase = nominatimv1alpha1.NominatimOperationPhaseRunning
+	if sequenceProbeOperation(op) {
+		t.Fatal("Running should not probe")
+	}
+	op.Status.Phase = nominatimv1alpha1.NominatimOperationPhaseSucceeded
+	op.Spec.Type = nominatimv1alpha1.NominatimOperationRefresh
+	if sequenceProbeOperation(op) {
+		t.Fatal("Refresh should not probe")
+	}
+}
+
+func TestReconcileSequenceObservation_CreatesProbeAndAppliesConfigMap(t *testing.T) {
+	scheme := testScheme(t)
+	ctx := context.Background()
+	nom := nominatimWithConnectionSecret("seq-obs")
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: regionPhaseImported}}
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "seq-obs-update", Namespace: nom.Namespace},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+		},
+		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, op).WithObjects(nom, op).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+
+	if err := r.reconcileSequenceObservation(ctx, nom); err != nil {
+		t.Fatalf("reconcileSequenceObservation: %v", err)
+	}
+
+	sa := &corev1.ServiceAccount{}
+	if err := c.Get(ctx, types.NamespacedName{Name: sequenceProbeSAName(nom), Namespace: nom.Namespace}, sa); err != nil {
+		t.Fatalf("SA: %v", err)
+	}
+	role := &rbacv1.Role{}
+	if err := c.Get(ctx, types.NamespacedName{Name: sequenceProbeSAName(nom), Namespace: nom.Namespace}, role); err != nil {
+		t.Fatalf("Role: %v", err)
+	}
+	job := &batchv1.Job{}
+	if err := c.Get(ctx, types.NamespacedName{Name: sequenceProbeJobName(op), Namespace: nom.Namespace}, job); err != nil {
+		t.Fatalf("Job: %v", err)
+	}
+	if job.Spec.Template.Spec.ServiceAccountName != sequenceProbeSAName(nom) {
+		t.Fatalf("job SA=%q", job.Spec.Template.Spec.ServiceAccountName)
+	}
+	if len(job.Spec.Template.Spec.Containers) != 1 || job.Spec.Template.Spec.Containers[0].Command[0] != "/opt/nominatim/scripts/report-sequence.sh" {
+		t.Fatalf("job command=%v", job.Spec.Template.Spec.Containers[0].Command)
+	}
+	for _, v := range job.Spec.Template.Spec.Volumes {
+		if v.PersistentVolumeClaim != nil && !v.PersistentVolumeClaim.ReadOnly {
+			t.Fatal("project volume should be read-only on probe")
+		}
+	}
+
+	// Simulate probe success + ConfigMap write, then observe again.
+	job.Status.Succeeded = 1
+	if err := c.Status().Update(ctx, job); err != nil {
+		t.Fatalf("job status: %v", err)
+	}
+	cm := &corev1.ConfigMap{}
+	if err := c.Get(ctx, types.NamespacedName{Name: sequenceReportConfigMapName(nom), Namespace: nom.Namespace}, cm); err != nil {
+		t.Fatalf("get cm: %v", err)
+	}
+	cm.Data = map[string]string{sequenceReportCMKey: `{"europe/monaco":"9@now"}`}
+	if err := c.Update(ctx, cm); err != nil {
+		t.Fatalf("cm update: %v", err)
+	}
+	if err := r.reconcileSequenceObservation(ctx, nom); err != nil {
+		t.Fatalf("second observe: %v", err)
+	}
+	if nom.Status.Regions[0].SequenceState != "9@now" {
+		t.Fatalf("SequenceState=%q", nom.Status.Regions[0].SequenceState)
+	}
+	gotOp := &nominatimv1alpha1.NominatimOperation{}
+	if err := c.Get(ctx, types.NamespacedName{Name: op.Name, Namespace: op.Namespace}, gotOp); err != nil {
+		t.Fatal(err)
+	}
+	if gotOp.Annotations[annotationSequenceObserved] != "true" {
+		t.Fatalf("annotations=%v", gotOp.Annotations)
+	}
+}
+
+func TestBuildSequenceProbeJob_UsesWorkerImage(t *testing.T) {
+	scheme := testScheme(t)
+	nom := baseNominatim("img")
+	nom.Spec.Worker = &nominatimv1alpha1.WorkerSpec{
+		Image: &nominatimv1alpha1.ImageSpec{Repository: "example.com/worker", Tag: "probe-test"},
+	}
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "img-boot", Namespace: nom.Namespace},
+	}
+	r := &NominatimReconciler{Scheme: scheme}
+	job, err := r.buildSequenceProbeJob(nom, op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "example.com/worker:probe-test"
+	if job.Spec.Template.Spec.Containers[0].Image != want {
+		t.Fatalf("image=%q want %q", job.Spec.Template.Spec.Containers[0].Image, want)
+	}
+}
