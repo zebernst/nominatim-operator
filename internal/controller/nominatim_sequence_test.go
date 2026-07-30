@@ -461,13 +461,13 @@ func TestEnsureSequenceReportConfigMap_CreatesAndUpdates(t *testing.T) {
 
 func TestSequenceProbeOperation_AllWriteTypes(t *testing.T) {
 	t.Parallel()
-	types := []nominatimv1alpha1.NominatimOperationType{
+	opTypes := []nominatimv1alpha1.NominatimOperationType{
 		nominatimv1alpha1.NominatimOperationBootstrap,
 		nominatimv1alpha1.NominatimOperationAddRegions,
 		nominatimv1alpha1.NominatimOperationReimport,
 		nominatimv1alpha1.NominatimOperationCatchUp,
 	}
-	for _, typ := range types {
+	for _, typ := range opTypes {
 		op := &nominatimv1alpha1.NominatimOperation{
 			Spec:   nominatimv1alpha1.NominatimOperationSpec{Type: typ},
 			Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
@@ -475,5 +475,40 @@ func TestSequenceProbeOperation_AllWriteTypes(t *testing.T) {
 		if !sequenceProbeOperation(op) {
 			t.Fatalf("%s Succeeded should probe", typ)
 		}
+	}
+}
+
+func TestMarkSequenceObserved_NotFound(t *testing.T) {
+	scheme := testScheme(t)
+	ctx := context.Background()
+	r := &NominatimReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).Build(), Scheme: scheme}
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "gone", Namespace: "default"},
+	}
+	if err := r.markSequenceObserved(ctx, op); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBuildSequenceProbeJob_WorkerPullPolicy(t *testing.T) {
+	scheme := testScheme(t)
+	nom := baseNominatim("pull-pol")
+	nom.Spec.Worker = &nominatimv1alpha1.WorkerSpec{
+		Image: &nominatimv1alpha1.ImageSpec{
+			Repository: "example.com/worker",
+			Tag:        "v1",
+			PullPolicy: corev1.PullAlways,
+		},
+	}
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "pull-pol-op", Namespace: nom.Namespace},
+	}
+	r := &NominatimReconciler{Scheme: scheme}
+	job, err := r.buildSequenceProbeJob(nom, op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Spec.Template.Spec.Containers[0].ImagePullPolicy != corev1.PullAlways {
+		t.Fatalf("pullPolicy=%q", job.Spec.Template.Spec.Containers[0].ImagePullPolicy)
 	}
 }

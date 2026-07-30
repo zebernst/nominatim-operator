@@ -407,6 +407,23 @@ func TestMergePodSpecOverlay_blocksMountPathCollision(t *testing.T) {
 	}
 }
 
+func TestStripPrivilegedPodSC(t *testing.T) {
+	t.Parallel()
+	if stripPrivilegedPodSC(nil) != nil {
+		t.Fatal("nil in → nil out")
+	}
+	fs := int64(1000)
+	in := &corev1.PodSecurityContext{FSGroup: &fs}
+	out := stripPrivilegedPodSC(in)
+	if out == nil || out.FSGroup == nil || *out.FSGroup != 1000 {
+		t.Fatalf("got %+v", out)
+	}
+	*out.FSGroup = 1
+	if *in.FSGroup != 1000 {
+		t.Fatal("must DeepCopy")
+	}
+}
+
 func envMap(env []corev1.EnvVar) map[string]string {
 	out := map[string]string{}
 	for _, e := range env {
