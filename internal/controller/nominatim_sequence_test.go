@@ -350,3 +350,130 @@ func TestEnsureSequenceProbeRBAC_UpdatesExisting(t *testing.T) {
 		t.Fatalf("roleRef=%q", gotRB.RoleRef.Name)
 	}
 }
+
+func TestObserveSequenceForOperation_InProgressNoMark(t *testing.T) {
+	scheme := testScheme(t)
+	ctx := context.Background()
+	nom := nominatimWithConnectionSecret("run-probe")
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "run-probe-update", Namespace: nom.Namespace},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+		},
+		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, op).WithObjects(nom, op).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	job, err := r.buildSequenceProbeJob(nom, op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Create(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.observeSequenceForOperation(ctx, nom, op); err != nil {
+		t.Fatal(err)
+	}
+	gotOp := &nominatimv1alpha1.NominatimOperation{}
+	if err := c.Get(ctx, types.NamespacedName{Name: op.Name, Namespace: op.Namespace}, gotOp); err != nil {
+		t.Fatal(err)
+	}
+	if gotOp.Annotations[annotationSequenceObserved] == annotationValueTrue {
+		t.Fatal("in-progress probe must not mark observed")
+	}
+}
+
+func TestMarkSequenceObserved_Idempotent(t *testing.T) {
+	scheme := testScheme(t)
+	ctx := context.Background()
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "idem-obs",
+			Namespace:   "default",
+			Annotations: map[string]string{annotationSequenceObserved: annotationValueTrue},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(op).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	if err := r.markSequenceObserved(ctx, op); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReconcileSequenceObservation_SkipsNonProbeTypes(t *testing.T) {
+	scheme := testScheme(t)
+	ctx := context.Background()
+	nom := nominatimWithConnectionSecret("skip-type")
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: regionPhaseImported}}
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "skip-type-refresh", Namespace: nom.Namespace},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationRefresh,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+		},
+		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, op).WithObjects(nom, op).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	if err := r.reconcileSequenceObservation(ctx, nom); err != nil {
+		t.Fatal(err)
+	}
+	job := &batchv1.Job{}
+	if err := c.Get(ctx, types.NamespacedName{Name: sequenceProbeJobName(op), Namespace: nom.Namespace}, job); err == nil {
+		t.Fatal("Refresh must not create a sequence probe Job")
+	}
+}
+
+func TestApplySequenceReportMap_EmptyInputs(t *testing.T) {
+	t.Parallel()
+	nom := &nominatimv1alpha1.Nominatim{
+		Status: nominatimv1alpha1.NominatimStatus{
+			Regions: []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}},
+		},
+	}
+	applySequenceReportMap(nom, nil, nil)
+	applySequenceReportMap(nom, map[string]string{}, nil)
+	empty := &nominatimv1alpha1.Nominatim{}
+	applySequenceReportMap(empty, map[string]string{"europe/monaco": "1@t"}, nil)
+}
+
+func TestEnsureSequenceReportConfigMap_CreatesAndUpdates(t *testing.T) {
+	scheme := testScheme(t)
+	ctx := context.Background()
+	nom := baseNominatim("seq-cm")
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	if err := r.ensureSequenceReportConfigMap(ctx, nom); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ensureSequenceReportConfigMap(ctx, nom); err != nil {
+		t.Fatal(err)
+	}
+	cm := &corev1.ConfigMap{}
+	if err := c.Get(ctx, types.NamespacedName{Name: sequenceReportConfigMapName(nom), Namespace: nom.Namespace}, cm); err != nil {
+		t.Fatal(err)
+	}
+	if cm.Labels["nominatim.zebernst.dev/component"] != "sequence-report" {
+		t.Fatalf("labels=%v", cm.Labels)
+	}
+}
+
+func TestSequenceProbeOperation_AllWriteTypes(t *testing.T) {
+	t.Parallel()
+	types := []nominatimv1alpha1.NominatimOperationType{
+		nominatimv1alpha1.NominatimOperationBootstrap,
+		nominatimv1alpha1.NominatimOperationAddRegions,
+		nominatimv1alpha1.NominatimOperationReimport,
+		nominatimv1alpha1.NominatimOperationCatchUp,
+	}
+	for _, typ := range types {
+		op := &nominatimv1alpha1.NominatimOperation{
+			Spec:   nominatimv1alpha1.NominatimOperationSpec{Type: typ},
+			Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
+		}
+		if !sequenceProbeOperation(op) {
+			t.Fatalf("%s Succeeded should probe", typ)
+		}
+	}
+}
