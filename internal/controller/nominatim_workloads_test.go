@@ -233,7 +233,7 @@ func TestReconcileAPI_RequiresConnectionSecretName(t *testing.T) {
 	nom := baseNominatim("api-nosecret")
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
-	if err := r.reconcileAPI(context.Background(), nom, "project-pvc", ""); err == nil {
+	if err := r.reconcileAPI(context.Background(), nom); err == nil {
 		t.Fatal("expected error when connectionSecretName is empty")
 	}
 }
@@ -245,7 +245,7 @@ func TestReconcileAPI_CreatesDeploymentAndServiceWithDBEnv(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileAPI(context.Background(), nom, "api-basic-project", ""); err != nil {
+	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileAPI: %v", err)
 	}
 
@@ -272,14 +272,18 @@ func TestReconcileAPI_CreatesDeploymentAndServiceWithDBEnv(t *testing.T) {
 	if !foundDSN {
 		t.Fatal("expected NOMINATIM_DATABASE_DSN env var from secret")
 	}
-	foundProjectMount := false
-	for _, m := range container.VolumeMounts {
-		if m.Name == "project" && m.MountPath == projectMountPath {
-			foundProjectMount = true
-		}
+
+	// Serving plane: ephemeral workdir only — never project/flatnode PVCs (nominatim-5et.35.1).
+	if len(container.VolumeMounts) != 1 || container.VolumeMounts[0].Name != apiWorkdirVolumeName {
+		t.Fatalf("volumeMounts=%+v want single %s emptyDir", container.VolumeMounts, apiWorkdirVolumeName)
 	}
-	if !foundProjectMount {
-		t.Fatalf("expected project volume mount at %s, got %+v", projectMountPath, container.VolumeMounts)
+	if len(deploy.Spec.Template.Spec.Volumes) != 1 || deploy.Spec.Template.Spec.Volumes[0].EmptyDir == nil {
+		t.Fatalf("volumes=%+v want single emptyDir workdir", deploy.Spec.Template.Spec.Volumes)
+	}
+	for _, v := range deploy.Spec.Template.Spec.Volumes {
+		if v.PersistentVolumeClaim != nil {
+			t.Fatalf("API must not mount PVCs, got %+v", v)
+		}
 	}
 
 	owners := deploy.GetOwnerReferences()
@@ -296,7 +300,7 @@ func TestReconcileAPI_CreatesDeploymentAndServiceWithDBEnv(t *testing.T) {
 	}
 }
 
-func TestReconcileAPI_FlatnodeVolumeAndEnv(t *testing.T) {
+func TestReconcileAPI_OmitsFlatnodeEvenWhenSpecSet(t *testing.T) {
 	scheme := testScheme(t)
 	nom := nominatimWithConnectionSecret("api-flatnode")
 	nom.Spec.Flatnode = &nominatimv1alpha1.FlatnodeSpec{
@@ -306,7 +310,7 @@ func TestReconcileAPI_FlatnodeVolumeAndEnv(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileAPI(context.Background(), nom, "project-pvc", "flatnode-pvc"); err != nil {
+	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileAPI: %v", err)
 	}
 
@@ -315,38 +319,20 @@ func TestReconcileAPI_FlatnodeVolumeAndEnv(t *testing.T) {
 		t.Fatalf("get deployment: %v", err)
 	}
 	container := deploy.Spec.Template.Spec.Containers[0]
-
-	foundFlatnodeMount := false
 	for _, m := range container.VolumeMounts {
-		if m.Name == "flatnode" && m.MountPath == flatnodeMountPath {
-			foundFlatnodeMount = true
+		if m.Name == flatnodeVolumeName || m.MountPath == flatnodeMountPath {
+			t.Fatalf("API must not mount flatnode, got %+v", container.VolumeMounts)
 		}
 	}
-	if !foundFlatnodeMount {
-		t.Fatalf("expected flatnode volume mount at %s, got %+v", flatnodeMountPath, container.VolumeMounts)
-	}
-
-	foundEnv := false
 	for _, e := range container.Env {
 		if e.Name == flatnodeFileEnv {
-			foundEnv = true
-			if e.Value != flatnodeFilePath {
-				t.Fatalf("%s=%q want %q", flatnodeFileEnv, e.Value, flatnodeFilePath)
-			}
+			t.Fatalf("API must not set %s", flatnodeFileEnv)
 		}
 	}
-	if !foundEnv {
-		t.Fatalf("expected %s env var", flatnodeFileEnv)
-	}
-
-	foundClaim := false
 	for _, v := range deploy.Spec.Template.Spec.Volumes {
-		if v.Name == "flatnode" && v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == "flatnode-pvc" {
-			foundClaim = true
+		if v.Name == flatnodeVolumeName || (v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == "flatnode-pvc") {
+			t.Fatalf("API must not volume flatnode PVC, got %+v", deploy.Spec.Template.Spec.Volumes)
 		}
-	}
-	if !foundClaim {
-		t.Fatalf("expected flatnode PVC volume, got %+v", deploy.Spec.Template.Spec.Volumes)
 	}
 }
 
@@ -529,7 +515,7 @@ func TestReconcileAPI_SkipsUntilBootstrapRegionsSynced(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, existing).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileAPI(context.Background(), nom, "project-pvc", ""); err != nil {
+	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileAPI: %v", err)
 	}
 	deploy := &appsv1.Deployment{}
@@ -548,7 +534,7 @@ func TestReconcileAPI_CreatesAfterBootstrapRegionsSynced(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileAPI(context.Background(), nom, "project-pvc", ""); err != nil {
+	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileAPI: %v", err)
 	}
 	deploy := &appsv1.Deployment{}
@@ -594,7 +580,7 @@ func TestReconcileAPI_SuspendDuringOperationsScalesToZero(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, op).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileAPI(context.Background(), nom, "project-pvc", ""); err != nil {
+	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileAPI: %v", err)
 	}
 
@@ -622,7 +608,7 @@ func TestReconcileAPI_DefaultNeverKeepsAPIUp(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, op).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileAPI(context.Background(), nom, "project-pvc", ""); err != nil {
+	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileAPI: %v", err)
 	}
 	deploy := &appsv1.Deployment{}
@@ -643,7 +629,7 @@ func TestReconcileAPI_ExplicitReplicasHonoredWhenNotSuspended(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileAPI(context.Background(), nom, "project-pvc", ""); err != nil {
+	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileAPI: %v", err)
 	}
 	deploy := &appsv1.Deployment{}
@@ -665,7 +651,7 @@ func TestReconcileAPI_CustomImage(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileAPI(context.Background(), nom, "project-pvc", ""); err != nil {
+	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileAPI: %v", err)
 	}
 	deploy := &appsv1.Deployment{}
@@ -709,7 +695,7 @@ func TestReconcileAPI_PodSpecOverlay(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileAPI(context.Background(), nom, "project-pvc", ""); err != nil {
+	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileAPI: %v", err)
 	}
 	deploy := &appsv1.Deployment{}
@@ -751,7 +737,7 @@ func TestReconcileAPI_PodSpecInvalidJSON(t *testing.T) {
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
-	if err := r.reconcileAPI(context.Background(), nom, "project-pvc", ""); err == nil {
+	if err := r.reconcileAPI(context.Background(), nom); err == nil {
 		t.Fatal("expected error for invalid podSpec JSON")
 	}
 }
@@ -988,7 +974,7 @@ func TestReconcileAPI_SetControllerReferenceError(t *testing.T) {
 	nom := nominatimWithConnectionSecret("api-owner-error")
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 	r := emptySchemeReconciler()
-	if err := r.reconcileAPI(context.Background(), nom, "project-pvc", ""); err == nil {
+	if err := r.reconcileAPI(context.Background(), nom); err == nil {
 		t.Fatal("expected SetControllerReference error to propagate from API deployment")
 	}
 }
@@ -1052,7 +1038,7 @@ func TestReconcileAPI_ServiceErrorPropagates(t *testing.T) {
 	fc := &failingClient{Client: base, failCreate: []failSpec{{kind: "Service", name: APIName(nom)}}}
 	r := &NominatimReconciler{Client: fc, Scheme: scheme}
 
-	if err := r.reconcileAPI(context.Background(), nom, "project-pvc", ""); err == nil {
+	if err := r.reconcileAPI(context.Background(), nom); err == nil {
 		t.Fatal("expected reconcileAPI to propagate Service creation error")
 	}
 	// Deployment must still have been created before the Service failure.
@@ -1073,7 +1059,7 @@ func TestReconcileAPI_HTTPRouteErrorPropagates(t *testing.T) {
 	fc := &failingClient{Client: base, failCreate: []failSpec{{kind: "HTTPRoute", name: APIName(nom)}}}
 	r := &NominatimReconciler{Client: fc, Scheme: scheme}
 
-	if err := r.reconcileAPI(context.Background(), nom, "project-pvc", ""); err == nil {
+	if err := r.reconcileAPI(context.Background(), nom); err == nil {
 		t.Fatal("expected reconcileAPI to propagate HTTPRoute creation error")
 	}
 }
@@ -1137,7 +1123,7 @@ func TestReconcileAPI_SuspendEvaluationErrorPropagates(t *testing.T) {
 	fc := &failingClient{Client: base, failGet: map[string]error{"op-x": fmt.Errorf("boom")}}
 	r := &NominatimReconciler{Client: fc, Scheme: scheme}
 
-	if err := r.reconcileAPI(context.Background(), nom, "project-pvc", ""); err == nil {
+	if err := r.reconcileAPI(context.Background(), nom); err == nil {
 		t.Fatal("expected reconcileAPI to propagate suspend evaluation error")
 	}
 }

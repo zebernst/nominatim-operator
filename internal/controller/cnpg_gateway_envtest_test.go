@@ -224,7 +224,7 @@ var _ = Describe("owned HTTPRoutes against the vendored Gateway API schema", fun
 		persistNominatim(nom)
 		nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 
-		Expect(reconciler.reconcileAPI(ctx, nom, "project-pvc", "")).To(Succeed())
+		Expect(reconciler.reconcileAPI(ctx, nom)).To(Succeed())
 
 		route := getUnstructured(HTTPRouteGVK, APIName(nom), nom.Namespace)
 

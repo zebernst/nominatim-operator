@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
-# API entrypoint: wait for external Postgres, link staging, serve gunicorn.
-# Codifies the serving path from homelab start-external.sh (no local Postgres / no mediagis init).
+# API entrypoint: wait for external Postgres, serve gunicorn.
+# Read-only serving plane (nominatim-5et.35.1): config from process env / Secrets only.
+# No project/flatnode PVC, no .env seed, no PVC import markers, no nominatim refresh.
 set -euo pipefail
 
 PROJECT_DIR="${PROJECT_DIR:-/nominatim}"
-STAGING_DIR="${IMPORT_STAGING:-/import-staging}"
-IMPORT_FINISHED="${IMPORT_FINISHED:-${PROJECT_DIR}/import-finished}"
-ENV_DEFAULTS="${ENV_DEFAULTS:-/opt/nominatim/env.defaults}"
 
 : "${NOMINATIM_DATABASE_DSN:?NOMINATIM_DATABASE_DSN is required}"
 : "${PGHOST:?PGHOST is required}"
@@ -16,59 +14,14 @@ ENV_DEFAULTS="${ENV_DEFAULTS:-/opt/nominatim/env.defaults}"
 
 export NOMINATIM_DATABASE_DSN PGHOST PGDATABASE PGUSER PGPASSWORD
 
-mkdir -p "${STAGING_DIR}" "${PROJECT_DIR}"
-
-link_staging() {
-  local name="$1"
-  local link="${PROJECT_DIR}/${name}"
-  local target="${STAGING_DIR}/${name}"
-
-  if [ -e "${link}" ] && [ ! -L "${link}" ]; then
-    echo "[nominatim-api] Removing stale project artifact: ${link}"
-    rm -f "${link}"
-  fi
-  ln -sfn "${target}" "${link}"
-}
-
-link_staging "data.osm.pbf"
-link_staging "wikimedia-importance.csv.gz"
-link_staging "us_postcodes.csv.gz"
-link_staging "secondary_importance.sql.gz"
-
-# Prefer process env over any durable .env DSN — never write the password-bearing DSN to the PVC.
-if [ ! -f "${PROJECT_DIR}/.env" ]; then
-  echo "[nominatim-api] Seeding ${PROJECT_DIR}/.env from ${ENV_DEFAULTS}"
-  cp "${ENV_DEFAULTS}" "${PROJECT_DIR}/.env"
-fi
-
-ENV_FILE="${PROJECT_DIR}/.env"
-IMPORT_STYLE="${IMPORT_STYLE:-extratags}"
-WEBUSER="${NOMINATIM_DATABASE_WEBUSER:-www-data}"
-if grep -qE '^NOMINATIM_IMPORT_STYLE=' "${ENV_FILE}"; then
-  sed -i "s|^NOMINATIM_IMPORT_STYLE=.*|NOMINATIM_IMPORT_STYLE=${IMPORT_STYLE}|" "${ENV_FILE}"
-else
-  printf 'NOMINATIM_IMPORT_STYLE=%s\n' "${IMPORT_STYLE}" >> "${ENV_FILE}"
-fi
-if grep -qE '^NOMINATIM_DATABASE_WEBUSER=' "${ENV_FILE}"; then
-  sed -i "s|^NOMINATIM_DATABASE_WEBUSER=.*|NOMINATIM_DATABASE_WEBUSER=${WEBUSER}|" "${ENV_FILE}"
-else
-  printf 'NOMINATIM_DATABASE_WEBUSER=%s\n' "${WEBUSER}" >> "${ENV_FILE}"
-fi
-
-if [ -n "${NOMINATIM_FLATNODE_FILE:-}" ]; then
-  if grep -qE '^NOMINATIM_FLATNODE_FILE=' "${ENV_FILE}"; then
-    sed -i "s|^NOMINATIM_FLATNODE_FILE=.*|NOMINATIM_FLATNODE_FILE=${NOMINATIM_FLATNODE_FILE}|" "${ENV_FILE}"
-  else
-    printf 'NOMINATIM_FLATNODE_FILE=%s\n' "${NOMINATIM_FLATNODE_FILE}" >> "${ENV_FILE}"
-  fi
-fi
+# Ephemeral workdir (emptyDir); never mutate shared import state.
+mkdir -p "${PROJECT_DIR}"
 
 echo "[nominatim-api] Waiting for PostgreSQL at ${PGHOST}"
 until pg_isready -h "${PGHOST}" -d "${PGDATABASE}" -U "${PGUSER}" -q; do
   sleep 2
 done
 
-# Fail closed: only seed / trust import-finished when placex exists (imported DB).
 echo "[nominatim-api] Verifying nominatim schema on ${PGHOST}/${PGDATABASE}"
 has_placex="$(psql -h "${PGHOST}" -d "${PGDATABASE}" -U "${PGUSER}" -Atqc \
   "SELECT EXISTS (
@@ -78,21 +31,8 @@ has_placex="$(psql -h "${PGHOST}" -d "${PGDATABASE}" -U "${PGUSER}" -Atqc \
      WHERE n.nspname = 'public' AND c.relname = 'placex' AND c.relkind = 'r'
    );")"
 if [ "${has_placex}" != "t" ]; then
-  if [ -f "${IMPORT_FINISHED}" ]; then
-    echo "[nominatim-api] Removing stale ${IMPORT_FINISHED} (public.placex missing)" >&2
-    rm -f "${IMPORT_FINISHED}"
-  fi
-  echo "[nominatim-api] ERROR: public.placex missing; refusing to start" >&2
+  echo "[nominatim-api] ERROR: public.placex missing; refusing to start (Bootstrap incomplete)" >&2
   exit 1
-fi
-if [ ! -f "${IMPORT_FINISHED}" ]; then
-  echo "[nominatim-api] Seeding ${IMPORT_FINISHED}"
-  touch "${IMPORT_FINISHED}"
-fi
-
-if [ "${NOMINATIM_REFRESH_FUNCTIONS:-true}" = "true" ] || [ "${NOMINATIM_REFRESH_FUNCTIONS:-true}" = "1" ]; then
-  echo "[nominatim-api] Refreshing SQL functions against external DB"
-  nominatim refresh --functions --project-dir "${PROJECT_DIR}"
 fi
 
 if [ -z "${GUNICORN_WORKERS:-}" ]; then
