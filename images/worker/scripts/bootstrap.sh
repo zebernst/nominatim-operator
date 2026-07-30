@@ -24,7 +24,7 @@ finish_bootstrap() {
   run_nominatim admin --check-database --project-dir "${PROJECT_DIR}" || true
 
   touch "${IMPORT_FINISHED}"
-  log "Bootstrap complete; wrote ${IMPORT_FINISHED}"
+  log "Bootstrap complete; wrote ${IMPORT_FINISHED} (worker-local resume bookmark; cluster SoT is status.regions)"
 }
 
 # A leftover import-finished on the project PVC must not succeed Bootstrap when the

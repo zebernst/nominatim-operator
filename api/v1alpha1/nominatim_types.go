@@ -488,7 +488,9 @@ type NominatimStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// Regions is the source of truth for imported regions (replaces imported-regions.txt).
+	// Regions is the cluster source of truth for which Geofabrik regions are imported
+	// (synced from Succeeded Bootstrap/AddRegions/Reimport). Project PVC files such as
+	// imported-regions.txt / import-finished are worker-local resume bookmarks only.
 	// +optional
 	Regions []RegionStatus `json:"regions,omitempty"`
 

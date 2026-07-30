@@ -1469,8 +1469,10 @@ spec:
                     type: string
                 type: object
               regions:
-                description: Regions is the source of truth for imported regions (replaces
-                  imported-regions.txt).
+                description: |-
+                  Regions is the cluster source of truth for which Geofabrik regions are imported
+                  (synced from Succeeded Bootstrap/AddRegions/Reimport). Project PVC files such as
+                  imported-regions.txt / import-finished are worker-local resume bookmarks only.
                 items:
                   description: RegionStatus is the observed state of an imported region.
                   properties:

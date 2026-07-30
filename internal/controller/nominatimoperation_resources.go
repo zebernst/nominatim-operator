@@ -147,8 +147,10 @@ func requiresRegionGate(t nominatimv1alpha1.NominatimOperationType) bool {
 }
 
 // bootstrapComplete reports whether a regions-mode Nominatim (parent.Spec.Regions
-// non-empty) has finished its initial Bootstrap: either status.regions already has
-// entries, or a peer Bootstrap Operation targeting this Nominatim has Succeeded.
+// non-empty) has finished its initial Bootstrap. This is the cluster source of
+// truth for "import complete" (not project PVC import-finished):
+// either status.regions already has entries, or a peer Bootstrap Operation
+// targeting this Nominatim has Succeeded (brief window before status sync).
 // PBF-only parents never need this gate — callers check parent.Spec.Regions first.
 func bootstrapComplete(parent *nominatimv1alpha1.Nominatim, peers []nominatimv1alpha1.NominatimOperation) bool {
 	if len(parent.Status.Regions) > 0 {

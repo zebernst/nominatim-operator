@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Reimport: full re-bootstrap. Operator arms this with NOMINATIM_REIMPORT_CONFIRM=1
-# and is responsible for providing an empty/ready application database (CNPG Database
-# CR recreate). This script only clears project markers, then runs Bootstrap.
+# after drop/recreate of the owned DB (empty/ready application database). This script
+# clears worker-local resume bookmarks on the project PVC (import-finished /
+# imported-regions.txt) — not Nominatim CR status; the operator replaces
+# status.regions when Reimport Succeeds — then runs Bootstrap.
 set -euo pipefail
 
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
