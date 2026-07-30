@@ -6,6 +6,7 @@
 
 * **api:** read-only serving plane — API Deployment uses an emptyDir workdir only (no project/flatnode PVC mounts); entrypoint takes config from process env, checks `placex`, and starts gunicorn without writing `.env` / `import-finished` or running `nominatim refresh --functions` (nominatim-5et.35.1).
 * **ci:** enforce `internal/controller` statement coverage against `.coverage-thresholds.json` (ratcheted to 90.0%; current ~90.6%). `make test` and pre-push run `hack/check-coverage.sh`; CI Test job fails below the floor (nominatim-5et.25).
+* **test:** bats + shellcheck CI for worker `common.sh` helpers (`detect_continue_at`, `parse_regions`, `seed_project_env`); portable `sed -i.bak` in `seed_project_env` (nominatim-5et.26).
 * **test:** envtest starts the manager and asserts the API Deployment appears via watches without calling `Reconcile()` directly (nominatim-5et.29).
 * **test:** CI import e2e asserts the API Deployment scales to zero while Reimport is active and restores afterward (`suspendDuringOperations` / Reimport-always-quiesce; nominatim-5et.27).
 * **test:** CI import e2e (`make test-e2e-import`) bootstraps `europe/monaco` + `europe/andorra` via multi `--osm-file` (`test/e2e/testdata/nominatim-monaco-andorra.yaml`), asserts both names on `status.regions`, and probes each country with `countrycodes=` so a regions[0]-only import cannot pass. The monaco-only fixture remains for `hack/validate-kind.sh` day-2 AddRegions. See `images/README.md` for the Bootstrap vs AddRegions contract.

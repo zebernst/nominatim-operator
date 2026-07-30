@@ -84,20 +84,24 @@ seed_project_env() {
   fi
 
   if grep -qE '^NOMINATIM_IMPORT_STYLE=' "${env_file}"; then
-    sed -i "s|^NOMINATIM_IMPORT_STYLE=.*|NOMINATIM_IMPORT_STYLE=${import_style}|" "${env_file}"
+    # -i.bak is portable across GNU sed (Ubuntu image) and BSD sed (macOS bats).
+    sed -i.bak "s|^NOMINATIM_IMPORT_STYLE=.*|NOMINATIM_IMPORT_STYLE=${import_style}|" "${env_file}"
+    rm -f "${env_file}.bak"
   else
     printf 'NOMINATIM_IMPORT_STYLE=%s\n' "${import_style}" >> "${env_file}"
   fi
 
   if grep -qE '^NOMINATIM_DATABASE_WEBUSER=' "${env_file}"; then
-    sed -i "s|^NOMINATIM_DATABASE_WEBUSER=.*|NOMINATIM_DATABASE_WEBUSER=${webuser}|" "${env_file}"
+    sed -i.bak "s|^NOMINATIM_DATABASE_WEBUSER=.*|NOMINATIM_DATABASE_WEBUSER=${webuser}|" "${env_file}"
+    rm -f "${env_file}.bak"
   else
     printf 'NOMINATIM_DATABASE_WEBUSER=%s\n' "${webuser}" >> "${env_file}"
   fi
 
   if [ -n "${NOMINATIM_FLATNODE_FILE:-}" ]; then
     if grep -qE '^NOMINATIM_FLATNODE_FILE=' "${env_file}"; then
-      sed -i "s|^NOMINATIM_FLATNODE_FILE=.*|NOMINATIM_FLATNODE_FILE=${NOMINATIM_FLATNODE_FILE}|" "${env_file}"
+      sed -i.bak "s|^NOMINATIM_FLATNODE_FILE=.*|NOMINATIM_FLATNODE_FILE=${NOMINATIM_FLATNODE_FILE}|" "${env_file}"
+      rm -f "${env_file}.bak"
     else
       printf 'NOMINATIM_FLATNODE_FILE=%s\n' "${NOMINATIM_FLATNODE_FILE}" >> "${env_file}"
     fi
@@ -105,7 +109,8 @@ seed_project_env() {
 
   if [ -n "${NOMINATIM_REPLICATION_URL:-}" ]; then
     if grep -qE '^NOMINATIM_REPLICATION_URL=' "${env_file}"; then
-      sed -i "s|^NOMINATIM_REPLICATION_URL=.*|NOMINATIM_REPLICATION_URL=${NOMINATIM_REPLICATION_URL}|" "${env_file}"
+      sed -i.bak "s|^NOMINATIM_REPLICATION_URL=.*|NOMINATIM_REPLICATION_URL=${NOMINATIM_REPLICATION_URL}|" "${env_file}"
+      rm -f "${env_file}.bak"
     else
       printf 'NOMINATIM_REPLICATION_URL=%s\n' "${NOMINATIM_REPLICATION_URL}" >> "${env_file}"
     fi
@@ -317,7 +322,8 @@ region_already_imported() {
 # (Initial multi-region load must use nominatim import with multiple --osm-file flags.)
 import_geofabrik_region() {
   local region="$1"
-  local import_file="${STAGING_DIR}/$(echo "${region}" | tr '/' '-')-latest.osm.pbf"
+  local import_file
+  import_file="${STAGING_DIR}/$(echo "${region}" | tr '/' '-')-latest.osm.pbf"
   log "Downloading and add-data importing region ${region}"
   curl -L -C - -A "${CURL_USER_AGENT}" --fail-with-body \
     "${DOWNURL}/${region}-latest.osm.pbf" -o "${import_file}"

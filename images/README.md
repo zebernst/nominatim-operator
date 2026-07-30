@@ -58,6 +58,18 @@ The worker entrypoint dispatches on `OPERATION_TYPE` (or the first CLI arg):
 
 These are thin phases invoked by `NominatimOperation` Jobs. Orchestration (mutex, scale API, pause backups, empty DB for Reimport) stays in the operator — not in bash.
 
+### Worker script tests
+
+Resume / region parsing helpers in `scripts/common.sh` have bats coverage under `scripts/test/`:
+
+```bash
+# Requires bats-core + shellcheck on PATH (brew install bats-core shellcheck).
+make test-worker-shell
+make shellcheck-worker
+```
+
+CI runs both in the **Worker shell** job. Stubs under `scripts/test/stubs/` fake `psql` / `pg_isready` so `detect_continue_at` can be exercised without Postgres.
+
 ### Bootstrap multi-region: one import, multiple `--osm-file`
 
 When `NOMINATIM_REGIONS` lists more than one Geofabrik path (e.g. `europe/monaco,europe/andorra`),

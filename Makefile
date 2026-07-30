@@ -65,6 +65,25 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 .PHONY: coverage
 coverage: test ## Alias: run tests and enforce .coverage-thresholds.json.
 
+# Worker bash helpers (bats + shellcheck). Requires bats-core and shellcheck on PATH.
+WORKER_SCRIPTS := $(wildcard images/worker/scripts/*.sh)
+
+.PHONY: test-worker-shell
+test-worker-shell: ## Run bats tests for worker scripts (detect_continue_at, parse_regions, seed_project_env).
+	@command -v bats >/dev/null 2>&1 || { \
+		echo "bats is not installed. Install bats-core (https://github.com/bats-core/bats-core)."; \
+		exit 1; \
+	}
+	bats images/worker/scripts/test
+
+.PHONY: shellcheck-worker
+shellcheck-worker: ## Lint worker Operation phase scripts with shellcheck.
+	@command -v shellcheck >/dev/null 2>&1 || { \
+		echo "shellcheck is not installed. Install shellcheck (https://www.shellcheck.net/)."; \
+		exit 1; \
+	}
+	shellcheck -x -e SC1091 $(WORKER_SCRIPTS)
+
 # E2E assumes Kind. Creates a local 'kind' cluster when none exists (CI creates it explicitly).
 # CertManager is installed by default; skip with CERT_MANAGER_INSTALL_SKIP=true.
 .PHONY: test-e2e
