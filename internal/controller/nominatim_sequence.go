@@ -37,6 +37,7 @@ import (
 
 const (
 	annotationSequenceObserved = "nominatim.zebernst.dev/sequence-observed"
+	annotationValueTrue        = "true"
 	labelSequenceProbe         = "sequence-probe"
 	sequenceReportCMKey        = "report.json"
 	sequenceProbeSASuffix      = "-seq-probe"
@@ -72,7 +73,7 @@ func (r *NominatimReconciler) reconcileSequenceObservation(ctx context.Context, 
 		if !sequenceProbeOperation(op) {
 			continue
 		}
-		if op.Annotations[annotationSequenceObserved] == "true" {
+		if op.Annotations[annotationSequenceObserved] == annotationValueTrue {
 			continue
 		}
 		if err := r.observeSequenceForOperation(ctx, nom, op); err != nil {
@@ -260,14 +261,14 @@ func (r *NominatimReconciler) markSequenceObserved(ctx context.Context, op *nomi
 	if err := r.Get(ctx, types.NamespacedName{Name: op.Name, Namespace: op.Namespace}, latest); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	if latest.Annotations != nil && latest.Annotations[annotationSequenceObserved] == "true" {
+	if latest.Annotations != nil && latest.Annotations[annotationSequenceObserved] == annotationValueTrue {
 		return nil
 	}
 	patch := latest.DeepCopy()
 	if patch.Annotations == nil {
 		patch.Annotations = map[string]string{}
 	}
-	patch.Annotations[annotationSequenceObserved] = "true"
+	patch.Annotations[annotationSequenceObserved] = annotationValueTrue
 	return r.Patch(ctx, patch, client.MergeFrom(latest))
 }
 

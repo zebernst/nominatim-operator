@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -156,7 +157,7 @@ func TestReconcileSequenceObservation_CreatesProbeAndAppliesConfigMap(t *testing
 	if err := c.Get(ctx, types.NamespacedName{Name: op.Name, Namespace: op.Namespace}, gotOp); err != nil {
 		t.Fatal(err)
 	}
-	if gotOp.Annotations[annotationSequenceObserved] != "true" {
+	if gotOp.Annotations[annotationSequenceObserved] != annotationValueTrue {
 		t.Fatalf("annotations=%v", gotOp.Annotations)
 	}
 }
@@ -178,5 +179,174 @@ func TestBuildSequenceProbeJob_UsesWorkerImage(t *testing.T) {
 	want := "example.com/worker:probe-test"
 	if job.Spec.Template.Spec.Containers[0].Image != want {
 		t.Fatalf("image=%q want %q", job.Spec.Template.Spec.Containers[0].Image, want)
+	}
+}
+
+func TestSequenceProbeJobName_TruncatesLongName(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("a", 70)
+	op := &nominatimv1alpha1.NominatimOperation{ObjectMeta: metav1.ObjectMeta{Name: long}}
+	got := sequenceProbeJobName(op)
+	if len(got) != 63 {
+		t.Fatalf("len=%d want 63", len(got))
+	}
+}
+
+func TestReconcileSequenceObservation_EmptyRegions(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	nom := baseNominatim("empty-regions")
+	r := &NominatimReconciler{Client: fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(nom).Build()}
+	if err := r.reconcileSequenceObservation(ctx, nom); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReconcileSequenceObservation_SkipsAlreadyObserved(t *testing.T) {
+	scheme := testScheme(t)
+	ctx := context.Background()
+	nom := nominatimWithConnectionSecret("skip-obs")
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: regionPhaseImported}}
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "skip-obs-update",
+			Namespace:   nom.Namespace,
+			Annotations: map[string]string{annotationSequenceObserved: annotationValueTrue},
+		},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+		},
+		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, op).WithObjects(nom, op).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	if err := r.reconcileSequenceObservation(ctx, nom); err != nil {
+		t.Fatal(err)
+	}
+	job := &batchv1.Job{}
+	err := c.Get(ctx, types.NamespacedName{Name: sequenceProbeJobName(op), Namespace: nom.Namespace}, job)
+	if err == nil {
+		t.Fatal("expected no probe Job for already-observed operation")
+	}
+}
+
+func TestObserveSequenceForOperation_FailedJobMarksObserved(t *testing.T) {
+	scheme := testScheme(t)
+	ctx := context.Background()
+	nom := nominatimWithConnectionSecret("fail-probe")
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "fail-probe-update", Namespace: nom.Namespace},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+		},
+		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, op).WithObjects(nom, op).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	job, err := r.buildSequenceProbeJob(nom, op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job.Status.Failed = 1
+	if err := c.Create(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.observeSequenceForOperation(ctx, nom, op); err != nil {
+		t.Fatal(err)
+	}
+	gotOp := &nominatimv1alpha1.NominatimOperation{}
+	if err := c.Get(ctx, types.NamespacedName{Name: op.Name, Namespace: op.Namespace}, gotOp); err != nil {
+		t.Fatal(err)
+	}
+	if gotOp.Annotations[annotationSequenceObserved] != annotationValueTrue {
+		t.Fatalf("annotations=%v", gotOp.Annotations)
+	}
+}
+
+func TestApplySequenceReportConfigMap_EmptyAndMissing(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	scheme := testScheme(t)
+	nom := baseNominatim("cm-edge")
+	r := &NominatimReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()}
+	if err := r.applySequenceReportConfigMap(ctx, nom); err != nil {
+		t.Fatal(err)
+	}
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: sequenceReportConfigMapName(nom), Namespace: nom.Namespace},
+		Data:       map[string]string{sequenceReportCMKey: "   "},
+	}
+	r = &NominatimReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, cm).Build()}
+	if err := r.applySequenceReportConfigMap(ctx, nom); err != nil {
+		t.Fatal(err)
+	}
+	badCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: sequenceReportConfigMapName(nom), Namespace: nom.Namespace},
+		Data:       map[string]string{sequenceReportCMKey: "not-json"},
+	}
+	r = &NominatimReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, badCM).Build()}
+	if err := r.applySequenceReportConfigMap(ctx, nom); err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
+func TestApplySequenceReportMap_SkipsUnchangedAndUsesObservedAt(t *testing.T) {
+	t.Parallel()
+	observed := metav1.Now()
+	nom := &nominatimv1alpha1.Nominatim{
+		Status: nominatimv1alpha1.NominatimStatus{
+			Regions: []nominatimv1alpha1.RegionStatus{
+				{Name: "europe/monaco", Phase: regionPhaseImported, SequenceState: "same@t"},
+			},
+		},
+	}
+	before := nom.Status.Regions[0].LastUpdatedTime
+	applySequenceReportMap(nom, map[string]string{"europe/monaco": "same@t", "": "skip"}, &observed)
+	if nom.Status.Regions[0].LastUpdatedTime != before {
+		t.Fatal("unchanged sequence should not bump LastUpdatedTime")
+	}
+	applySequenceReportMap(nom, map[string]string{"europe/monaco": "new@t"}, &observed)
+	if nom.Status.Regions[0].SequenceState != "new@t" {
+		t.Fatalf("SequenceState=%q", nom.Status.Regions[0].SequenceState)
+	}
+	if nom.Status.Regions[0].LastUpdatedTime == nil || !nom.Status.Regions[0].LastUpdatedTime.Equal(&observed) {
+		t.Fatal("expected observedAt timestamp")
+	}
+}
+
+func TestEnsureSequenceProbeRBAC_UpdatesExisting(t *testing.T) {
+	scheme := testScheme(t)
+	ctx := context.Background()
+	nom := baseNominatim("rbac-upd")
+	saName := sequenceProbeSAName(nom)
+	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: saName, Namespace: nom.Namespace}}
+	role := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{Name: saName, Namespace: nom.Namespace},
+		Rules:      []rbacv1.PolicyRule{{APIGroups: []string{"old"}, Resources: []string{"x"}, Verbs: []string{"get"}}},
+	}
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: saName, Namespace: nom.Namespace},
+		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "wrong"},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, sa, role, rb).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	if err := r.ensureSequenceProbeRBAC(ctx, nom); err != nil {
+		t.Fatal(err)
+	}
+	gotRole := &rbacv1.Role{}
+	if err := c.Get(ctx, types.NamespacedName{Name: saName, Namespace: nom.Namespace}, gotRole); err != nil {
+		t.Fatal(err)
+	}
+	if gotRole.Rules[0].Resources[0] != "configmaps" {
+		t.Fatalf("role rules=%v", gotRole.Rules)
+	}
+	gotRB := &rbacv1.RoleBinding{}
+	if err := c.Get(ctx, types.NamespacedName{Name: saName, Namespace: nom.Namespace}, gotRB); err != nil {
+		t.Fatal(err)
+	}
+	if gotRB.RoleRef.Name != saName {
+		t.Fatalf("roleRef=%q", gotRB.RoleRef.Name)
 	}
 }
