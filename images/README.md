@@ -99,10 +99,16 @@ docker run --rm \
 
 ## API serving
 
+The API is a **read-only serving plane**: it talks to Postgres via Secrets / env
+(`NOMINATIM_DATABASE_DSN`, `PG*`, plus `spec.nominatim` → `NOMINATIM_*`). It does
+**not** mount the project or flatnode PVCs (those are for worker Jobs / osm2pgsql).
+The Deployment mounts an ephemeral emptyDir at `/nominatim` only as gunicorn's
+working directory. Import-complete is gated by the operator (`status.regions`);
+the entrypoint refuses to start if `public.placex` is missing.
+
 ```bash
 docker run --rm -p 8080:8080 \
   -e NOMINATIM_DATABASE_DSN=postgresql://… \
   -e PGHOST=… -e PGDATABASE=nominatim -e PGUSER=… -e PGPASSWORD=… \
-  -v nominatim-project:/nominatim \
   ghcr.io/zebernst/nominatim-api:dev
 ```

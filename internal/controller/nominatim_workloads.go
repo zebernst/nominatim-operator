@@ -57,6 +57,10 @@ const (
 
 	flatnodeFileEnv = "NOMINATIM_FLATNODE_FILE"
 
+	// apiWorkdirVolumeName is an emptyDir for gunicorn's working directory. The API
+	// serving plane must not mount the shared project or flatnode PVCs.
+	apiWorkdirVolumeName = "workdir"
+
 	workloadContainerPort = 8080
 	workloadServicePort   = 80
 )
@@ -93,21 +97,20 @@ func commonLabels(nom *nominatimv1alpha1.Nominatim, component string) map[string
 // reconcileWorkloads reconciles the project/flatnode PVCs and the API/UI serving plane.
 // It must run after reconcileDatabase (connection secret known) and preferably after
 // reconcileBootstrap so status.regions can unlock API/UI in the same pass.
+// Project/flatnode PVCs remain for worker Jobs (write plane); the API Deployment does
+// not mount them (nominatim-5et.35.1).
 func (r *NominatimReconciler) reconcileWorkloads(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
-	projectClaim, err := r.reconcilePVC(ctx, nom, nom.Spec.Project.Volume, ProjectPVCName(nom), ComponentProject)
-	if err != nil {
+	if _, err := r.reconcilePVC(ctx, nom, nom.Spec.Project.Volume, ProjectPVCName(nom), ComponentProject); err != nil {
 		return fmt.Errorf("reconcile project volume: %w", err)
 	}
 
-	var flatnodeClaim string
 	if nom.Spec.Flatnode != nil {
-		flatnodeClaim, err = r.reconcilePVC(ctx, nom, nom.Spec.Flatnode.Volume, FlatnodePVCName(nom), ComponentFlatnode)
-		if err != nil {
+		if _, err := r.reconcilePVC(ctx, nom, nom.Spec.Flatnode.Volume, FlatnodePVCName(nom), ComponentFlatnode); err != nil {
 			return fmt.Errorf("reconcile flatnode volume: %w", err)
 		}
 	}
 
-	if err := r.reconcileAPI(ctx, nom, projectClaim, flatnodeClaim); err != nil {
+	if err := r.reconcileAPI(ctx, nom); err != nil {
 		return err
 	}
 
@@ -227,35 +230,24 @@ func dbEnvVars(secretName string) []corev1.EnvVar {
 	}
 }
 
-// apiVolumes builds the project (+ optional flatnode) volumes, mounts, and env vars for
-// the API container.
-func apiVolumes(nom *nominatimv1alpha1.Nominatim, projectClaim, flatnodeClaim string) ([]corev1.Volume, []corev1.VolumeMount, []corev1.EnvVar) {
-	volumes := []corev1.Volume{
-		{
-			Name: projectVolumeName,
-			VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: projectClaim},
-			},
+// apiPodFilesystem returns the API pod volumes/mounts/env for a read-only serving
+// plane: ephemeral emptyDir workdir plus Nominatim config from the CR (no project
+// or flatnode PVCs — those belong to worker Jobs).
+func apiPodFilesystem(nom *nominatimv1alpha1.Nominatim) ([]corev1.Volume, []corev1.VolumeMount, []corev1.EnvVar) {
+	volumes := []corev1.Volume{{
+		Name: apiWorkdirVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
 		},
+	}}
+	mounts := []corev1.VolumeMount{{
+		Name:      apiWorkdirVolumeName,
+		MountPath: projectMountPath,
+	}}
+	env := []corev1.EnvVar{
+		{Name: "PROJECT_DIR", Value: projectMountPath},
 	}
-	mounts := []corev1.VolumeMount{
-		{Name: projectVolumeName, MountPath: projectMountPath},
-	}
-	var env []corev1.EnvVar
-
-	if nom.Spec.Flatnode != nil && flatnodeClaim != "" {
-		volumes = append(volumes, corev1.Volume{
-			Name: flatnodeVolumeName,
-			VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: flatnodeClaim},
-			},
-		})
-		mounts = append(mounts, corev1.VolumeMount{Name: flatnodeVolumeName, MountPath: flatnodeMountPath})
-		env = append(env, corev1.EnvVar{Name: flatnodeFileEnv, Value: flatnodeFilePath})
-	}
-
 	env = append(env, effectiveNominatimConfigEnv(nom)...)
-
 	return volumes, mounts, env
 }
 
@@ -314,7 +306,7 @@ func (r *NominatimReconciler) shouldSuspendAPI(ctx context.Context, nom *nominat
 // Until Bootstrap has populated status.regions (when regions are desired), no API
 // objects are created — and any leftover owned API Deployment/Service/HTTPRoute
 // are removed. suspendDuringOperations only scales an already-allowed API.
-func (r *NominatimReconciler) reconcileAPI(ctx context.Context, nom *nominatimv1alpha1.Nominatim, projectClaim, flatnodeClaim string) error {
+func (r *NominatimReconciler) reconcileAPI(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
 	if !servingWorkloadsAllowed(nom) {
 		return r.deleteServingComponent(ctx, nom, APIName(nom), ComponentAPI)
 	}
@@ -343,7 +335,7 @@ func (r *NominatimReconciler) reconcileAPI(ctx context.Context, nom *nominatimv1
 
 	name := APIName(nom)
 	labels := commonLabels(nom, ComponentAPI)
-	volumes, mounts, env := apiVolumes(nom, projectClaim, flatnodeClaim)
+	volumes, mounts, env := apiPodFilesystem(nom)
 	env = append(env, dbEnvVars(nom.Status.Database.ConnectionSecretName)...)
 
 	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: nom.Namespace}}
