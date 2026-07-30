@@ -30,21 +30,38 @@ func TestAddRegionsImportsFullSpec(t *testing.T) {
 	}
 }
 
-// TestAddRegionsKeepsBashBelts asserts the IMPORT_FINISHED and NOMINATIM_REGIONS
-// guards remain in add-regions.sh even though the operator now enforces
-// preconditions too (belt-and-suspenders per R6 in the worker guards plan).
-func TestAddRegionsKeepsBashBelts(t *testing.T) {
-	contents, err := os.ReadFile("add-regions.sh")
+// TestAddRegionsBootstrapBelt uses require_bootstrap_ready (schema-aware last
+// resort), not a hard die on missing IMPORT_FINISHED alone. Cluster SoT remains
+// status.regions / Succeeded Bootstrap (nominatim-5et.35.2).
+func TestAddRegionsBootstrapBelt(t *testing.T) {
+	addRegions, err := os.ReadFile("add-regions.sh")
 	if err != nil {
 		t.Fatalf("reading add-regions.sh: %v", err)
 	}
-	script := string(contents)
-
-	if !strings.Contains(script, "IMPORT_FINISHED") {
-		t.Error("add-regions.sh must still guard on IMPORT_FINISHED (Bootstrap-done belt)")
+	if !strings.Contains(string(addRegions), "require_bootstrap_ready") {
+		t.Error("add-regions.sh must call require_bootstrap_ready")
 	}
-	if !strings.Contains(script, "NOMINATIM_REGIONS") {
+	if !strings.Contains(string(addRegions), "NOMINATIM_REGIONS") {
 		t.Error("add-regions.sh must still require NOMINATIM_REGIONS (regions belt)")
+	}
+
+	common, err := os.ReadFile("common.sh")
+	if err != nil {
+		t.Fatalf("reading common.sh: %v", err)
+	}
+	if !strings.Contains(string(common), "require_bootstrap_ready()") {
+		t.Error("common.sh must define require_bootstrap_ready")
+	}
+	if !strings.Contains(string(common), "status.regions is Bootstrap-done source of truth") {
+		t.Error("require_bootstrap_ready must document CR status.regions as SoT")
+	}
+
+	update, err := os.ReadFile("update.sh")
+	if err != nil {
+		t.Fatalf("reading update.sh: %v", err)
+	}
+	if !strings.Contains(string(update), "require_bootstrap_ready") {
+		t.Error("update.sh must call require_bootstrap_ready")
 	}
 }
 

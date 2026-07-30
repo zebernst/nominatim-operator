@@ -9,9 +9,7 @@ source "${SCRIPTS_DIR}/common.sh"
 
 prepare_worker
 
-if [ ! -f "${IMPORT_FINISHED}" ]; then
-  die "Import not finished (${IMPORT_FINISHED} missing); run Bootstrap first"
-fi
+require_bootstrap_ready
 
 parse_regions
 if [ "${#DESIRED_REGIONS[@]}" -eq 0 ]; then

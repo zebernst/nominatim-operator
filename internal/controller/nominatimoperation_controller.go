@@ -180,7 +180,7 @@ func (r *NominatimOperationReconciler) enforceRegionGates(
 	}
 	if len(parent.Spec.Regions) > 0 && !bootstrapComplete(parent, peers) {
 		return true, r.failOperation(ctx, op, reasonBootstrapIncomplete,
-			fmt.Sprintf("Nominatim %q has not completed a Bootstrap Operation", parent.Name))
+			fmt.Sprintf("Nominatim %q has not completed Bootstrap (status.regions empty and no Succeeded Bootstrap Operation)", parent.Name))
 	}
 	return false, nil
 }

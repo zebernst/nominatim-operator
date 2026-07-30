@@ -418,6 +418,23 @@ assert_imported_list_complete() {
   fi
 }
 
+# require_bootstrap_ready is a last-resort worker belt. Cluster source of truth for
+# Bootstrap-done is Nominatim status.regions (and/or a Succeeded Bootstrap Operation);
+# the operator refuses AddRegions/Update/CatchUp Jobs until that is true in regions mode.
+# Locally we prefer the import-finished bookmark, heal it when the schema is ready, and
+# only die when both the marker and placex/database_version are missing.
+require_bootstrap_ready() {
+  if [ -f "${IMPORT_FINISHED}" ]; then
+    return 0
+  fi
+  if import_schema_ready; then
+    log "Warning: ${IMPORT_FINISHED} missing but Nominatim schema is ready; healing marker (CR status.regions is Bootstrap-done source of truth)"
+    touch "${IMPORT_FINISHED}"
+    return 0
+  fi
+  die "Import not finished (${IMPORT_FINISHED} missing and Nominatim schema incomplete); run Bootstrap first (operator gate uses status.regions)"
+}
+
 prepare_worker() {
   require_db_env
   mkdir -p "${STAGING_DIR}" "${PROJECT_DIR}" "${PROJECT_DIR}/update"

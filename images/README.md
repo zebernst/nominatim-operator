@@ -58,6 +58,19 @@ The worker entrypoint dispatches on `OPERATION_TYPE` (or the first CLI arg):
 
 These are thin phases invoked by `NominatimOperation` Jobs. Orchestration (mutex, scale API, pause backups, empty DB for Reimport) stays in the operator — not in bash.
 
+### Import-complete / ready-to-serve (Kubernetes source of truth)
+
+| Concern | Source of truth | Not SoT |
+|---------|-----------------|--------|
+| Which regions are imported | `status.regions` (synced from Succeeded Bootstrap / AddRegions / Reimport) | `imported-regions.txt` on the project PVC |
+| Bootstrap done (regions mode) | `status.regions` non-empty **or** a peer Bootstrap Operation `Succeeded` | `import-finished` on the project PVC |
+| API/UI may exist | `servingWorkloadsAllowed`: no desired regions, or `status.regions` populated | PVC markers |
+| Day-2 Jobs (AddRegions / Update / CatchUp) | Operator `BootstrapIncomplete` gate via `bootstrapComplete` | Worker file checks alone |
+
+Project PVC files remain **worker-local resume bookmarks** (Bootstrap still writes `import-finished`; Reimport clears markers before re-bootstrap). Workers call `require_bootstrap_ready`, which heals a missing marker when the Nominatim schema is already ready and only fails when both the marker and schema are absent — last-resort, not cluster coordination.
+
+**PBF-only** parents (`Spec.Regions` empty) skip the operator Bootstrap gate; the worker schema/marker belt is then the only guard before AddRegions/Update.
+
 ### Worker script tests
 
 Resume / region parsing helpers in `scripts/common.sh` have bats coverage under `scripts/test/`:
@@ -84,13 +97,13 @@ region `Imported` fails the search assertions even if `status.regions` looks com
 
 ### AddRegions Spec contract
 
-`NOMINATIM_REGIONS` (derived by the operator from `op.Spec.Regions`, falling back to `parent.Spec.Regions` when the Operation sets none) is the **exact** import set for an AddRegions Job: `add-regions.sh` imports every region listed there that is not already recorded in `imported-regions.txt`, then re-indexes once if anything changed. There is no per-run cap or "only this region" filter in the worker — chunking (e.g. one missing region per drift-driven Operation) is entirely the operator's responsibility. A manual AddRegions with multiple regions in its Spec imports all of them in one Job.
+`NOMINATIM_REGIONS` (derived by the operator from `op.Spec.Regions`, falling back to `parent.Spec.Regions` when the Operation sets none) is the **exact** import set for an AddRegions Job: `add-regions.sh` imports every region listed there that is not already recorded in `imported-regions.txt` (local bookmark; cluster SoT is `status.regions`), then re-indexes once if anything changed. There is no per-run cap or "only this region" filter in the worker — chunking (e.g. one missing region per drift-driven Operation) is entirely the operator's responsibility. A manual AddRegions with multiple regions in its Spec imports all of them in one Job.
 
-`add-regions.sh` still requires `IMPORT_FINISHED` (Bootstrap must have completed) and a non-empty `NOMINATIM_REGIONS` as bash-level belts, even though the operator also enforces these preconditions before creating the Job.
+`add-regions.sh` / `update.sh` call `require_bootstrap_ready` as a last-resort belt; the operator's Bootstrap-done gate is authoritative in regions mode (see above).
 
 ### Bootstrap gate: PBF-only vs regions mode
 
-The operator only requires Bootstrap-done before creating AddRegions / Update / CatchUp Jobs when the parent `Nominatim` is in **regions mode** (`Spec.Regions` non-empty). In that mode, Bootstrap-done means `Status.Regions` is non-empty **or** a peer Bootstrap Operation for the same parent has already `Succeeded` (covers the brief window before status is persisted). **PBF-only** parents (`Spec.Regions` empty) skip this operator-side gate entirely; the worker's own `IMPORT_FINISHED` belt in `add-regions.sh` / `update.sh` remains the only guard against running before a Bootstrap has completed.
+See **Import-complete / ready-to-serve** above. Regions-mode parents use `status.regions` / Succeeded Bootstrap; PBF-only parents rely on the worker belt.
 
 ### Postgres readiness: CNPG gate is primary, Job wait is last-mile
 
