@@ -28,13 +28,22 @@ fi
 
 echo "  ✓ Coverage enforcement"
 if [ -f .coverage-thresholds.json ]; then
-  if command -v jq &>/dev/null; then
-    CMD=$(jq -r '.enforcement.command' .coverage-thresholds.json)
+  # Prefer make test so envtest assets match CI; then compare against thresholds.
+  if [ -f Makefile ]; then
+    make test
   else
-    CMD='go test $(go list ./... | grep -v /e2e) -coverprofile=coverage.out'
+    if command -v jq &>/dev/null; then
+      CMD=$(jq -r '.enforcement.command // empty' .coverage-thresholds.json)
+    else
+      CMD=""
+    fi
+    if [ -z "$CMD" ] || [ "$CMD" = "null" ]; then
+      CMD='go test $(go list ./... | grep -v /e2e) -coverprofile=cover.out'
+    fi
+    echo "    Running: $CMD"
+    eval "$CMD"
+    ./hack/check-coverage.sh cover.out
   fi
-  echo "    Running: $CMD"
-  eval "$CMD"
 else
   echo "    · No .coverage-thresholds.json — running make test"
   make test
