@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Always-ready pg_isready stub for bats.
+# shellcheck shell=bash
+exit 0

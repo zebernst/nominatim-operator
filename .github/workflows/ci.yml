@@ -54,6 +54,22 @@ jobs:
       - name: Coverage gate
         run: ./hack/check-coverage.sh cover.out
 
+  worker-shell:
+    name: Worker shell
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install bats and shellcheck
+        run: sudo apt-get update && sudo apt-get install -y bats shellcheck
+
+      - name: Shellcheck worker scripts
+        run: make shellcheck-worker
+
+      - name: Bats (detect_continue_at / parse_regions / seed_project_env)
+        run: make test-worker-shell
+
   e2e:
     name: E2E
     runs-on: ubuntu-latest

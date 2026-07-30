@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Stub psql for bats. Inspects the SQL (-Atqc / -c) and returns canned answers from env.
+# shellcheck shell=bash
+set -euo pipefail
+
+sql=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -Atqc | -c)
+      shift
+      sql="${1:-}"
+      ;;
+  esac
+  shift || true
+done
+
+# Database existence probe uses -d postgres and SELECT 1 FROM pg_database.
+# Empty STUB_DB_EXISTS means missing (do not use :-1 — empty would fall back to 1).
+if [[ "$sql" == *"pg_database"* ]]; then
+  echo "${STUB_DB_EXISTS-1}"
+  exit 0
+fi
+
+# import_schema_ready / detect_continue_at: placex relation EXISTS via pg_class.
+if [[ "$sql" == *"pg_class"* && "$sql" == *"placex"* ]]; then
+  echo "${STUB_HAS_PLACEX_REL:-f}"
+  exit 0
+fi
+
+# to_regclass('public.placex')
+if [[ "$sql" == *"to_regclass"* ]]; then
+  echo "${STUB_TO_REGCLASS_PLACEX:-f}"
+  exit 0
+fi
+
+# place table has rows — match "FROM place" but not "FROM placex".
+if [[ "$sql" == *"FROM place"* && "$sql" != *"FROM placex"* ]]; then
+  echo "${STUB_HAS_PLACE:-f}"
+  exit 0
+fi
+
+# placex has rows (EXISTS ... FROM placex LIMIT 1) without indexed_status
+if [[ "$sql" == *"FROM placex"* && "$sql" == *"LIMIT 1"* && "$sql" != *"indexed_status"* ]]; then
+  echo "${STUB_PLACEX_LOADED:-f}"
+  exit 0
+fi
+
+# database_version property
+if [[ "$sql" == *"database_version"* ]]; then
+  echo "${STUB_HAS_VERSION:-f}"
+  exit 0
+fi
+
+# indexing started: indexed_status = 0
+if [[ "$sql" == *"indexed_status = 0"* ]]; then
+  echo "${STUB_INDEXING_STARTED:-f}"
+  exit 0
+fi
+
+# pending indexing: indexed_status > 0
+if [[ "$sql" == *"indexed_status > 0"* ]]; then
+  echo "${STUB_HAS_PENDING:-f}"
+  exit 0
+fi
+
+# Default: empty / false
+echo "${STUB_PSQL_DEFAULT:-f}"
+exit 0
