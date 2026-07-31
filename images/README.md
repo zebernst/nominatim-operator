@@ -83,6 +83,12 @@ make shellcheck-worker
 
 CI runs both in the **Worker shell** job. Stubs under `scripts/test/stubs/` fake `psql` / `pg_isready` so `detect_continue_at` can be exercised without Postgres.
 
+### Sequence state / update lag
+
+After a Succeeded Bootstrap / AddRegions / Reimport / Update / CatchUp Operation, the Nominatim reconciler creates a short-lived **sequence probe** Job (operator-owned) that mounts the project PVC read-only, runs `scripts/report-sequence.sh`, and merge-patches ConfigMap `{name}-sequence`. The reconciler copies `report.json` into `status.regions[].sequenceState` (`sequenceNumber@timestamp`). Worker Operation scripts do **not** talk to the Kubernetes API.
+
+This is per-region **pyosmium / Geofabrik** cursor state — not Nominatim `NOMINATIM_REPLICATION_*` lag.
+
 ### Bootstrap multi-region: one import, multiple `--osm-file`
 
 When `NOMINATIM_REGIONS` lists more than one Geofabrik path (e.g. `europe/monaco,europe/andorra`),

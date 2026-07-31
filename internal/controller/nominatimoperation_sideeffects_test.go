@@ -164,7 +164,7 @@ func TestDefaultCNPGEffects_PauseAnnotationSetAndCleared(t *testing.T) {
 	if err := c.Get(ctx, key, got); err != nil {
 		t.Fatalf("get after pause: %v", err)
 	}
-	if got.GetAnnotations()[CNPGBackupPausedAnnotation] != "true" {
+	if got.GetAnnotations()[CNPGBackupPausedAnnotation] != annotationValueTrue {
 		t.Fatalf("expected pause annotation set, got %#v", got.GetAnnotations())
 	}
 

@@ -68,7 +68,7 @@ func (e defaultCNPGEffects) setBackupPausedAnnotation(ctx context.Context, clust
 		if annotations == nil {
 			annotations = map[string]string{}
 		}
-		annotations[CNPGBackupPausedAnnotation] = "true"
+		annotations[CNPGBackupPausedAnnotation] = annotationValueTrue
 	} else if annotations != nil {
 		delete(annotations, CNPGBackupPausedAnnotation)
 	}
