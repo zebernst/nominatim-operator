@@ -77,7 +77,56 @@ func effectiveNominatimConfigEnv(nom *nominatimv1alpha1.Nominatim) []corev1.EnvV
 			})
 		}
 	}
+	if cfg.API != nil {
+		a := cfg.API
+		if a.PoolSize != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "NOMINATIM_API_POOL_SIZE",
+				Value: fmt.Sprintf("%d", *a.PoolSize),
+			})
+		}
+		if a.QueryTimeoutSeconds != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "NOMINATIM_QUERY_TIMEOUT",
+				Value: fmt.Sprintf("%d", *a.QueryTimeoutSeconds),
+			})
+		}
+		if a.RequestTimeoutSeconds != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "NOMINATIM_REQUEST_TIMEOUT",
+				Value: fmt.Sprintf("%d", *a.RequestTimeoutSeconds),
+			})
+		}
+		if a.DefaultLanguage != "" {
+			env = append(env, corev1.EnvVar{
+				Name:  "NOMINATIM_DEFAULT_LANGUAGE",
+				Value: a.DefaultLanguage,
+			})
+		}
+		if a.CorsNoAccessControl != nil {
+			val := "no"
+			if *a.CorsNoAccessControl {
+				val = "yes"
+			}
+			env = append(env, corev1.EnvVar{
+				Name:  "NOMINATIM_CORS_NOACCESSCONTROL",
+				Value: val,
+			})
+		}
+	}
 	return env
+}
+
+// effectiveAPIEnv returns process env set on the API container from APISpec
+// (non-NOMINATIM_* knobs such as GUNICORN_WORKERS).
+func effectiveAPIEnv(api *nominatimv1alpha1.APISpec) []corev1.EnvVar {
+	if api == nil || api.GunicornWorkers == nil {
+		return nil
+	}
+	return []corev1.EnvVar{{
+		Name:  "GUNICORN_WORKERS",
+		Value: fmt.Sprintf("%d", *api.GunicornWorkers),
+	}}
 }
 
 func effectiveImportTimeSettings(nom *nominatimv1alpha1.Nominatim) (importStyle, tokenizer string) {

@@ -4,6 +4,7 @@
 
 ### Changed
 
+* **api:** default HTTP startup/readiness/liveness probes on `/status`; typed `spec.nominatim.api` runtime knobs (pool, query/request timeouts, CORS, default language); `spec.api.gunicornWorkers` with entrypoint cgroup-CPU fallback (nominatim-5et.14).
 * **docs:** document control / serving / data planes, sequence observation, and RWO project-flatnode vs multi-replica API in the root README, `images/README.md`, and samples (nominatim-5et.35.4).
 * **build:** rename image build files to `*.Dockerfile` (`operator.Dockerfile`, `api.Dockerfile`, `worker.Dockerfile`) so editors apply Dockerfile syntax highlighting.
 * **api:** read-only serving plane — API Deployment uses an emptyDir workdir only (no project/flatnode PVC mounts); entrypoint takes config from process env, checks `placex`, and starts gunicorn without writing `.env` / `import-finished` or running `nominatim refresh --functions` (nominatim-5et.35.1).

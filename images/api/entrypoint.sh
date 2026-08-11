@@ -35,8 +35,39 @@ if [ "${has_placex}" != "t" ]; then
   exit 1
 fi
 
+# Prefer cgroup CPU quota over nproc so Gunicorn workers track container limits
+# (nominatim-5et.14). Override with GUNICORN_WORKERS from the operator or env.
+default_gunicorn_workers() {
+  local quota period workers
+  if [ -r /sys/fs/cgroup/cpu.max ]; then
+    # cgroup v2: "quota period" or "max period"
+    read -r quota period < /sys/fs/cgroup/cpu.max || true
+    if [ -n "${quota:-}" ] && [ "${quota}" != "max" ] && [ -n "${period:-}" ] && [ "${period}" -gt 0 ] 2>/dev/null; then
+      workers=$(( (quota + period - 1) / period ))
+      if [ "${workers}" -lt 1 ]; then
+        workers=1
+      fi
+      echo "${workers}"
+      return
+    fi
+  fi
+  if [ -r /sys/fs/cgroup/cpu/cpu.cfs_quota_us ] && [ -r /sys/fs/cgroup/cpu/cpu.cfs_period_us ]; then
+    quota="$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us)"
+    period="$(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us)"
+    if [ -n "${quota:-}" ] && [ "${quota}" -gt 0 ] 2>/dev/null && [ -n "${period:-}" ] && [ "${period}" -gt 0 ] 2>/dev/null; then
+      workers=$(( (quota + period - 1) / period ))
+      if [ "${workers}" -lt 1 ]; then
+        workers=1
+      fi
+      echo "${workers}"
+      return
+    fi
+  fi
+  nproc
+}
+
 if [ -z "${GUNICORN_WORKERS:-}" ]; then
-  GUNICORN_WORKERS="$(nproc)"
+  GUNICORN_WORKERS="$(default_gunicorn_workers)"
 fi
 
 echo "[nominatim-api] Starting Gunicorn on :8080 with ${GUNICORN_WORKERS} workers"

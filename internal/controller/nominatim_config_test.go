@@ -43,6 +43,13 @@ func TestEffectiveNominatimConfigEnv_BeforeBootstrapUsesSpec(t *testing.T) {
 					URL:     "https://download.geofabrik.de/europe/monaco-updates",
 					MaxDiff: &maxDiff,
 				},
+				API: &nominatimv1alpha1.NominatimAPIConfigSpec{
+					PoolSize:              int32Ptr(5),
+					QueryTimeoutSeconds:   int32Ptr(15),
+					RequestTimeoutSeconds: int32Ptr(90),
+					DefaultLanguage:       "en",
+					CorsNoAccessControl:   boolPtr(true),
+				},
 			},
 		},
 	}
@@ -59,7 +66,38 @@ func TestEffectiveNominatimConfigEnv_BeforeBootstrapUsesSpec(t *testing.T) {
 	if env["NOMINATIM_REPLICATION_URL"] == "" || env["NOMINATIM_REPLICATION_MAX_DIFF"] != "50" {
 		t.Fatalf("replication env=%v", env)
 	}
+	if env["NOMINATIM_API_POOL_SIZE"] != "5" {
+		t.Fatalf("API_POOL_SIZE=%q", env["NOMINATIM_API_POOL_SIZE"])
+	}
+	if env["NOMINATIM_QUERY_TIMEOUT"] != "15" {
+		t.Fatalf("QUERY_TIMEOUT=%q", env["NOMINATIM_QUERY_TIMEOUT"])
+	}
+	if env["NOMINATIM_REQUEST_TIMEOUT"] != "90" {
+		t.Fatalf("REQUEST_TIMEOUT=%q", env["NOMINATIM_REQUEST_TIMEOUT"])
+	}
+	if env["NOMINATIM_DEFAULT_LANGUAGE"] != "en" {
+		t.Fatalf("DEFAULT_LANGUAGE=%q", env["NOMINATIM_DEFAULT_LANGUAGE"])
+	}
+	if env["NOMINATIM_CORS_NOACCESSCONTROL"] != "yes" {
+		t.Fatalf("CORS=%q", env["NOMINATIM_CORS_NOACCESSCONTROL"])
+	}
 }
+
+func TestEffectiveAPIEnv_GunicornWorkers(t *testing.T) {
+	if got := effectiveAPIEnv(nil); len(got) != 0 {
+		t.Fatalf("nil api: %v", got)
+	}
+	if got := effectiveAPIEnv(&nominatimv1alpha1.APISpec{}); len(got) != 0 {
+		t.Fatalf("empty api: %v", got)
+	}
+	workers := int32(4)
+	got := envMap(effectiveAPIEnv(&nominatimv1alpha1.APISpec{GunicornWorkers: &workers}))
+	if got["GUNICORN_WORKERS"] != "4" {
+		t.Fatalf("GUNICORN_WORKERS=%q", got["GUNICORN_WORKERS"])
+	}
+}
+
+func boolPtr(v bool) *bool { return &v }
 
 func TestEffectiveNominatimConfigEnv_AfterBootstrapUsesSealedImportTime(t *testing.T) {
 	nom := &nominatimv1alpha1.Nominatim{
