@@ -53,6 +53,14 @@ spec:
               api:
                 description: API configures the geocoding API workload.
                 properties:
+                  gunicornWorkers:
+                    description: |-
+                      GunicornWorkers sets GUNICORN_WORKERS for the API container.
+                      When unset, the entrypoint derives the worker count from the container's
+                      cgroup CPU limit (ceil(quota/period)), falling back to nproc.
+                    format: int32
+                    minimum: 1
+                    type: integer
                   image:
                     description: Image for the API container (sole supported image
                       hatch; podSpec.containers[].image is ignored).
@@ -71,6 +79,8 @@ spec:
                     description: |-
                       PodSpec is a user overlay merged into the operator-built API PodSpec (affinity,
                       tolerations, resources, probes, sidecars, …). Not a DeploymentSpec passthrough.
+                      The operator sets default HTTP probes on /status (startup/readiness/liveness);
+                      podSpec can override them when needed.
                     type: object
                     x-kubernetes-preserve-unknown-fields: true
                   replicas:
@@ -906,6 +916,37 @@ spec:
                   Nominatim is typed Nominatim dotenv/settings (import style, tokenizer, languages, replication).
                   Prefer this over setting NOMINATIM_* via podSpec; reserved operator env keys remain sealed.
                 properties:
+                  api:
+                    description: API holds Python frontend runtime settings (pool,
+                      timeouts, CORS, default language).
+                    properties:
+                      corsNoAccessControl:
+                        description: |-
+                          CorsNoAccessControl maps to NOMINATIM_CORS_NOACCESSCONTROL (yes/no).
+                          When true, API responses send permissive CORS headers.
+                        type: boolean
+                      defaultLanguage:
+                        description: DefaultLanguage is NOMINATIM_DEFAULT_LANGUAGE.
+                        type: string
+                      poolSize:
+                        description: PoolSize is NOMINATIM_API_POOL_SIZE (DB connections
+                          per gunicorn worker).
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      queryTimeoutSeconds:
+                        description: QueryTimeoutSeconds is NOMINATIM_QUERY_TIMEOUT
+                          (SQL query cancel timeout).
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      requestTimeoutSeconds:
+                        description: RequestTimeoutSeconds is NOMINATIM_REQUEST_TIMEOUT
+                          (max request duration).
+                        format: int32
+                        minimum: 0
+                        type: integer
+                    type: object
                   importStyle:
                     description: |-
                       ImportStyle is NOMINATIM_IMPORT_STYLE (admin, street, address, full, extratags, or a path).

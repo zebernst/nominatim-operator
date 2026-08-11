@@ -25,6 +25,12 @@ spec:
   #   languages: ["en"]
   #   replication:
   #     updateIntervalSeconds: 86400
+  #   api:
+  #     poolSize: 10
+  #     queryTimeoutSeconds: 10
+  #     requestTimeoutSeconds: 60
+  #     defaultLanguage: en
+  #     corsNoAccessControl: true
   database:
     clusterRef:
       name: nominatim-pg
@@ -37,8 +43,11 @@ spec:
   api:
     # Stateless serving (DB + env). May be >1; project/flatnode stay single-writer Jobs.
     replicas: 1
+    # Optional: pin Gunicorn workers; when unset, entrypoint uses cgroup CPU quota.
+    # gunicornWorkers: 2
     # Day-2 only (Never = keep API up during AddRegions/Update/…).
     # Bootstrap does not use this: serving workloads wait for status.regions.
+    # Default probes: GET /status (startup/readiness/liveness); override via podSpec.
     suspendDuringOperations: Never
     # Optional podSpec overlay (affinity/resources/probes/…). Sibling image seals container image.
     # podSpec:
