@@ -51,7 +51,7 @@ COPY images/worker/scripts/ /opt/nominatim/scripts/
 RUN chmod 0755 /opt/nominatim/scripts/*.sh
 
 WORKDIR /nominatim
-# Entrypoint dispatches OPERATION_TYPE (Bootstrap|AddRegions|Reimport|Update|CatchUp).
+# Entrypoint dispatches OPERATION_TYPE (Bootstrap|AddRegions|Reimport|Update|CatchUp|Refresh).
 # Root so Jobs can fix volume ownership; CLI runs as nominatim via gosu.
 USER root
 ENTRYPOINT ["/opt/nominatim/scripts/entrypoint.sh"]

@@ -490,7 +490,7 @@ func TestIsOperationTypeImplemented(t *testing.T) {
 	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationReimport)).To(BeTrue())
 	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationUpdate)).To(BeTrue())
 	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationCatchUp)).To(BeTrue())
-	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationRefresh)).To(BeFalse())
+	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationRefresh)).To(BeTrue())
 	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationMigrate)).To(BeFalse())
 	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationFreeze)).To(BeFalse())
 	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationType("Nope"))).To(BeFalse())

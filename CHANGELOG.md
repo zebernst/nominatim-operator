@@ -2,9 +2,14 @@
 
 ## Unreleased
 
+### Features
+
+* **controller/worker:** implement `NominatimOperation` type `Refresh` — worker `refresh.sh` runs `nominatim refresh` (default `--postcodes --word-counts --functions --importance`, overridable via `NOMINATIM_REFRESH_TASKS`); Migrate/Freeze remain NotImplemented (nominatim-5et.12).
+
 ### Changed
 
 * **api:** default HTTP startup/readiness/liveness probes on `/status`; typed `spec.nominatim.api` runtime knobs (pool, query/request timeouts, CORS, default language); `spec.api.gunicornWorkers` with entrypoint cgroup-CPU fallback (nominatim-5et.14).
+* **test:** smoke e2e NotImplemented coverage is Migrate/Freeze only (Refresh is implemented; nominatim-5et.12).
 * **docs:** document control / serving / data planes, sequence observation, and RWO project-flatnode vs multi-replica API in the root README, `images/README.md`, and samples (nominatim-5et.35.4).
 * **build:** rename image build files to `*.Dockerfile` (`operator.Dockerfile`, `api.Dockerfile`, `worker.Dockerfile`) so editors apply Dockerfile syntax highlighting.
 * **api:** read-only serving plane — API Deployment uses an emptyDir workdir only (no project/flatnode PVC mounts); entrypoint takes config from process env, checks `placex`, and starts gunicorn without writing `.env` / `import-finished` or running `nominatim refresh --functions` (nominatim-5et.35.1).
@@ -15,7 +20,7 @@
 * **test:** envtest starts the manager and asserts the API Deployment appears via watches without calling `Reconcile()` directly (nominatim-5et.29).
 * **test:** CI import e2e asserts the API Deployment scales to zero while Reimport is active and restores afterward (`suspendDuringOperations` / Reimport-always-quiesce; nominatim-5et.27).
 * **test:** CI import e2e (`make test-e2e-import`) bootstraps `europe/monaco` + `europe/andorra` via multi `--osm-file` (`test/e2e/testdata/nominatim-monaco-andorra.yaml`), asserts both names on `status.regions`, and probes each country with `countrycodes=` so a regions[0]-only import cannot pass. The monaco-only fixture remains for `hack/validate-kind.sh` day-2 AddRegions. See `images/README.md` for the Bootstrap vs AddRegions contract.
-* **test:** smoke e2e asserts Refresh/Migrate/Freeze fail as NotImplemented with no Job or staging PVC (nominatim-5et.22).
+* **test:** smoke e2e asserts Migrate/Freeze fail as NotImplemented with no Job or staging PVC (nominatim-5et.22; Refresh implemented in nominatim-5et.12).
 * **worker:** `add-regions.sh` now imports every region in `NOMINATIM_REGIONS` (the operator's `Spec.Regions` contract) not already in `imported-regions.txt`, indexing once if any region changed. Removed the `NOMINATIM_IMPORT_MAX_REGIONS` / `NOMINATIM_IMPORT_ONLY_REGION` single-region deferral; the operator (not the worker) now owns AddRegions chunking. Deploy the operator and worker images together — see `images/README.md` for the Spec/`NOMINATIM_REGIONS` contract.
 * **worker:** `wait_for_postgres` in `scripts/common.sh` now defaults to 15 attempts at a 2s sleep (~30s, down from ~180s), honoring `NOMINATIM_PG_WAIT_ATTEMPTS` to override the attempt count. The operator's CNPG readiness gate (`cnpgClusterReadyForJobs`) is the primary check before a Job is created; this shortened loop is last-mile only. See `images/README.md` for the readiness split and the mode-aware Bootstrap-done gate (PBF-only vs regions mode).
 

@@ -21,7 +21,7 @@ The operator keeps Kubernetes orchestration and status separate from Nominatim C
 
 **Rules (nominatim-5et.35):**
 
-1. **API is read-only serving** — no project or flatnode mounts; no writes of `.env` / `import-finished`; no `nominatim refresh --functions` (or other admin work) on boot. Admin belongs in Operations (e.g. Refresh, when implemented).
+1. **API is read-only serving** — no project or flatnode mounts; no writes of `.env` / `import-finished`; no `nominatim refresh --functions` (or other admin work) on boot. Admin belongs in Operations (`Refresh` runs `nominatim refresh` in a worker Job).
 2. **Workers are Nominatim CLI only** — no Kubernetes client, ServiceAccount tokens for the API server are not part of Operation Jobs. Sequencing into `status.regions` is operator-owned.
 3. **CR status is GitOps / cluster truth** — `status.regions` (and Succeeded Bootstrap peers) gate serving and day-2 Jobs. PVC files (`import-finished`, `imported-regions.txt`, `update/*/sequence.state`) are **worker-local bookmarks**, not coordination.
 4. **Flatnode is write-plane only** — mount on import/update Jobs when `spec.flatnode` is set; never on the API Deployment.

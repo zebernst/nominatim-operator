@@ -677,9 +677,40 @@ var _ = Describe("NominatimOperation Controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("fails Refresh/Migrate/Freeze as NotImplemented without creating PVC or Job", func() {
+	It("creates staging PVC and Job for Refresh without requiring regions", func() {
+		op := &nominatimv1alpha1.NominatimOperation{
+			ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: "default"},
+			Spec: nominatimv1alpha1.NominatimOperationSpec{
+				Type:         nominatimv1alpha1.NominatimOperationRefresh,
+				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+			},
+		}
+		Expect(k8sClient.Create(ctx, op)).To(Succeed())
+
+		_, err := reconciler.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: opName, Namespace: "default"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		pvc := &corev1.PersistentVolumeClaim{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: opName + "-staging", Namespace: "default"}, pvc)).To(Succeed())
+		Expect(metav1.IsControlledBy(pvc, op)).To(BeTrue())
+
+		job := &batchv1.Job{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, job)).To(Succeed())
+		Expect(metav1.IsControlledBy(job, op)).To(BeTrue())
+		c := job.Spec.Template.Spec.Containers[0]
+		Expect(envValue(c.Env, "OPERATION_TYPE")).To(Equal("Refresh"))
+		Expect(findEnvVar(c.Env, "NOMINATIM_REGIONS")).To(BeNil())
+		Expect(findEnvVar(c.Env, "PBF_URL")).To(BeNil())
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: opName, Namespace: "default"}, op)).To(Succeed())
+		Expect(op.Status.Phase).To(Equal(nominatimv1alpha1.NominatimOperationPhasePending))
+		Expect(op.Status.JobRef).NotTo(BeNil())
+	})
+
+	It("fails Migrate/Freeze as NotImplemented without creating PVC or Job", func() {
 		for _, typ := range []nominatimv1alpha1.NominatimOperationType{
-			nominatimv1alpha1.NominatimOperationRefresh,
 			nominatimv1alpha1.NominatimOperationMigrate,
 			nominatimv1alpha1.NominatimOperationFreeze,
 		} {

@@ -36,7 +36,7 @@ const (
 	// NominatimOperationCatchUp forces a catch-up / refresh-style update through the same queue.
 	NominatimOperationCatchUp NominatimOperationType = "CatchUp"
 
-	// NominatimOperationRefresh is reserved for a future refresh workflow (accepted; not implemented yet).
+	// NominatimOperationRefresh recomputes auxiliary data (postcodes, word counts, functions, importance).
 	NominatimOperationRefresh NominatimOperationType = "Refresh"
 	// NominatimOperationMigrate is reserved for a future migrate workflow (accepted; not implemented yet).
 	NominatimOperationMigrate NominatimOperationType = "Migrate"

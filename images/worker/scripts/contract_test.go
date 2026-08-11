@@ -89,6 +89,42 @@ func TestWaitForPostgresDefaultIsShortened(t *testing.T) {
 	}
 }
 
+// TestRefreshScriptContract asserts Refresh runs nominatim refresh admin tasks
+// after bootstrap readiness (nominatim-5et.12), not on the API boot path.
+func TestRefreshScriptContract(t *testing.T) {
+	refresh, err := os.ReadFile("refresh.sh")
+	if err != nil {
+		t.Fatalf("reading refresh.sh: %v", err)
+	}
+	script := string(refresh)
+	if !strings.Contains(script, "require_bootstrap_ready") {
+		t.Error("refresh.sh must call require_bootstrap_ready")
+	}
+	if !strings.Contains(script, "run_nominatim refresh") {
+		t.Error("refresh.sh must invoke run_nominatim refresh")
+	}
+	for _, flag := range []string{"--postcodes", "--word-counts", "--functions", "--importance"} {
+		if !strings.Contains(script, flag) {
+			t.Errorf("refresh.sh default task set must include %s", flag)
+		}
+	}
+	if !strings.Contains(script, "NOMINATIM_REFRESH_TASKS") {
+		t.Error("refresh.sh must honor NOMINATIM_REFRESH_TASKS override")
+	}
+
+	entrypoint, err := os.ReadFile("entrypoint.sh")
+	if err != nil {
+		t.Fatalf("reading entrypoint.sh: %v", err)
+	}
+	ep := string(entrypoint)
+	if !strings.Contains(ep, "Refresh") {
+		t.Error("entrypoint.sh must dispatch Refresh")
+	}
+	if !strings.Contains(ep, "refresh.sh") {
+		t.Error("entrypoint.sh must exec refresh.sh for Refresh")
+	}
+}
+
 // TestReportSequenceScriptIsProbeOnly asserts sequence reporting is a dedicated
 // script for the operator probe Job, not wired into Update/Bootstrap (5et.35.3).
 func TestReportSequenceScriptIsProbeOnly(t *testing.T) {

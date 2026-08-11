@@ -374,7 +374,8 @@ var _ = Describe("Manager", Ordered, func() {
 
 		// Cluster-level counterpart to the envtest NotImplemented fail-fast (nominatim-5et.16 /
 		// nominatim-5et.22): reserved types must not arm a Job or staging PVC.
-		It("fails Refresh/Migrate/Freeze as NotImplemented without creating PVC or Job", func() {
+		// Refresh is implemented (nominatim-5et.12); Migrate/Freeze remain reserved.
+		It("fails Migrate/Freeze as NotImplemented without creating PVC or Job", func() {
 			By("creating reserved NominatimOperation types against the smoke parent")
 			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-smoke-notimplemented.yaml")
 			cmd := exec.Command("kubectl", "apply", "-f", fixture)
@@ -385,7 +386,7 @@ var _ = Describe("Manager", Ordered, func() {
 				_, _ = utils.Run(cmd)
 			})
 
-			for _, name := range []string{"smoke-refresh", "smoke-migrate", "smoke-freeze"} {
+			for _, name := range []string{"smoke-migrate", "smoke-freeze"} {
 				By("waiting for " + name + " to Fail with NotImplemented")
 				Eventually(func(g Gomega) {
 					cmd := exec.Command("kubectl", "get", "nominatimoperation", name,

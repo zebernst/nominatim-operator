@@ -50,7 +50,7 @@ const (
 )
 
 // isOperationTypeImplemented reports whether the worker entrypoint can run this type.
-// Refresh/Migrate/Freeze remain in the CRD enum for forward compatibility but must fail
+// Migrate/Freeze remain in the CRD enum for forward compatibility but must fail
 // fast in the controller (no staging PVC / Job) until their scripts exist.
 func isOperationTypeImplemented(t nominatimv1alpha1.NominatimOperationType) bool {
 	switch t {
@@ -58,7 +58,8 @@ func isOperationTypeImplemented(t nominatimv1alpha1.NominatimOperationType) bool
 		nominatimv1alpha1.NominatimOperationAddRegions,
 		nominatimv1alpha1.NominatimOperationReimport,
 		nominatimv1alpha1.NominatimOperationUpdate,
-		nominatimv1alpha1.NominatimOperationCatchUp:
+		nominatimv1alpha1.NominatimOperationCatchUp,
+		nominatimv1alpha1.NominatimOperationRefresh:
 		return true
 	default:
 		return false

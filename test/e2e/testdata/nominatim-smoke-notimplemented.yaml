@@ -1,14 +1,5 @@
 # Reserved Operation types must fail fast as NotImplemented with no Job / staging PVC.
-apiVersion: nominatim.zebernst.dev/v1alpha1
-kind: NominatimOperation
-metadata:
-  name: smoke-refresh
-  namespace: nominatim-e2e
-spec:
-  type: Refresh
-  nominatimRef:
-    name: smoke
----
+# Refresh is implemented (nominatim-5et.12); Migrate/Freeze remain reserved.
 apiVersion: nominatim.zebernst.dev/v1alpha1
 kind: NominatimOperation
 metadata:
