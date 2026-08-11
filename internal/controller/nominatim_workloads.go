@@ -248,7 +248,48 @@ func apiPodFilesystem(nom *nominatimv1alpha1.Nominatim) ([]corev1.Volume, []core
 		{Name: "PROJECT_DIR", Value: projectMountPath},
 	}
 	env = append(env, effectiveNominatimConfigEnv(nom)...)
+	env = append(env, effectiveAPIEnv(nom.Spec.API)...)
 	return volumes, mounts, env
+}
+
+// defaultAPIHTTPProbe returns an HTTP GET probe against the Nominatim /status endpoint.
+func defaultAPIHTTPProbe() corev1.ProbeHandler {
+	return corev1.ProbeHandler{
+		HTTPGet: &corev1.HTTPGetAction{
+			Path: "/status",
+			Port: intstr.FromString("http"),
+		},
+	}
+}
+
+// applyDefaultAPIProbes sets startup/readiness/liveness on /status when not already
+// provided (e.g. by a user podSpec overlay after merge). Call after mergePodSpecOverlay.
+func applyDefaultAPIProbes(c *corev1.Container) {
+	handler := defaultAPIHTTPProbe()
+	if c.StartupProbe == nil {
+		c.StartupProbe = &corev1.Probe{
+			ProbeHandler:     handler,
+			PeriodSeconds:    5,
+			TimeoutSeconds:   3,
+			FailureThreshold: 36, // ~3m for pg_isready + placex gate + gunicorn
+		}
+	}
+	if c.ReadinessProbe == nil {
+		c.ReadinessProbe = &corev1.Probe{
+			ProbeHandler:     handler,
+			PeriodSeconds:    10,
+			TimeoutSeconds:   5,
+			FailureThreshold: 3,
+		}
+	}
+	if c.LivenessProbe == nil {
+		c.LivenessProbe = &corev1.Probe{
+			ProbeHandler:     handler,
+			PeriodSeconds:    30,
+			TimeoutSeconds:   5,
+			FailureThreshold: 3,
+		}
+	}
 }
 
 // operationImpactMatches reports whether a NominatimOperation of the given type should
@@ -371,6 +412,12 @@ func (r *NominatimReconciler) reconcileAPI(ctx context.Context, nom *nominatimv1
 		)
 		if merr != nil {
 			return merr
+		}
+		for i := range merged.Containers {
+			if merged.Containers[i].Name == "api" {
+				applyDefaultAPIProbes(&merged.Containers[i])
+				break
+			}
 		}
 		deploy.Spec.Template = corev1.PodTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{Labels: labels},

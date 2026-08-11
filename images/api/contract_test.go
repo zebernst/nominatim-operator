@@ -37,3 +37,23 @@ func TestEntrypointIsReadOnlyServingPlane(t *testing.T) {
 		t.Error("entrypoint must start gunicorn")
 	}
 }
+
+// TestEntrypointDerivesWorkersFromCgroup asserts Gunicorn workers prefer cgroup
+// CPU quota over bare nproc (nominatim-5et.14).
+func TestEntrypointDerivesWorkersFromCgroup(t *testing.T) {
+	contents, err := os.ReadFile("entrypoint.sh")
+	if err != nil {
+		t.Fatalf("reading entrypoint.sh: %v", err)
+	}
+	script := string(contents)
+	for _, needle := range []string{
+		"default_gunicorn_workers",
+		"/sys/fs/cgroup/cpu.max",
+		"cpu.cfs_quota_us",
+		"GUNICORN_WORKERS",
+	} {
+		if !strings.Contains(script, needle) {
+			t.Errorf("entrypoint missing %q", needle)
+		}
+	}
+}

@@ -267,8 +267,17 @@ type APISpec struct {
 	// +optional
 	Image *ImageSpec `json:"image,omitempty"`
 
+	// GunicornWorkers sets GUNICORN_WORKERS for the API container.
+	// When unset, the entrypoint derives the worker count from the container's
+	// cgroup CPU limit (ceil(quota/period)), falling back to nproc.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	GunicornWorkers *int32 `json:"gunicornWorkers,omitempty"`
+
 	// PodSpec is a user overlay merged into the operator-built API PodSpec (affinity,
 	// tolerations, resources, probes, sidecars, …). Not a DeploymentSpec passthrough.
+	// The operator sets default HTTP probes on /status (startup/readiness/liveness);
+	// podSpec can override them when needed.
 	// +optional
 	// +kubebuilder:pruning:PreserveUnknownFields
 	PodSpec *runtime.RawExtension `json:"podSpec,omitempty"`
@@ -284,6 +293,35 @@ type APISpec struct {
 	// +optional
 	// +kubebuilder:default="Never"
 	SuspendDuringOperations OperationImpact `json:"suspendDuringOperations,omitempty"`
+}
+
+// NominatimAPIConfigSpec holds Python frontend runtime knobs (Nominatim dotenv /
+// NOMINATIM_* env). Applies on every API/worker reconcile; not sealed after Bootstrap.
+// See https://nominatim.org/release-docs/latest/customize/Settings/
+type NominatimAPIConfigSpec struct {
+	// PoolSize is NOMINATIM_API_POOL_SIZE (DB connections per gunicorn worker).
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	PoolSize *int32 `json:"poolSize,omitempty"`
+
+	// QueryTimeoutSeconds is NOMINATIM_QUERY_TIMEOUT (SQL query cancel timeout).
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	QueryTimeoutSeconds *int32 `json:"queryTimeoutSeconds,omitempty"`
+
+	// RequestTimeoutSeconds is NOMINATIM_REQUEST_TIMEOUT (max request duration).
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	RequestTimeoutSeconds *int32 `json:"requestTimeoutSeconds,omitempty"`
+
+	// DefaultLanguage is NOMINATIM_DEFAULT_LANGUAGE.
+	// +optional
+	DefaultLanguage string `json:"defaultLanguage,omitempty"`
+
+	// CorsNoAccessControl maps to NOMINATIM_CORS_NOACCESSCONTROL (yes/no).
+	// When true, API responses send permissive CORS headers.
+	// +optional
+	CorsNoAccessControl *bool `json:"corsNoAccessControl,omitempty"`
 }
 
 // UISpec configures an optional Nominatim UI Deployment and route.
@@ -347,8 +385,8 @@ type NominatimReplicationSpec struct {
 //
 // Import-time fields (ImportStyle, Tokenizer) cannot be changed after Bootstrap without
 // a Reimport — the controller seals observed values into status and surfaces
-// ImportConfigDrift when spec diverges. Runtime fields (Languages, Replication) apply
-// on every reconcile.
+// ImportConfigDrift when spec diverges. Runtime fields (Languages, Replication, API)
+// apply on every reconcile.
 type NominatimConfigSpec struct {
 	// ImportStyle is NOMINATIM_IMPORT_STYLE (admin, street, address, full, extratags, or a path).
 	// Immutable after Bootstrap. Image default is extratags when unset.
@@ -366,6 +404,10 @@ type NominatimConfigSpec struct {
 	// Replication holds optional replication URL / interval / maxDiff settings.
 	// +optional
 	Replication *NominatimReplicationSpec `json:"replication,omitempty"`
+
+	// API holds Python frontend runtime settings (pool, timeouts, CORS, default language).
+	// +optional
+	API *NominatimAPIConfigSpec `json:"api,omitempty"`
 }
 
 // ObservedNominatimConfig records import-time settings sealed when Bootstrap first succeeded.

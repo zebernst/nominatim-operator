@@ -137,6 +137,13 @@ The Deployment mounts an ephemeral emptyDir at `/nominatim` only as gunicorn's
 working directory. Import-complete is gated by the operator (`status.regions`);
 the entrypoint refuses to start if `public.placex` is missing.
 
+Default Deployment probes use **GET `/status`** (startup, readiness, and liveness).
+`spec.api.podSpec` may override them. `spec.api.gunicornWorkers` sets
+`GUNICORN_WORKERS`; when unset the entrypoint prefers cgroup CPU quota over
+`nproc` (nominatim-5et.14). Runtime knobs under `spec.nominatim.api` map to
+`NOMINATIM_API_POOL_SIZE`, `NOMINATIM_QUERY_TIMEOUT`, `NOMINATIM_REQUEST_TIMEOUT`,
+`NOMINATIM_DEFAULT_LANGUAGE`, and `NOMINATIM_CORS_NOACCESSCONTROL`.
+
 ```bash
 docker run --rm -p 8080:8080 \
   -e NOMINATIM_DATABASE_DSN=postgresql://… \

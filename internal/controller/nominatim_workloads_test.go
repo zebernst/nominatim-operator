@@ -667,6 +667,55 @@ func TestReconcileAPI_CustomImage(t *testing.T) {
 	}
 }
 
+func TestReconcileAPI_DefaultStatusProbes(t *testing.T) {
+	scheme := testScheme(t)
+	nom := nominatimWithConnectionSecret("api-status-probes")
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+
+	if err := r.reconcileAPI(context.Background(), nom); err != nil {
+		t.Fatalf("reconcileAPI: %v", err)
+	}
+	deploy := &appsv1.Deployment{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: APIName(nom), Namespace: "default"}, deploy); err != nil {
+		t.Fatal(err)
+	}
+	c0 := deploy.Spec.Template.Spec.Containers[0]
+	for name, p := range map[string]*corev1.Probe{
+		"startup":   c0.StartupProbe,
+		"readiness": c0.ReadinessProbe,
+		"liveness":  c0.LivenessProbe,
+	} {
+		if p == nil || p.HTTPGet == nil || p.HTTPGet.Path != "/status" {
+			t.Fatalf("%s probe path=%v want /status", name, p)
+		}
+		if p.HTTPGet.Port.String() != "http" {
+			t.Fatalf("%s probe port=%v want http", name, p.HTTPGet.Port)
+		}
+	}
+}
+
+func TestReconcileAPI_GunicornWorkersEnv(t *testing.T) {
+	scheme := testScheme(t)
+	nom := nominatimWithConnectionSecret("api-gunicorn")
+	workers := int32(2)
+	nom.Spec.API = &nominatimv1alpha1.APISpec{GunicornWorkers: &workers}
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	if err := r.reconcileAPI(context.Background(), nom); err != nil {
+		t.Fatal(err)
+	}
+	deploy := &appsv1.Deployment{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: APIName(nom), Namespace: "default"}, deploy); err != nil {
+		t.Fatal(err)
+	}
+	if envMap(deploy.Spec.Template.Spec.Containers[0].Env)["GUNICORN_WORKERS"] != "2" {
+		t.Fatalf("env=%v", deploy.Spec.Template.Spec.Containers[0].Env)
+	}
+}
+
 func TestReconcileAPI_PodSpecOverlay(t *testing.T) {
 	scheme := testScheme(t)
 	nom := nominatimWithConnectionSecret("api-podspec")
@@ -718,6 +767,13 @@ func TestReconcileAPI_PodSpecOverlay(t *testing.T) {
 	}
 	if c0.LivenessProbe == nil || c0.LivenessProbe.HTTPGet == nil || c0.LivenessProbe.HTTPGet.Path != "/ready" {
 		t.Fatalf("probe=%v", c0.LivenessProbe)
+	}
+	// User overlay liveness replaces default; readiness/startup still get defaults.
+	if c0.ReadinessProbe == nil || c0.ReadinessProbe.HTTPGet == nil || c0.ReadinessProbe.HTTPGet.Path != "/status" {
+		t.Fatalf("default readiness expected, got %v", c0.ReadinessProbe)
+	}
+	if c0.StartupProbe == nil || c0.StartupProbe.HTTPGet == nil || c0.StartupProbe.HTTPGet.Path != "/status" {
+		t.Fatalf("default startup expected, got %v", c0.StartupProbe)
 	}
 	env := envMap(c0.Env)
 	if env["EXTRA"] != "1" {
