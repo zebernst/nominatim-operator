@@ -88,6 +88,14 @@ func TestSequenceProbeOperation(t *testing.T) {
 	if sequenceProbeOperation(op) {
 		t.Fatal("Refresh should not probe")
 	}
+	op.Spec.Type = nominatimv1alpha1.NominatimOperationMigrate
+	if sequenceProbeOperation(op) {
+		t.Fatal("Migrate should not probe")
+	}
+	op.Spec.Type = nominatimv1alpha1.NominatimOperationFreeze
+	if sequenceProbeOperation(op) {
+		t.Fatal("Freeze should not probe")
+	}
 }
 
 func TestReconcileSequenceObservation_CreatesProbeAndAppliesConfigMap(t *testing.T) {

@@ -928,6 +928,12 @@ func TestOperationImpactMatches_AllCombinations(t *testing.T) {
 	if !operationImpactMatches(nominatimv1alpha1.OperationImpactWriteHeavy, nominatimv1alpha1.NominatimOperationAddRegions) {
 		t.Fatal("WriteHeavy should match AddRegions")
 	}
+	if !operationImpactMatches(nominatimv1alpha1.OperationImpactWriteHeavy, nominatimv1alpha1.NominatimOperationMigrate) {
+		t.Fatal("WriteHeavy should match Migrate")
+	}
+	if !operationImpactMatches(nominatimv1alpha1.OperationImpactWriteHeavy, nominatimv1alpha1.NominatimOperationFreeze) {
+		t.Fatal("WriteHeavy should match Freeze")
+	}
 	if operationImpactMatches(nominatimv1alpha1.OperationImpactWriteHeavy, nominatimv1alpha1.NominatimOperationUpdate) {
 		t.Fatal("WriteHeavy should not match Update")
 	}
