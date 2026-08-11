@@ -2,11 +2,31 @@
 
 Own images for Nominatim on Kubernetes — **not** based on `mediagis/nominatim`.
 
-| Image | Dockerfile | Registry |
-|-------|------------|----------|
-| Operator (kubebuilder manager) | `Dockerfile` | `ghcr.io/zebernst/nominatim-operator` |
-| API (gunicorn + nominatim-api) | `Dockerfile.api` | `ghcr.io/zebernst/nominatim-api` |
-| Worker (nominatim CLI + Operation phases) | `Dockerfile.worker` | `ghcr.io/zebernst/nominatim-worker` |
+| Image | Dockerfile | Registry | Plane |
+|-------|------------|----------|-------|
+| Operator (kubebuilder manager) | `operator.Dockerfile` | `ghcr.io/zebernst/nominatim-operator` | Control |
+| API (gunicorn + nominatim-api) | `api.Dockerfile` | `ghcr.io/zebernst/nominatim-api` | Serving |
+| Worker (nominatim CLI + Operation phases) | `worker.Dockerfile` | `ghcr.io/zebernst/nominatim-worker` | Data / write |
+
+Root operator architecture (planes, status SoT, replica/volume notes): see the repository [README](../README.md).
+
+## Planes and volumes
+
+| Plane | Image / process | Mounts | Talks to Kubernetes API? |
+|-------|-----------------|--------|---------------------------|
+| **Control** | operator | none of the instance project/flatnode | yes (reconcile) |
+| **Serving** | API (+ optional UI) | emptyDir workdir only | no |
+| **Data / write** | worker Operation Jobs | project (+ optional flatnode), staging | no |
+| **Observation** | short-lived sequence probe Job (worker image, operator-owned) | project **read-only** | ConfigMaps only (dedicated SA) |
+
+| Volume | Access mode (typical) | Serving API | Worker Jobs | Sequence probe |
+|--------|----------------------|-------------|-------------|----------------|
+| project PVC | RWO | no | read-write | read-only |
+| flatnode PVC | RWO | no | read-write when `spec.flatnode` set | no |
+| staging PVC | RWO (per Operation) | no | yes | no |
+| API workdir | emptyDir | yes | no | no |
+
+**Multi-replica API** (`spec.api.replicas > 1`) is supported for serving because the API is stateless against Postgres. It does **not** require RWX project or flatnode volumes — those stay single-writer for Jobs. Shared RWO flatnode across API replicas is never the design and is not mounted on the serving plane.
 
 ## Base / packaging
 
@@ -15,23 +35,23 @@ API and worker use **Ubuntu 24.04** and install Nominatim from **PyPI** (`nomina
 Override version at build time:
 
 ```bash
-docker build -f Dockerfile.api --build-arg NOMINATIM_VERSION=5.3.2 -t ghcr.io/zebernst/nominatim-api:dev .
+docker build -f api.Dockerfile --build-arg NOMINATIM_VERSION=5.3.2 -t ghcr.io/zebernst/nominatim-api:dev .
 ```
 
 ## Local builds
 
 ```bash
 # Operator
-docker build -t ghcr.io/zebernst/nominatim-operator:dev -f Dockerfile .
+docker build -t ghcr.io/zebernst/nominatim-operator:dev -f operator.Dockerfile .
 
 # API
-docker build -t ghcr.io/zebernst/nominatim-api:dev -f Dockerfile.api .
+docker build -t ghcr.io/zebernst/nominatim-api:dev -f api.Dockerfile .
 
 # Worker
-docker build -t ghcr.io/zebernst/nominatim-worker:dev -f Dockerfile.worker .
+docker build -t ghcr.io/zebernst/nominatim-worker:dev -f worker.Dockerfile .
 ```
 
-CI (`.github/workflows/images.yml`) builds and pushes all three to GHCR on pushes to `main` and on version tags.
+CI (`.github/workflows/release.yaml`) builds and pushes all three to GHCR on pushes to `main` and on version tags.
 
 ## External Postgres
 
@@ -132,10 +152,15 @@ docker run --rm \
 
 The API is a **read-only serving plane**: it talks to Postgres via Secrets / env
 (`NOMINATIM_DATABASE_DSN`, `PG*`, plus `spec.nominatim` → `NOMINATIM_*`). It does
-**not** mount the project or flatnode PVCs (those are for worker Jobs / osm2pgsql).
-The Deployment mounts an ephemeral emptyDir at `/nominatim` only as gunicorn's
-working directory. Import-complete is gated by the operator (`status.regions`);
-the entrypoint refuses to start if `public.placex` is missing.
+**not** mount the project or flatnode PVCs (those are for worker Jobs / osm2pgsql
+on the data plane). The Deployment mounts an ephemeral emptyDir at `/nominatim`
+only as gunicorn's working directory. Import-complete is gated by the operator
+(`status.regions`); the entrypoint refuses to start if `public.placex` is missing.
+
+Admin refresh / migrate / freeze run as `NominatimOperation` types when
+implemented — never as side effects of API container start. Scale API pods with
+`spec.api.replicas` freely relative to project/flatnode access modes (see
+**Planes and volumes** above).
 
 ```bash
 docker run --rm -p 8080:8080 \
