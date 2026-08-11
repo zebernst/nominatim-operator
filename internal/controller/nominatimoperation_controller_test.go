@@ -746,6 +746,10 @@ var _ = Describe("NominatimOperation Controller", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, op)).To(Succeed())
 			Expect(op.Status.Phase).To(Equal(nominatimv1alpha1.NominatimOperationPhasePending))
 			Expect(op.Status.JobRef).NotTo(BeNil())
+
+			// Both types are write-heavy; finish this Op before starting the next peer.
+			op.Status.Phase = nominatimv1alpha1.NominatimOperationPhaseSucceeded
+			Expect(k8sClient.Status().Update(ctx, op)).To(Succeed())
 		}
 	})
 

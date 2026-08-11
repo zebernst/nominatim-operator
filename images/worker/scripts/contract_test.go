@@ -91,8 +91,9 @@ func TestWaitForPostgresDefaultIsShortened(t *testing.T) {
 
 // TestMigrateAndFreezeScriptContracts asserts Migrate/Freeze worker scripts match
 // upstream Nominatim 4.5 admin docs (nominatim-5et.13 / 5et.18):
-//   Migrate → nominatim admin --migrate (after image bump; stop updates first)
-//   Freeze  → nominatim freeze (drop dynamic-update tables; no further OSM updates)
+//
+//	Migrate → nominatim admin --migrate (after image bump; stop updates first)
+//	Freeze  → nominatim freeze (drop dynamic-update tables; no further OSM updates)
 func TestMigrateAndFreezeScriptContracts(t *testing.T) {
 	migrate, err := os.ReadFile("migrate.sh")
 	if err != nil {
