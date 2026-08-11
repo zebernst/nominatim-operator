@@ -4,6 +4,8 @@
 
 ### Changed
 
+* **docs:** document control / serving / data planes, sequence observation, and RWO project-flatnode vs multi-replica API in the root README, `images/README.md`, and samples (nominatim-5et.35.4).
+* **build:** rename image build files to `*.Dockerfile` (`operator.Dockerfile`, `api.Dockerfile`, `worker.Dockerfile`) so editors apply Dockerfile syntax highlighting.
 * **api:** read-only serving plane — API Deployment uses an emptyDir workdir only (no project/flatnode PVC mounts); entrypoint takes config from process env, checks `placex`, and starts gunicorn without writing `.env` / `import-finished` or running `nominatim refresh --functions` (nominatim-5et.35.1).
 * **ci:** enforce `internal/controller` statement coverage against `.coverage-thresholds.json` (ratcheted to 90.0%; current ~90.6%). `make test` and pre-push run `hack/check-coverage.sh`; CI Test job fails below the floor (nominatim-5et.25).
 * **status:** document `status.regions` as Bootstrap-done / imported-set source of truth; worker `require_bootstrap_ready` heals missing `import-finished` when the schema is ready (PVC markers are local bookmarks only; nominatim-5et.35.2).

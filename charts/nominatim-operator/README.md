@@ -22,6 +22,9 @@ reference them. This chart does **not** install those third-party CRDs.
 They must **not** be applied as Flux desired-state (GitOps) objects. Manage only
 `Nominatim` CRs via Flux; let the operator create and garbage-collect operations.
 
+Instance architecture (control vs serving vs data/write planes, volumes, multi-replica
+API): see the repository [README](../../README.md) and [images/README.md](../../images/README.md).
+
 ## CRDs (Nominatim / NominatimOperation)
 
 Operator CRDs ship in the Helm-native [`crds/`](./crds/) directory (copied from

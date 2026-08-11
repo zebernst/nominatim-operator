@@ -55,6 +55,8 @@ spec:
       tag: e2e
       pullPolicy: IfNotPresent
   api:
+    # Serving plane is DB+env only (no project PVC). replicas may be >1 in prod;
+    # project remains RWO for worker Jobs.
     replicas: 1
     # Day-2 only. Bootstrap never creates API/UI until status.regions is set.
     # Reimport always quiesces the API (DROP DATABASE), but BootstrapReimport also

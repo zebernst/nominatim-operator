@@ -6,9 +6,14 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: nominatim-sample
 spec:
+  # Data plane: project PVC is for worker Jobs + sequence probe (RWO is fine).
+  # The API Deployment never mounts project or flatnode (read-only serving plane).
   project:
     volume:
       claimName: nominatim-project
+  # flatnode:
+  #   volume:
+  #     claimName: nominatim-flatnode  # Jobs only; do not assume API multi-attach
   regions:
     - north-america/us
   regionChangePolicy: AddData
@@ -30,6 +35,7 @@ spec:
     enabled: true
     schedule: "0 3 * * *"
   api:
+    # Stateless serving (DB + env). May be >1; project/flatnode stay single-writer Jobs.
     replicas: 1
     # Day-2 only (Never = keep API up during AddRegions/Update/…).
     # Bootstrap does not use this: serving workloads wait for status.regions.
