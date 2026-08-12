@@ -352,6 +352,146 @@ func TestApplyPostgresProfile_Attached(t *testing.T) {
 	}
 }
 
+// --- setBackupPaused / applyPostgresProfile (moved from nominatim_database_test) ---
+
+func TestApplyPostgresProfile_UnknownWhich(t *testing.T) {
+	scheme := testScheme(t)
+	nom := baseNominatim("prof")
+	nom.Spec.Database = nominatimv1alpha1.DatabaseSpec{
+		ClusterRef: &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
+	}
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{
+		Mode:        nominatimv1alpha1.DatabaseModeClusterAttached,
+		ClusterName: "pg",
+	}
+	cluster := &unstructured.Unstructured{}
+	cluster.SetGroupVersionKind(CNPGClusterGVK)
+	cluster.SetName("pg")
+	cluster.SetNamespace("default")
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, cluster).Build()
+	if err := applyPostgresProfile(context.Background(), c, &recordingCNPGEffects{}, nom, "nope"); err == nil {
+		t.Fatal("expected error for unknown profile")
+	}
+}
+
+func TestSetBackupPaused_ErrorsAndDefaults(t *testing.T) {
+	scheme := testScheme(t)
+	cluster := &unstructured.Unstructured{}
+	cluster.SetGroupVersionKind(CNPGClusterGVK)
+	cluster.SetName("pg")
+	cluster.SetNamespace("default")
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cluster).Build()
+	defaults := defaultCNPGEffects{Client: c}
+
+	nom := baseNominatim("bp")
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{
+		Mode: nominatimv1alpha1.DatabaseModeClusterAttached,
+	}
+	if err := setBackupPaused(context.Background(), c, defaults, nom, true); err == nil {
+		t.Fatal("expected missing cluster name error")
+	}
+
+	nom.Status.Database.ClusterName = "missing"
+	if err := setBackupPaused(context.Background(), c, defaults, nom, true); err == nil {
+		t.Fatal("expected get cluster error")
+	}
+
+	nom.Status.Database.ClusterName = "pg"
+	if err := setBackupPaused(context.Background(), c, defaults, nom, true); err != nil {
+		t.Fatalf("default PauseBackups: %v", err)
+	}
+	if err := setBackupPaused(context.Background(), c, defaults, nom, false); err != nil {
+		t.Fatalf("default ResumeBackups: %v", err)
+	}
+
+	// Mode ConnectionSecret without Degraded still no-ops.
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{Mode: nominatimv1alpha1.DatabaseModeConnectionSecret}
+	effects := &recordingCNPGEffects{}
+	if err := setBackupPaused(context.Background(), c, effects, nom, true); err != nil {
+		t.Fatal(err)
+	}
+	if effects.pauseCalls != 0 {
+		t.Fatal("ConnectionSecret mode must not pause")
+	}
+}
+
+func TestApplyPostgresProfile_Branches(t *testing.T) {
+	scheme := testScheme(t)
+	cluster := &unstructured.Unstructured{}
+	cluster.SetGroupVersionKind(CNPGClusterGVK)
+	cluster.SetName("pg")
+	cluster.SetNamespace("default")
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cluster).Build()
+	effects := &recordingCNPGEffects{}
+	ctx := context.Background()
+
+	nom := baseNominatim("ap")
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{Mode: nominatimv1alpha1.DatabaseModeConnectionSecret}
+	if err := applyPostgresProfile(ctx, c, effects, nom, postgresProfileImport); err != nil {
+		t.Fatal(err)
+	}
+	if effects.profileCalls != 0 {
+		t.Fatal("degraded/secret mode must skip profiles")
+	}
+
+	nom.Spec.Database.PostgresProfiles = &nominatimv1alpha1.PostgresProfiles{
+		Import: map[string]string{"work_mem": "64MB"},
+	}
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{
+		Mode: nominatimv1alpha1.DatabaseModeClusterAttached,
+	}
+	if err := applyPostgresProfile(ctx, c, effects, nom, postgresProfileImport); err == nil {
+		t.Fatal("expected missing cluster name")
+	}
+	nom.Status.Database.ClusterName = "missing"
+	if err := applyPostgresProfile(ctx, c, effects, nom, postgresProfileImport); err == nil {
+		t.Fatal("expected get error")
+	}
+	nom.Status.Database.ClusterName = "pg"
+	if err := applyPostgresProfile(ctx, c, effects, nom, postgresProfileImport); err != nil {
+		t.Fatal(err)
+	}
+	if effects.profileCalls != 1 || effects.lastParams["work_mem"] != "64MB" {
+		t.Fatalf("import profile not applied: %#v", effects)
+	}
+	// empty runtime still clears import-only managed keys (work_mem)
+	if err := applyPostgresProfile(ctx, c, effects, nom, postgresProfileRuntime); err != nil {
+		t.Fatal(err)
+	}
+	if effects.profileCalls != 2 {
+		t.Fatalf("empty runtime should still clear import-only keys, got %d calls", effects.profileCalls)
+	}
+	// nil profiles + import
+	nom.Spec.Database.PostgresProfiles = nil
+	if err := applyPostgresProfile(ctx, c, effects, nom, postgresProfileImport); err != nil {
+		t.Fatal(err)
+	}
+	if effects.profileCalls != 2 {
+		t.Fatalf("nil profiles must be a no-op, got %d", effects.profileCalls)
+	}
+}
+
+func TestDefaultCNPGEffects_ApplyParameters(t *testing.T) {
+	scheme := testScheme(t)
+	cluster := &unstructured.Unstructured{}
+	cluster.SetGroupVersionKind(CNPGClusterGVK)
+	cluster.SetName("pg")
+	cluster.SetNamespace("default")
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cluster).Build()
+	nom := baseNominatim("defeff")
+	nom.Spec.Database.PostgresProfiles = &nominatimv1alpha1.PostgresProfiles{
+		Runtime: map[string]string{"a": "b"},
+	}
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{
+		Mode:        nominatimv1alpha1.DatabaseModeClusterAttached,
+		ClusterName: "pg",
+	}
+	if err := applyPostgresProfile(context.Background(), c, defaultCNPGEffects{Client: c}, nom, postgresProfileRuntime); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // --- applyPreJobCNPGEffects / applyTerminalCNPGEffects policy gate + error propagation ---
 
 func TestApplyPreJobCNPGEffects_PolicyMismatchNoOp(t *testing.T) {
