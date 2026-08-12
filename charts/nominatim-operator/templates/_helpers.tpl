@@ -104,7 +104,6 @@ rbac:
       type: ClusterRole
       labels:
         control-plane: controller-manager
-      # Keep in sync with config/rbac/role.yaml (kubebuilder manager-role).
       rules:
         - apiGroups: [""]
           resources: [configmaps, serviceaccounts]
