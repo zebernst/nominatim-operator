@@ -76,10 +76,14 @@ The worker entrypoint dispatches on `OPERATION_TYPE` (or the first CLI arg):
 | `Update` | `scripts/update.sh` | Geofabrik diffs via `pyosmium-get-changes` |
 | `CatchUp` | `scripts/catch-up.sh` | Update loop until idle |
 | `Refresh` | `scripts/refresh.sh` | `nominatim refresh` admin tasks (default: `--postcodes --word-counts --functions --importance`; override with `NOMINATIM_REFRESH_TASKS`) |
+| `Migrate` | `scripts/migrate.sh` | `nominatim admin --migrate` after rolling the worker image to a newer `nominatim-db` (then roll API). Stop Update/CatchUp first — Migrate is write-heavy. Prefer `suspendDuringOperations: WriteHeavy` (or All) while migrating; upstream advises not serving during upgrades. |
+| `Freeze` | `scripts/freeze.sh` | `nominatim freeze` — drop tables kept only for OSM diffs (same as import `--no-updates`). Serving continues; Update/AddRegions/aux imports that need update structures will fail afterward. Do not Freeze before TIGER/aux data you still plan to load. |
 
 These are thin phases invoked by `NominatimOperation` Jobs. Orchestration (mutex, scale API, pause backups, empty DB for Reimport) stays in the operator — not in bash.
 
-`Refresh` is not write-heavy for the Operation mutex (it still conflicts with an active Bootstrap / AddRegions / Reimport peer). Do not run it in parallel with Update / CatchUp / AddRegions — upstream Nominatim forbids parallel refresh with add-data / replication-style updates. Staging PVC is still created for Job shape consistency even though Refresh does not download extracts.
+`Refresh` is not write-heavy for the Operation mutex (it still conflicts with an active Bootstrap / AddRegions / Reimport / Migrate / Freeze peer). Do not run it in parallel with Update / CatchUp / AddRegions — upstream Nominatim forbids parallel refresh with add-data / replication-style updates. Staging PVC is still created for Job shape consistency even though Refresh does not download extracts.
+
+`Migrate` and `Freeze` are write-heavy (mutex with Update/CatchUp and other write-heavy peers; default `pauseBackupsDuringOperations: WriteHeavy` applies).
 
 ### Import-complete / ready-to-serve (Kubernetes source of truth)
 
@@ -90,6 +94,7 @@ These are thin phases invoked by `NominatimOperation` Jobs. Orchestration (mutex
 | API/UI may exist | `servingWorkloadsAllowed`: no desired regions, or `status.regions` populated | PVC markers |
 | Day-2 Jobs (AddRegions / Update / CatchUp) | Operator `BootstrapIncomplete` gate via `bootstrapComplete` | Worker file checks alone |
 | Day-2 admin (`Refresh`) | Worker `require_bootstrap_ready` (no region gate; Refresh does not need `NOMINATIM_REGIONS`) | API boot path |
+| Schema / serve-only (`Migrate` / `Freeze`) | Worker `require_bootstrap_ready`; write-heavy mutex (stop updates first) | Image bumps for Migrate are outside the Job |
 
 Project PVC files remain **worker-local resume bookmarks** (Bootstrap still writes `import-finished`; Reimport clears markers before re-bootstrap). Workers call `require_bootstrap_ready`, which heals a missing marker when the Nominatim schema is already ready and only fails when both the marker and schema are absent — last-resort, not cluster coordination.
 

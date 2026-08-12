@@ -89,6 +89,48 @@ func TestWaitForPostgresDefaultIsShortened(t *testing.T) {
 	}
 }
 
+// TestMigrateAndFreezeScriptContracts asserts Migrate/Freeze worker scripts match
+// upstream Nominatim 4.5 admin docs (nominatim-5et.13 / 5et.18):
+//
+//	Migrate → nominatim admin --migrate (after image bump; stop updates first)
+//	Freeze  → nominatim freeze (drop dynamic-update tables; no further OSM updates)
+func TestMigrateAndFreezeScriptContracts(t *testing.T) {
+	migrate, err := os.ReadFile("migrate.sh")
+	if err != nil {
+		t.Fatalf("reading migrate.sh: %v", err)
+	}
+	ms := string(migrate)
+	if !strings.Contains(ms, "require_bootstrap_ready") {
+		t.Error("migrate.sh must call require_bootstrap_ready")
+	}
+	if !strings.Contains(ms, "run_nominatim admin --migrate") {
+		t.Error("migrate.sh must invoke run_nominatim admin --migrate")
+	}
+
+	freeze, err := os.ReadFile("freeze.sh")
+	if err != nil {
+		t.Fatalf("reading freeze.sh: %v", err)
+	}
+	fs := string(freeze)
+	if !strings.Contains(fs, "require_bootstrap_ready") {
+		t.Error("freeze.sh must call require_bootstrap_ready")
+	}
+	if !strings.Contains(fs, "run_nominatim freeze") {
+		t.Error("freeze.sh must invoke run_nominatim freeze")
+	}
+
+	entrypoint, err := os.ReadFile("entrypoint.sh")
+	if err != nil {
+		t.Fatalf("reading entrypoint.sh: %v", err)
+	}
+	ep := string(entrypoint)
+	for _, needle := range []string{"Migrate", "migrate.sh", "Freeze", "freeze.sh"} {
+		if !strings.Contains(ep, needle) {
+			t.Errorf("entrypoint.sh must dispatch Migrate/Freeze (missing %q)", needle)
+		}
+	}
+}
+
 // TestRefreshScriptContract asserts Refresh runs nominatim refresh admin tasks
 // after bootstrap readiness (nominatim-5et.12), not on the API boot path.
 func TestRefreshScriptContract(t *testing.T) {

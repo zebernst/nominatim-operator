@@ -38,9 +38,10 @@ const (
 
 	// NominatimOperationRefresh recomputes auxiliary data (postcodes, word counts, functions, importance).
 	NominatimOperationRefresh NominatimOperationType = "Refresh"
-	// NominatimOperationMigrate is reserved for a future migrate workflow (accepted; not implemented yet).
+	// NominatimOperationMigrate runs nominatim admin --migrate after a nominatim-db image bump
+	// (stop Update/CatchUp first; prefer suspending the API while Migrate runs).
 	NominatimOperationMigrate NominatimOperationType = "Migrate"
-	// NominatimOperationFreeze is reserved for a future freeze workflow (accepted; not implemented yet).
+	// NominatimOperationFreeze drops dynamic-update tables (serve-only DB; no further OSM updates).
 	NominatimOperationFreeze NominatimOperationType = "Freeze"
 )
 

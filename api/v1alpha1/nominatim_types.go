@@ -48,7 +48,7 @@ const (
 	OperationImpactNever OperationImpact = "Never"
 	// OperationImpactBootstrapReimport covers Bootstrap and Reimport only (not AddRegions/Update).
 	OperationImpactBootstrapReimport OperationImpact = "BootstrapReimport"
-	// OperationImpactWriteHeavy covers Bootstrap, AddRegions, and Reimport.
+	// OperationImpactWriteHeavy covers Bootstrap, AddRegions, Reimport, Migrate, and Freeze.
 	OperationImpactWriteHeavy OperationImpact = "WriteHeavy"
 	OperationImpactAll        OperationImpact = "All"
 )
@@ -190,7 +190,7 @@ type DatabaseSpec struct {
 	PostgresProfiles *PostgresProfiles `json:"postgresProfiles,omitempty"`
 
 	// PauseBackupsDuringOperations controls continuous backup pausing around operations.
-	// Default WriteHeavy pauses Bootstrap/AddRegions/Reimport but not routine Update.
+	// Default WriteHeavy pauses Bootstrap/AddRegions/Reimport/Migrate/Freeze but not routine Update.
 	// +optional
 	// +kubebuilder:default="WriteHeavy"
 	PauseBackupsDuringOperations OperationImpact `json:"pauseBackupsDuringOperations,omitempty"`
