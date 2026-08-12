@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+* **controller:** seed Gateway API HTTPRoute `rules[].matches` (and related parentRef/backendRef defaults) and preserve existing matches across reconciles so CreateOrUpdate stays idempotent (nominatim-5et.32).
+
 ### Features
 
 * **controller/worker:** `spec.auxData` toggles Wikipedia importance, secondary importance, and US postcode downloads during Bootstrap staging; `status.auxData` reports observed files via the sequence probe (nominatim-5et.11).
