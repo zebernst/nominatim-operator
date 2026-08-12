@@ -58,8 +58,6 @@ type NominatimOperationReconciler struct {
 
 // Reconcile ensures staging PVC + worker Job for a NominatimOperation and syncs status from the Job.
 func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
-
 	op := &nominatimv1alpha1.NominatimOperation{}
 	if err := r.Get(ctx, req.NamespacedName, op); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
@@ -104,9 +102,11 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 	if err := r.List(ctx, peers, client.InNamespace(op.Namespace)); err != nil {
 		return ctrl.Result{}, err
 	}
-	if conflict := findConflictingOperation(op, peers.Items); conflict != nil {
-		log.Info("operation conflict", "operation", op.Name, "peer", conflict.Name)
-		return ctrl.Result{}, r.failOperation(ctx, op, reasonConflict, conflictMessage(conflict))
+
+	// Atomically register on the parent and serialize write-plane peers (creation
+	// race requeue; terminal Conflict only when a peer already has a Job/Running).
+	if result, stop, err := r.claimWritePlane(ctx, op); stop {
+		return result, err
 	}
 
 	if stop, err := r.enforceRegionGates(ctx, op, parent, peers.Items); stop || err != nil {
@@ -119,12 +119,6 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	if err := r.applyPreJobCNPGEffects(ctx, op, parent); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	// Register the Operation as active before any Reimport Database drop so the parent
-	// can scale the API to zero (Reimport always suspends) and CNPG can reclaim-delete.
-	if err := r.syncParentActiveOperationRef(ctx, op, true); err != nil {
 		return ctrl.Result{}, err
 	}
 

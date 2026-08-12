@@ -92,6 +92,20 @@ func isWriteHeavyOperation(t nominatimv1alpha1.NominatimOperationType) bool {
 	}
 }
 
+// requiresRegionsEnv is true for Operations whose worker scripts consume
+// NOMINATIM_REGIONS (and optionally PBF_URL). Refresh/Migrate/Freeze act on
+// the existing database only and must not inherit parent.spec.regions implicitly.
+func requiresRegionsEnv(t nominatimv1alpha1.NominatimOperationType) bool {
+	switch t {
+	case nominatimv1alpha1.NominatimOperationRefresh,
+		nominatimv1alpha1.NominatimOperationMigrate,
+		nominatimv1alpha1.NominatimOperationFreeze:
+		return false
+	default:
+		return true
+	}
+}
+
 // requiresImportPBFURL is true for Operations that run nominatim import with
 // Geofabrik extracts (Bootstrap/Reimport). Migrate/Freeze/AddRegions are
 // write-heavy for the mutex but do not download PBFs via PBF_URL.
@@ -131,8 +145,7 @@ func findConflictingOperation(op *nominatimv1alpha1.NominatimOperation, peers []
 		if !isActiveOperationPhase(peer.Status.Phase) {
 			continue
 		}
-		// Conflict when either side is write-heavy (see mutex policy comment above).
-		if isWriteHeavyOperation(op.Spec.Type) || isWriteHeavyOperation(peer.Spec.Type) {
+		if operationsMutexConflict(op, peer) {
 			return peer
 		}
 	}
@@ -320,14 +333,16 @@ func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominat
 		env = append(env, corev1.EnvVar{Name: "NOMINATIM_REIMPORT_CONFIRM", Value: "1"})
 	}
 
-	regions := effectiveRegions(op, parent)
-	if len(regions) > 0 {
-		env = append(env, corev1.EnvVar{Name: "NOMINATIM_REGIONS", Value: strings.Join(regions, ",")})
-		if requiresImportPBFURL(op.Spec.Type) {
-			// PBF_URL is regions[0] for back-compat / first extract URL. The worker
-			// downloads every NOMINATIM_REGIONS path and passes multiple --osm-file
-			// flags to nominatim import (not add-data — that path is AddRegions only).
-			env = append(env, corev1.EnvVar{Name: "PBF_URL", Value: pbfURLForRegion(regions[0])})
+	if requiresRegionsEnv(op.Spec.Type) {
+		regions := effectiveRegions(op, parent)
+		if len(regions) > 0 {
+			env = append(env, corev1.EnvVar{Name: "NOMINATIM_REGIONS", Value: strings.Join(regions, ",")})
+			if requiresImportPBFURL(op.Spec.Type) {
+				// PBF_URL is regions[0] for back-compat / first extract URL. The worker
+				// downloads every NOMINATIM_REGIONS path and passes multiple --osm-file
+				// flags to nominatim import (not add-data — that path is AddRegions only).
+				env = append(env, corev1.EnvVar{Name: "PBF_URL", Value: pbfURLForRegion(regions[0])})
+			}
 		}
 	}
 

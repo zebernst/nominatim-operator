@@ -56,8 +56,10 @@ var _ = Describe("NominatimOperation Controller", func() {
 
 		parent := minimalNominatim(parentName)
 		parent.Spec.Staging = &nominatimv1alpha1.StagingSpec{Size: "30Gi"}
+		parent.Spec.Regions = []string{"europe/monaco"}
 		Expect(k8sClient.Create(ctx, parent)).To(Succeed())
 		parent.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: "pg-secret"}
+		parent.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: regionPhaseImported}}
 		Expect(k8sClient.Status().Update(ctx, parent)).To(Succeed())
 		Expect(k8sClient.Create(ctx, &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Name: "pg-secret", Namespace: "default"},
@@ -71,6 +73,8 @@ var _ = Describe("NominatimOperation Controller", func() {
 		cleanupOperation(ctx, opName+"-b")
 		cleanupOperation(ctx, opName+"-migrate")
 		cleanupOperation(ctx, opName+"-freeze")
+		cleanupOperation(ctx, opName+"-aaa")
+		cleanupOperation(ctx, opName+"-bbb")
 		cleanupNominatim(ctx, parentName)
 		_ = k8sClient.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "pg-secret", Namespace: "default"}})
 	})
@@ -335,6 +339,7 @@ var _ = Describe("NominatimOperation Controller", func() {
 			Spec: nominatimv1alpha1.NominatimOperationSpec{
 				Type:         nominatimv1alpha1.NominatimOperationAddRegions,
 				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+				Regions:      []string{"europe/monaco"},
 			},
 		}
 		Expect(k8sClient.Create(ctx, second)).To(Succeed())
@@ -349,6 +354,50 @@ var _ = Describe("NominatimOperation Controller", func() {
 
 		job := &batchv1.Job{}
 		err = k8sClient.Get(ctx, types.NamespacedName{Name: secondName, Namespace: "default"}, job)
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("requeues the lexicographically younger write-heavy Operation in a creation race", func() {
+		winnerName := opName + "-aaa"
+		loserName := opName + "-bbb"
+		Expect(k8sClient.Create(ctx, &nominatimv1alpha1.NominatimOperation{
+			ObjectMeta: metav1.ObjectMeta{Name: winnerName, Namespace: "default"},
+			Spec: nominatimv1alpha1.NominatimOperationSpec{
+				Type:         nominatimv1alpha1.NominatimOperationBootstrap,
+				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+			},
+		})).To(Succeed())
+		Expect(k8sClient.Create(ctx, &nominatimv1alpha1.NominatimOperation{
+			ObjectMeta: metav1.ObjectMeta{Name: loserName, Namespace: "default"},
+			Spec: nominatimv1alpha1.NominatimOperationSpec{
+				Type:         nominatimv1alpha1.NominatimOperationBootstrap,
+				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+			},
+		})).To(Succeed())
+
+		// Simulate the winner claiming the write plane before either Job exists.
+		parent := &nominatimv1alpha1.Nominatim{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: parentName, Namespace: "default"}, parent)).To(Succeed())
+		parent.Status.ActiveOperationRefs = []corev1.ObjectReference{{
+			APIVersion: nominatimv1alpha1.GroupVersion.String(),
+			Kind:       operationRefKind,
+			Namespace:  "default",
+			Name:       winnerName,
+		}}
+		Expect(k8sClient.Status().Update(ctx, parent)).To(Succeed())
+
+		res, err := reconciler.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: loserName, Namespace: "default"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.RequeueAfter).To(BeNumerically(">", 0))
+
+		loser := &nominatimv1alpha1.NominatimOperation{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: loserName, Namespace: "default"}, loser)).To(Succeed())
+		Expect(loser.Status.Phase).NotTo(Equal(nominatimv1alpha1.NominatimOperationPhaseFailed))
+
+		job := &batchv1.Job{}
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: loserName, Namespace: "default"}, job)
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
 
@@ -375,6 +424,7 @@ var _ = Describe("NominatimOperation Controller", func() {
 			Spec: nominatimv1alpha1.NominatimOperationSpec{
 				Type:         nominatimv1alpha1.NominatimOperationUpdate,
 				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
+				Regions:      []string{"europe/monaco"},
 			},
 		}
 		Expect(k8sClient.Create(ctx, second)).To(Succeed())
@@ -408,6 +458,13 @@ var _ = Describe("NominatimOperation Controller", func() {
 	})
 
 	It("fails AddRegions with RegionsRequired when no regions are configured (T5)", func() {
+		parent := &nominatimv1alpha1.Nominatim{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: parentName, Namespace: "default"}, parent)).To(Succeed())
+		parent.Spec.Regions = nil
+		Expect(k8sClient.Update(ctx, parent)).To(Succeed())
+		parent.Status.Regions = []nominatimv1alpha1.RegionStatus{}
+		Expect(k8sClient.Status().Update(ctx, parent)).To(Succeed())
+
 		op := &nominatimv1alpha1.NominatimOperation{
 			ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: "default"},
 			Spec: nominatimv1alpha1.NominatimOperationSpec{
@@ -440,6 +497,8 @@ var _ = Describe("NominatimOperation Controller", func() {
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: parentName, Namespace: "default"}, parent)).To(Succeed())
 		parent.Spec.Regions = []string{"europe/monaco"}
 		Expect(k8sClient.Update(ctx, parent)).To(Succeed())
+		parent.Status.Regions = []nominatimv1alpha1.RegionStatus{}
+		Expect(k8sClient.Status().Update(ctx, parent)).To(Succeed())
 
 		op := &nominatimv1alpha1.NominatimOperation{
 			ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: "default"},
@@ -465,6 +524,13 @@ var _ = Describe("NominatimOperation Controller", func() {
 	})
 
 	It("fails CatchUp with RegionsRequired when no regions are configured (T6b)", func() {
+		parent := &nominatimv1alpha1.Nominatim{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: parentName, Namespace: "default"}, parent)).To(Succeed())
+		parent.Spec.Regions = nil
+		Expect(k8sClient.Update(ctx, parent)).To(Succeed())
+		parent.Status.Regions = []nominatimv1alpha1.RegionStatus{}
+		Expect(k8sClient.Status().Update(ctx, parent)).To(Succeed())
+
 		op := &nominatimv1alpha1.NominatimOperation{
 			ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: "default"},
 			Spec: nominatimv1alpha1.NominatimOperationSpec{
@@ -493,6 +559,8 @@ var _ = Describe("NominatimOperation Controller", func() {
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: parentName, Namespace: "default"}, parent)).To(Succeed())
 		parent.Spec.Regions = []string{"europe/monaco", "africa/morocco"}
 		Expect(k8sClient.Update(ctx, parent)).To(Succeed())
+		parent.Status.Regions = []nominatimv1alpha1.RegionStatus{}
+		Expect(k8sClient.Status().Update(ctx, parent)).To(Succeed())
 
 		op := &nominatimv1alpha1.NominatimOperation{
 			ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: "default"},
@@ -523,6 +591,8 @@ var _ = Describe("NominatimOperation Controller", func() {
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: parentName, Namespace: "default"}, parent)).To(Succeed())
 		parent.Spec.Regions = []string{"europe/monaco"}
 		Expect(k8sClient.Update(ctx, parent)).To(Succeed())
+		parent.Status.Regions = []nominatimv1alpha1.RegionStatus{}
+		Expect(k8sClient.Status().Update(ctx, parent)).To(Succeed())
 
 		op := &nominatimv1alpha1.NominatimOperation{
 			ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: "default"},
@@ -610,6 +680,13 @@ var _ = Describe("NominatimOperation Controller", func() {
 	})
 
 	It("does not require Bootstrap history for AddRegions on a PBF-only parent (T9)", func() {
+		parent := &nominatimv1alpha1.Nominatim{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: parentName, Namespace: "default"}, parent)).To(Succeed())
+		parent.Spec.Regions = nil
+		Expect(k8sClient.Update(ctx, parent)).To(Succeed())
+		parent.Status.Regions = []nominatimv1alpha1.RegionStatus{}
+		Expect(k8sClient.Status().Update(ctx, parent)).To(Succeed())
+
 		op := &nominatimv1alpha1.NominatimOperation{
 			ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: "default"},
 			Spec: nominatimv1alpha1.NominatimOperationSpec{
