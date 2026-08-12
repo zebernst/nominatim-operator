@@ -240,7 +240,7 @@ metadata:
   namespace: ${VALIDATION_NS}
 spec:
   type: Reimport
-  nominatimRef:
+  nominatimInstanceRef:
     name: ${NOM_NAME}
   regions:
     - europe/monaco

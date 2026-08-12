@@ -141,8 +141,8 @@ func TestReconcileUpdates_SkipsOnWriteHeavyConflict(t *testing.T) {
 	boot := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-active", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseRunning},
 	}
@@ -190,8 +190,8 @@ func TestReconcileUpdates_SkipsOnCreationRacePeer(t *testing.T) {
 	boot := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-racing", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: ""},
 	}

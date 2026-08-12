@@ -176,7 +176,7 @@ func bootstrapComplete(parent *nominatimv1alpha1.NominatimInstance, peers []nomi
 		peer := &peers[i]
 		if peer.Spec.Type == nominatimv1alpha1.NominatimOperationBootstrap &&
 			peer.Status.Phase == nominatimv1alpha1.NominatimOperationPhaseSucceeded &&
-			peer.Spec.NominatimRef.Name == parent.Name {
+			peer.Spec.NominatimInstanceRef.Name == parent.Name {
 			return true
 		}
 	}
@@ -278,7 +278,7 @@ func operationLabels(op *nominatimv1alpha1.NominatimOperation) map[string]string
 		"app.kubernetes.io/name":                "nominatim-operation",
 		"app.kubernetes.io/instance":            op.Name,
 		"app.kubernetes.io/managed-by":          "nominatim-operator",
-		"nominatim.zebernst.dev/nominatim":      op.Spec.NominatimRef.Name,
+		"nominatim.zebernst.dev/nominatim":      op.Spec.NominatimInstanceRef.Name,
 		"nominatim.zebernst.dev/operation":      op.Name,
 		"nominatim.zebernst.dev/operation-type": string(op.Spec.Type),
 	}

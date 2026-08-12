@@ -396,8 +396,8 @@ func TestShouldSuspendAPI_ImpactMatrix(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "op-update", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationUpdate,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 	}
 	nom.Status.ActiveOperationRefs = []corev1.ObjectReference{{Name: "op-update"}}
@@ -434,8 +434,8 @@ func TestShouldSuspendAPI_ReimportAlwaysSuspendsEvenWithNever(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "op-reimport", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationReimport,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationReimport,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 	}
 	nom.Status.ActiveOperationRefs = []corev1.ObjectReference{{Name: "op-reimport"}}
@@ -571,8 +571,8 @@ func TestReconcileAPI_SuspendDuringOperationsScalesToZero(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "busy-op", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationUpdate,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 	}
 	nom.Status.ActiveOperationRefs = []corev1.ObjectReference{{Name: "busy-op"}}
@@ -600,8 +600,8 @@ func TestReconcileAPI_DefaultNeverKeepsAPIUp(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "busy-op", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 	}
 	nom.Status.ActiveOperationRefs = []corev1.ObjectReference{{Name: "busy-op"}}
@@ -802,8 +802,8 @@ func TestBuildOperationJob_WorkerPodSpecOverlay(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "job-podspec", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationUpdate,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
+			Type:                 nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
 		},
 	}
 	overlay, _ := json.Marshal(corev1.PodSpec{

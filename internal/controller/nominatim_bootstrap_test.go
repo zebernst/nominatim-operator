@@ -103,8 +103,8 @@ func TestEnsureBootstrapOperation_CreatesWhenEmpty(t *testing.T) {
 	if op.Spec.Type != nominatimv1alpha1.NominatimOperationBootstrap {
 		t.Fatalf("type=%q want Bootstrap", op.Spec.Type)
 	}
-	if op.Spec.NominatimRef.Name != nom.Name {
-		t.Fatalf("nominatimRef=%q want %q", op.Spec.NominatimRef.Name, nom.Name)
+	if op.Spec.NominatimInstanceRef.Name != nom.Name {
+		t.Fatalf("nominatimInstanceRef=%q want %q", op.Spec.NominatimInstanceRef.Name, nom.Name)
 	}
 	if len(op.Spec.Regions) != 2 || op.Spec.Regions[0] != testRegionMonaco || op.Spec.Regions[1] != testRegionMorocco {
 		t.Fatalf("regions=%v want copy of spec.regions", op.Spec.Regions)
@@ -126,8 +126,8 @@ func TestEnsureBootstrapOperation_NoopWhenBootstrapAlreadyActive(t *testing.T) {
 			existing := &nominatimv1alpha1.NominatimOperation{
 				ObjectMeta: metav1.ObjectMeta{Name: BootstrapOperationName(nom), Namespace: "default"},
 				Spec: nominatimv1alpha1.NominatimOperationSpec{
-					Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-					NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+					Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+					NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 				},
 				Status: nominatimv1alpha1.NominatimOperationStatus{Phase: phase},
 			}
@@ -155,8 +155,8 @@ func TestEnsureBootstrapOperation_NoopWhenBootstrapAlreadyTerminal(t *testing.T)
 	existing := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: BootstrapOperationName(nom), Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseFailed},
 	}
@@ -195,8 +195,8 @@ func TestEnsureBootstrapOperation_IgnoresOperationsForOtherParents(t *testing.T)
 	other := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "other-nom-bootstrap", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "some-other-nominatim"},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "some-other-nominatim"},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseRunning},
 	}
@@ -219,9 +219,9 @@ func TestEnsureBootstrapOperation_NoCreateAfterObservePopulatedRegions(t *testin
 	succeeded := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: BootstrapOperationName(nom), Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
-			Regions:      []string{testRegionMonaco, testRegionMorocco},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Regions:              []string{testRegionMonaco, testRegionMorocco},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}
@@ -263,9 +263,9 @@ func TestEnsureBootstrapOperation_DoesNotSyncRegions(t *testing.T) {
 	succeeded := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: BootstrapOperationName(nom), Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
-			Regions:      []string{testRegionMonaco},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Regions:              []string{testRegionMonaco},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}

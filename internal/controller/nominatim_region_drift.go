@@ -118,9 +118,9 @@ func (r *NominatimInstanceReconciler) ensureAddRegionsOperation(
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: nom.Namespace},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationAddRegions,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
-			Regions:      []string{next},
+			Type:                 nominatimv1alpha1.NominatimOperationAddRegions,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Regions:              []string{next},
 		},
 	}
 	if err := controllerutil.SetControllerReference(nom, op, r.Scheme); err != nil {
@@ -168,9 +168,9 @@ func (r *NominatimInstanceReconciler) ensureReimportOperation(
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: nom.Namespace},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationReimport,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
-			Regions:      append([]string(nil), desired...),
+			Type:                 nominatimv1alpha1.NominatimOperationReimport,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Regions:              append([]string(nil), desired...),
 		},
 	}
 	if err := controllerutil.SetControllerReference(nom, op, r.Scheme); err != nil {

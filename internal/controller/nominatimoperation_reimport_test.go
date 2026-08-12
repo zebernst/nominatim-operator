@@ -96,9 +96,9 @@ func reimportOp(name string, parent *nominatimv1alpha1.NominatimInstance, annota
 			Annotations: annotations,
 		},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationReimport,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
-			Regions:      []string{"europe/monaco"},
+			Type:                 nominatimv1alpha1.NominatimOperationReimport,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
+			Regions:              []string{"europe/monaco"},
 		},
 	}
 }

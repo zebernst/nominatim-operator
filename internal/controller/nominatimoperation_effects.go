@@ -87,7 +87,7 @@ func (r *NominatimOperationReconciler) hasOtherActiveMatchingImpactOps(
 		if peer.Name == excludeName {
 			continue
 		}
-		if peer.Spec.NominatimRef.Name != parent.Name {
+		if peer.Spec.NominatimInstanceRef.Name != parent.Name {
 			continue
 		}
 		if !isActiveOperationPhase(peer.Status.Phase) {

@@ -106,8 +106,8 @@ func TestReconcileSequenceObservation_CreatesProbeAndAppliesConfigMap(t *testing
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "seq-obs-update", Namespace: nom.Namespace},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationUpdate,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}
@@ -180,8 +180,8 @@ func TestEnsureSequenceProbes_DoesNotApplyReport(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "seq-ensure-only-update", Namespace: nom.Namespace},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationUpdate,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}
@@ -273,8 +273,8 @@ func TestReconcileSequenceObservation_SkipsAlreadyObserved(t *testing.T) {
 			Annotations: map[string]string{annotationSequenceObserved: annotationValueTrue},
 		},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationUpdate,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}
@@ -297,8 +297,8 @@ func TestEnsureSequenceProbeJob_FailedJobMarksObserved(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "fail-probe-update", Namespace: nom.Namespace},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationUpdate,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}
@@ -431,8 +431,8 @@ func TestEnsureSequenceProbeJob_InProgressNoMark(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "run-probe-update", Namespace: nom.Namespace},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationUpdate,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}
@@ -482,8 +482,8 @@ func TestReconcileSequenceObservation_SkipsNonProbeTypes(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "skip-type-refresh", Namespace: nom.Namespace},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationRefresh,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationRefresh,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}

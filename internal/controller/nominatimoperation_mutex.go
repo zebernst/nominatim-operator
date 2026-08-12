@@ -79,7 +79,7 @@ func operationsMutexConflict(a, b *nominatimv1alpha1.NominatimOperation) bool {
 	if a == nil || b == nil || a.Name == b.Name {
 		return false
 	}
-	if a.Spec.NominatimRef.Name != b.Spec.NominatimRef.Name || a.Namespace != b.Namespace {
+	if a.Spec.NominatimInstanceRef.Name != b.Spec.NominatimInstanceRef.Name || a.Namespace != b.Namespace {
 		return false
 	}
 	return isWriteHeavyOperation(a.Spec.Type) || isWriteHeavyOperation(b.Spec.Type)
@@ -144,7 +144,7 @@ func (r *NominatimOperationReconciler) listPeersForNominatim(ctx context.Context
 	out := make([]nominatimv1alpha1.NominatimOperation, 0, len(list.Items))
 	for i := range list.Items {
 		peer := &list.Items[i]
-		if peer.Spec.NominatimRef.Name == op.Spec.NominatimRef.Name {
+		if peer.Spec.NominatimInstanceRef.Name == op.Spec.NominatimInstanceRef.Name {
 			out = append(out, *peer)
 		}
 	}
@@ -155,11 +155,11 @@ func (r *NominatimOperationReconciler) listPeersForNominatim(ctx context.Context
 // using a retry-on-conflict loop so only one creation-race winner arms a Job.
 // Returns stop=true when Reconcile must return immediately (requeue or failed).
 func (r *NominatimOperationReconciler) claimWritePlane(ctx context.Context, op *nominatimv1alpha1.NominatimOperation) (ctrl.Result, bool, error) {
-	if op.Spec.NominatimRef.Name == "" {
+	if op.Spec.NominatimInstanceRef.Name == "" {
 		return ctrl.Result{}, false, nil
 	}
 
-	parentKey := types.NamespacedName{Name: op.Spec.NominatimRef.Name, Namespace: op.Namespace}
+	parentKey := types.NamespacedName{Name: op.Spec.NominatimInstanceRef.Name, Namespace: op.Namespace}
 	ref := operationObjectReference(op)
 	var terminal *writePlaneTerminalConflict
 

@@ -70,11 +70,11 @@ type NominatimOperationSpec struct {
 	// +kubebuilder:validation:Required
 	Type NominatimOperationType `json:"type"`
 
-	// NominatimRef names the NominatimInstance in the same namespace.
+	// NominatimInstanceRef names the NominatimInstance in the same namespace.
 	// The operation controller will set an ownerReference to that NominatimInstance when reconciling
 	// (callers need not set metadata.ownerReferences).
 	// +kubebuilder:validation:Required
-	NominatimRef LocalObjectReference `json:"nominatimRef"`
+	NominatimInstanceRef LocalObjectReference `json:"nominatimInstanceRef"`
 
 	// Regions are Geofabrik-style region paths targeted by AddRegions or Reimport.
 	// Ignored for other operation types unless documented otherwise by the controller.

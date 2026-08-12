@@ -276,15 +276,15 @@ func difference(a, b []string) []string {
 	return out
 }
 
-// mapOperationToNominatimInstance enqueues the parent NominatimInstance named by nominatimRef.
+// mapOperationToNominatimInstance enqueues the parent NominatimInstance named by nominatimInstanceRef.
 func mapOperationToNominatimInstance(_ context.Context, obj client.Object) []reconcile.Request {
 	op, ok := obj.(*nominatimv1alpha1.NominatimOperation)
-	if !ok || op.Spec.NominatimRef.Name == "" {
+	if !ok || op.Spec.NominatimInstanceRef.Name == "" {
 		return nil
 	}
 	return []reconcile.Request{{
 		NamespacedName: types.NamespacedName{
-			Name:      op.Spec.NominatimRef.Name,
+			Name:      op.Spec.NominatimInstanceRef.Name,
 			Namespace: op.Namespace,
 		},
 	}}

@@ -626,7 +626,7 @@ func TestApplyTerminalCNPGEffects_ProfileErrorPropagates(t *testing.T) {
 	}
 }
 
-func TestSyncParentActiveOperationRef_NoNominatimRefIsNoop(t *testing.T) {
+func TestSyncParentActiveOperationRef_NoNominatimInstanceRefIsNoop(t *testing.T) {
 	r := &NominatimOperationReconciler{}
 	op := &nominatimv1alpha1.NominatimOperation{}
 	if err := r.syncParentActiveOperationRef(context.Background(), op, true); err != nil {
@@ -640,7 +640,7 @@ func TestSyncParentActiveOperationRef_MissingParentIsNoop(t *testing.T) {
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "op-x", Namespace: "default"},
-		Spec:       nominatimv1alpha1.NominatimOperationSpec{NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "gone"}},
+		Spec:       nominatimv1alpha1.NominatimOperationSpec{NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "gone"}},
 	}
 	if err := r.syncParentActiveOperationRef(context.Background(), op, true); err != nil {
 		t.Fatalf("expected no-op for missing parent, got %v", err)
@@ -654,7 +654,7 @@ func TestSyncParentActiveOperationRef_AddRemoveAndAlreadyDesiredIsNoop(t *testin
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "op-adr", Namespace: "default"},
-		Spec:       nominatimv1alpha1.NominatimOperationSpec{NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name}},
+		Spec:       nominatimv1alpha1.NominatimOperationSpec{NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name}},
 	}
 
 	// Removing an absent ref is a no-op.
@@ -691,7 +691,7 @@ func TestSyncParentActiveOperationRef_AddRemoveAndAlreadyDesiredIsNoop(t *testin
 	}
 }
 
-func TestSyncParentSideEffects_NoNominatimRefIsNoop(t *testing.T) {
+func TestSyncParentSideEffects_NoNominatimInstanceRefIsNoop(t *testing.T) {
 	r := &NominatimOperationReconciler{}
 	op := &nominatimv1alpha1.NominatimOperation{}
 	if err := r.syncParentSideEffects(context.Background(), op); err != nil {
@@ -706,7 +706,7 @@ func TestSyncParentSideEffects_NonTerminalStopsAfterRefSync(t *testing.T) {
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "op-sse2", Namespace: "default"},
-		Spec:       nominatimv1alpha1.NominatimOperationSpec{NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name}},
+		Spec:       nominatimv1alpha1.NominatimOperationSpec{NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name}},
 		Status:     nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseRunning},
 	}
 	if err := r.syncParentSideEffects(context.Background(), op); err != nil {
@@ -727,7 +727,7 @@ func TestSyncParentSideEffects_TerminalMissingParentIsNoop(t *testing.T) {
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "op-sse3", Namespace: "default"},
-		Spec:       nominatimv1alpha1.NominatimOperationSpec{NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "gone"}},
+		Spec:       nominatimv1alpha1.NominatimOperationSpec{NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "gone"}},
 		Status:     nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}
 	if err := r.syncParentSideEffects(context.Background(), op); err != nil {
@@ -755,8 +755,8 @@ func TestOperationReconcile_WriteHeavyBootstrap_PauseImportThenTerminalResumeRun
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-1", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
 		},
 	}
 
@@ -888,8 +888,8 @@ func TestOperationReconcile_NeverImpact_NoCNPGCallsButRefStillTracked(t *testing
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-never", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
 		},
 	}
 	effects := &recordingCNPGEffects{}
@@ -928,8 +928,8 @@ func TestOperationReconcile_DegradedParent_NoCNPGCalls(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-degraded", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
 		},
 	}
 	effects := &recordingCNPGEffects{}
@@ -958,8 +958,8 @@ func TestOperationReconcile_ParentNotYetAttached_NoCNPGCallsNoError(t *testing.T
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-unattached", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
 		},
 	}
 	effects := &recordingCNPGEffects{}
@@ -993,8 +993,8 @@ func TestOperationReconcile_TerminalSyncStatusFromJobErrorPropagates(t *testing.
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-term-job-err", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{
 			Phase:  nominatimv1alpha1.NominatimOperationPhaseSucceeded,
@@ -1023,8 +1023,8 @@ func TestOperationReconcile_MainPathSyncParentSideEffectsErrorPropagates(t *test
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-main-parent-err", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
 		},
 	}
 	base := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent, op).WithObjects(parent, fakeConnectionSecret("pg-app"), newCNPGCluster("pg"), op).Build()
@@ -1043,8 +1043,8 @@ func TestFailOperation_StatusUpdateErrorPropagates(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "op-failop-err", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
 		},
 	}
 	base := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent, op).WithObjects(parent, op).Build()
@@ -1075,8 +1075,8 @@ func TestOperationReconcile_ConflictFailure_SyncsParentSideEffectsWithoutError(t
 	running := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "op-running", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseRunning},
 	}
@@ -1095,8 +1095,8 @@ func TestOperationReconcile_ConflictFailure_SyncsParentSideEffectsWithoutError(t
 	conflicting := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "op-conflict", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationReimport,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationReimport,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
 		},
 	}
 	if err := c.Create(ctx, conflicting); err != nil {
@@ -1201,8 +1201,8 @@ func TestOperationReconcile_DeleteMidFlight_ClearsRefAndResumes(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-del", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
 		},
 	}
 	effects := &recordingCNPGEffects{}

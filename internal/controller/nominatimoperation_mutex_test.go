@@ -65,23 +65,23 @@ func TestEvaluateWritePlane(t *testing.T) {
 	update := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "update-1", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationUpdate,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
+			Type:                 nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
 		},
 	}
 	bootstrapRunning := nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "bootstrap-1", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseRunning},
 	}
 	racingWinner := nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "bootstrap-aaa", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: ""},
 	}
@@ -90,24 +90,24 @@ func TestEvaluateWritePlane(t *testing.T) {
 	done := nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "done", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}
 	otherNom := nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "other-nom"},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "other-nom"},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseRunning},
 	}
 	updatePeer := nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "update-2", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationUpdate,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
+			Type:                 nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhasePending},
 	}
@@ -164,8 +164,8 @@ func TestEvaluateWritePlane(t *testing.T) {
 		probe := &nominatimv1alpha1.NominatimOperation{
 			ObjectMeta: metav1.ObjectMeta{Name: "__schedule-probe__", Namespace: "ns"},
 			Spec: nominatimv1alpha1.NominatimOperationSpec{
-				Type:         nominatimv1alpha1.NominatimOperationUpdate,
-				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
+				Type:                 nominatimv1alpha1.NominatimOperationUpdate,
+				NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
 			},
 		}
 		ev := evaluateWritePlane(probe, []nominatimv1alpha1.NominatimOperation{racingWinner})

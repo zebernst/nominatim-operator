@@ -313,7 +313,7 @@ func hasPendingReimportDatabaseReset(ctx context.Context, c client.Client, nom *
 	}
 	for i := range list.Items {
 		op := &list.Items[i]
-		if op.Spec.NominatimRef.Name != nom.Name {
+		if op.Spec.NominatimInstanceRef.Name != nom.Name {
 			continue
 		}
 		if op.Spec.Type != nominatimv1alpha1.NominatimOperationReimport {

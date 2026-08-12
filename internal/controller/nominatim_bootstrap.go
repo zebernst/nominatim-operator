@@ -38,7 +38,7 @@ func BootstrapOperationName(nom *nominatimv1alpha1.NominatimInstance) string {
 }
 
 // listOperationsForParent lists NominatimOperations in the same namespace whose
-// nominatimRef targets nom.
+// nominatimInstanceRef targets nom.
 func (r *NominatimInstanceReconciler) listOperationsForParent(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) ([]nominatimv1alpha1.NominatimOperation, error) {
 	list := &nominatimv1alpha1.NominatimOperationList{}
 	if err := r.List(ctx, list, client.InNamespace(nom.Namespace)); err != nil {
@@ -46,7 +46,7 @@ func (r *NominatimInstanceReconciler) listOperationsForParent(ctx context.Contex
 	}
 	out := make([]nominatimv1alpha1.NominatimOperation, 0, len(list.Items))
 	for _, op := range list.Items {
-		if op.Spec.NominatimRef.Name == nom.Name {
+		if op.Spec.NominatimInstanceRef.Name == nom.Name {
 			out = append(out, op)
 		}
 	}
@@ -82,9 +82,9 @@ func (r *NominatimInstanceReconciler) ensureBootstrapOperation(ctx context.Conte
 			Namespace: nom.Namespace,
 		},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
-			Regions:      append([]string(nil), nom.Spec.Regions...),
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Regions:              append([]string(nil), nom.Spec.Regions...),
 		},
 	}
 	if err := controllerutil.SetControllerReference(nom, op, r.Scheme); err != nil {

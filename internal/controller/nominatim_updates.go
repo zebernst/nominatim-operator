@@ -73,8 +73,8 @@ func (r *NominatimInstanceReconciler) reconcileUpdates(ctx context.Context, nom 
 	probe := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "__schedule-probe__", Namespace: nom.Namespace},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationUpdate,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 	}
 	if ev := evaluateWritePlane(probe, ops); ev.ScheduleBusy() {
@@ -105,9 +105,9 @@ func (r *NominatimInstanceReconciler) reconcileUpdates(ctx context.Context, nom 
 			Namespace: nom.Namespace,
 		},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationUpdate,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
-			Regions:      regions,
+			Type:                 nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Regions:              regions,
 		},
 	}
 	if err := controllerutil.SetControllerReference(nom, op, r.Scheme); err != nil {

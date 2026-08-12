@@ -85,11 +85,11 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	parent := &nominatimv1alpha1.NominatimInstance{}
-	parentKey := types.NamespacedName{Name: op.Spec.NominatimRef.Name, Namespace: op.Namespace}
+	parentKey := types.NamespacedName{Name: op.Spec.NominatimInstanceRef.Name, Namespace: op.Namespace}
 	if err := r.Get(ctx, parentKey, parent); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, r.failOperation(ctx, op, reasonParentNotFound,
-				fmt.Sprintf("NominatimInstance %q not found in namespace %q", op.Spec.NominatimRef.Name, op.Namespace))
+				fmt.Sprintf("NominatimInstance %q not found in namespace %q", op.Spec.NominatimInstanceRef.Name, op.Namespace))
 		}
 		return ctrl.Result{}, err
 	}
@@ -243,9 +243,9 @@ func (r *NominatimOperationReconciler) reconcileOperationDelete(ctx context.Cont
 		return ctrl.Result{}, err
 	}
 
-	if op.Spec.NominatimRef.Name != "" {
+	if op.Spec.NominatimInstanceRef.Name != "" {
 		parent := &nominatimv1alpha1.NominatimInstance{}
-		key := types.NamespacedName{Name: op.Spec.NominatimRef.Name, Namespace: op.Namespace}
+		key := types.NamespacedName{Name: op.Spec.NominatimInstanceRef.Name, Namespace: op.Namespace}
 		if err := r.Get(ctx, key, parent); err != nil {
 			if !apierrors.IsNotFound(err) {
 				return ctrl.Result{}, err

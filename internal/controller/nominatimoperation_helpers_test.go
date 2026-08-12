@@ -64,32 +64,32 @@ func TestEvaluateWritePlaneScheduleBusyFromHelpers(t *testing.T) {
 	bootstrap := nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "bootstrap-1", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseRunning},
 	}
 	update := nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "update-1", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationUpdate,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
+			Type:                 nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhasePending},
 	}
 	otherNom := nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "other-nom"},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "other-nom"},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseRunning},
 	}
 	done := nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "done", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}
@@ -98,8 +98,8 @@ func TestEvaluateWritePlaneScheduleBusyFromHelpers(t *testing.T) {
 	ev := evaluateWritePlane(&nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "bootstrap-2", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationReimport,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
+			Type:                 nominatimv1alpha1.NominatimOperationReimport,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
 		},
 	}, []nominatimv1alpha1.NominatimOperation{bootstrap, otherNom, done})
 	g.Expect(ev.ScheduleBusy()).To(BeTrue())
@@ -222,9 +222,9 @@ func TestBuildOperationJob(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-1", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
-			Regions:      []string{"europe/monaco"},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
+			Regions:              []string{"europe/monaco"},
 		},
 	}
 	parent := &nominatimv1alpha1.NominatimInstance{
@@ -264,9 +264,9 @@ func TestBuildOperationJob_AuxDataEnv(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-1", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
-			Regions:      []string{"europe/monaco"},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
+			Regions:              []string{"europe/monaco"},
 		},
 	}
 	parent := &nominatimv1alpha1.NominatimInstance{
@@ -292,9 +292,9 @@ func TestBuildOperationJob_ReimportSetsConfirmEnv(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "reimport-1", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationReimport,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
-			Regions:      []string{"europe/monaco"},
+			Type:                 nominatimv1alpha1.NominatimOperationReimport,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
+			Regions:              []string{"europe/monaco"},
 		},
 	}
 	parent := &nominatimv1alpha1.NominatimInstance{
@@ -319,9 +319,9 @@ func TestBuildOperationJob_IncludesDBEnvAndPBFURLForBootstrap(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-1", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
-			Regions:      []string{"europe/monaco", "africa/morocco"},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
+			Regions:              []string{"europe/monaco", "africa/morocco"},
 		},
 	}
 	parent := &nominatimv1alpha1.NominatimInstance{
@@ -369,9 +369,9 @@ func TestBuildOperationJob_NoPBFURLForNonImportOperation(t *testing.T) {
 		op := &nominatimv1alpha1.NominatimOperation{
 			ObjectMeta: metav1.ObjectMeta{Name: "op-" + string(typ), Namespace: "ns"},
 			Spec: nominatimv1alpha1.NominatimOperationSpec{
-				Type:         typ,
-				NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
-				Regions:      []string{"europe/monaco"},
+				Type:                 typ,
+				NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
+				Regions:              []string{"europe/monaco"},
 			},
 		}
 		parent := &nominatimv1alpha1.NominatimInstance{
@@ -393,8 +393,8 @@ func TestBuildOperationJob_NoDBEnvWhenConnectionSecretNameEmpty(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-nosecret", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
 		},
 	}
 	parent := &nominatimv1alpha1.NominatimInstance{
@@ -460,8 +460,8 @@ func TestBootstrapComplete(t *testing.T) {
 	// Empty status, Succeeded Bootstrap peer targeting this NominatimInstance → complete.
 	succeededBootstrap := nominatimv1alpha1.NominatimOperation{
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}
@@ -474,7 +474,7 @@ func TestBootstrapComplete(t *testing.T) {
 
 	// Succeeded Bootstrap peer targeting a different NominatimInstance → still incomplete.
 	otherBootstrap := succeededBootstrap
-	otherBootstrap.Spec.NominatimRef.Name = "other-nom"
+	otherBootstrap.Spec.NominatimInstanceRef.Name = "other-nom"
 	g.Expect(bootstrapComplete(parentEmpty, []nominatimv1alpha1.NominatimOperation{otherBootstrap})).To(BeFalse())
 
 	// Succeeded non-Bootstrap peer → still incomplete.

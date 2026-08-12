@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/part-of: nominatim-validation
 spec:
   type: Reimport
-  nominatimRef:
+  nominatimInstanceRef:
     name: monaco
   # Keep aligned with the parent Spec so Reimport does not leave Andorra as drift
   # and spawn an AddRegions Operation mid-suite.

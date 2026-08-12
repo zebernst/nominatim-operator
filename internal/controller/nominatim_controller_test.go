@@ -286,12 +286,12 @@ var _ = Describe("NominatimInstance Controller", func() {
 	})
 
 	Context("Operation watch mapping", func() {
-		It("maps NominatimOperation nominatimRef to parent reconcile request", func() {
+		It("maps NominatimOperation nominatimInstanceRef to parent reconcile request", func() {
 			op := &nominatimv1alpha1.NominatimOperation{
 				ObjectMeta: metav1.ObjectMeta{Name: "op1", Namespace: "default"},
 				Spec: nominatimv1alpha1.NominatimOperationSpec{
-					Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-					NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "parent-nom"},
+					Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+					NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "parent-nom"},
 				},
 			}
 			reqs := mapOperationToNominatimInstance(ctx, op)
@@ -300,7 +300,7 @@ var _ = Describe("NominatimInstance Controller", func() {
 			Expect(reqs[0].Namespace).To(Equal("default"))
 		})
 
-		It("ignores operations without nominatimRef", func() {
+		It("ignores operations without nominatimInstanceRef", func() {
 			Expect(mapOperationToNominatimInstance(ctx, &corev1.Pod{})).To(BeEmpty())
 			Expect(mapOperationToNominatimInstance(ctx, &nominatimv1alpha1.NominatimOperation{})).To(BeEmpty())
 		})
