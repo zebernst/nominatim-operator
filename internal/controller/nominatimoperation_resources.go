@@ -50,15 +50,17 @@ const (
 )
 
 // isOperationTypeImplemented reports whether the worker entrypoint can run this type.
-// Refresh/Migrate/Freeze remain in the CRD enum for forward compatibility but must fail
-// fast in the controller (no staging PVC / Job) until their scripts exist.
+// All CRD enum values except unknown/future strings are implemented.
 func isOperationTypeImplemented(t nominatimv1alpha1.NominatimOperationType) bool {
 	switch t {
 	case nominatimv1alpha1.NominatimOperationBootstrap,
 		nominatimv1alpha1.NominatimOperationAddRegions,
 		nominatimv1alpha1.NominatimOperationReimport,
 		nominatimv1alpha1.NominatimOperationUpdate,
-		nominatimv1alpha1.NominatimOperationCatchUp:
+		nominatimv1alpha1.NominatimOperationCatchUp,
+		nominatimv1alpha1.NominatimOperationRefresh,
+		nominatimv1alpha1.NominatimOperationMigrate,
+		nominatimv1alpha1.NominatimOperationFreeze:
 		return true
 	default:
 		return false
@@ -67,18 +69,35 @@ func isOperationTypeImplemented(t nominatimv1alpha1.NominatimOperationType) bool
 
 // Mutex policy for NominatimOperations targeting the same Nominatim:
 //
-// At most one write-heavy Operation (Bootstrap, AddRegions, Reimport) may be
-// Pending or Running per Nominatim. If another write-heavy Operation is already
-// active, a new Operation is set to Failed with reason Conflict (no Job created).
+// At most one write-heavy Operation (Bootstrap, AddRegions, Reimport, Migrate,
+// Freeze) may be Pending or Running per Nominatim. If another write-heavy
+// Operation is already active, a new Operation is set to Failed with reason
+// Conflict (no Job created).
 //
 // Update and CatchUp use the same Conflict policy when a write-heavy Operation
 // is active (and vice versa): they may not run alongside write-heavy work.
 // Two Update/CatchUp Operations may run concurrently when no write-heavy peer
-// is active.
+// is active. Migrate/Freeze are write-heavy so Update cannot run beside them
+// (upstream: stop updates before migrate; freeze removes update capability).
 func isWriteHeavyOperation(t nominatimv1alpha1.NominatimOperationType) bool {
 	switch t {
 	case nominatimv1alpha1.NominatimOperationBootstrap,
 		nominatimv1alpha1.NominatimOperationAddRegions,
+		nominatimv1alpha1.NominatimOperationReimport,
+		nominatimv1alpha1.NominatimOperationMigrate,
+		nominatimv1alpha1.NominatimOperationFreeze:
+		return true
+	default:
+		return false
+	}
+}
+
+// requiresImportPBFURL is true for Operations that run nominatim import with
+// Geofabrik extracts (Bootstrap/Reimport). Migrate/Freeze/AddRegions are
+// write-heavy for the mutex but do not download PBFs via PBF_URL.
+func requiresImportPBFURL(t nominatimv1alpha1.NominatimOperationType) bool {
+	switch t {
+	case nominatimv1alpha1.NominatimOperationBootstrap,
 		nominatimv1alpha1.NominatimOperationReimport:
 		return true
 	default:
@@ -304,7 +323,7 @@ func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominat
 	regions := effectiveRegions(op, parent)
 	if len(regions) > 0 {
 		env = append(env, corev1.EnvVar{Name: "NOMINATIM_REGIONS", Value: strings.Join(regions, ",")})
-		if isWriteHeavyOperation(op.Spec.Type) {
+		if requiresImportPBFURL(op.Spec.Type) {
 			// PBF_URL is regions[0] for back-compat / first extract URL. The worker
 			// downloads every NOMINATIM_REGIONS path and passes multiple --osm-file
 			// flags to nominatim import (not add-data — that path is AddRegions only).

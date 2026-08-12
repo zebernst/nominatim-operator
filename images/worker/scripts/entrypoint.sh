@@ -16,6 +16,9 @@ OPERATION_TYPE (env or first arg):
   Reimport    Full re-import (expects empty/ready DB; then Bootstrap)
   Update      Incremental Geofabrik diffs for imported regions
   CatchUp     Update loop until no further diffs (or max rounds)
+  Refresh     Recompute postcodes / word-counts / functions / importance
+  Migrate     Schema upgrade via nominatim admin --migrate (after image bump)
+  Freeze      Drop dynamic-update tables (serve-only; no further OSM updates)
 
 Extra args after OPERATION_TYPE are passed through to the phase script.
 Without OPERATION_TYPE, remaining args are executed as a raw command
@@ -26,7 +29,7 @@ EOF
 op="${OPERATION_TYPE:-}"
 if [ -z "${op}" ] && [ "${#}" -gt 0 ]; then
   case "$1" in
-    Bootstrap | AddRegions | Reimport | Update | CatchUp | -h | --help)
+    Bootstrap | AddRegions | Reimport | Update | CatchUp | Refresh | Migrate | Freeze | -h | --help)
       op="$1"
       shift
       ;;
@@ -60,7 +63,16 @@ case "${op}" in
   CatchUp)
     exec "${SCRIPTS_DIR}/catch-up.sh" "$@"
     ;;
+  Refresh)
+    exec "${SCRIPTS_DIR}/refresh.sh" "$@"
+    ;;
+  Migrate)
+    exec "${SCRIPTS_DIR}/migrate.sh" "$@"
+    ;;
+  Freeze)
+    exec "${SCRIPTS_DIR}/freeze.sh" "$@"
+    ;;
   *)
-    die "Unknown OPERATION_TYPE='${op}' (expected Bootstrap|AddRegions|Reimport|Update|CatchUp)"
+    die "Unknown OPERATION_TYPE='${op}' (expected Bootstrap|AddRegions|Reimport|Update|CatchUp|Refresh|Migrate|Freeze)"
     ;;
 esac

@@ -652,7 +652,7 @@ spec:
                     default: WriteHeavy
                     description: |-
                       PauseBackupsDuringOperations controls continuous backup pausing around operations.
-                      Default WriteHeavy pauses Bootstrap/AddRegions/Reimport but not routine Update.
+                      Default WriteHeavy pauses Bootstrap/AddRegions/Reimport/Migrate/Freeze but not routine Update.
                     enum:
                     - Never
                     - BootstrapReimport

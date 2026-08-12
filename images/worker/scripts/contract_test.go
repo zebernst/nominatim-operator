@@ -89,6 +89,84 @@ func TestWaitForPostgresDefaultIsShortened(t *testing.T) {
 	}
 }
 
+// TestMigrateAndFreezeScriptContracts asserts Migrate/Freeze worker scripts match
+// upstream Nominatim 4.5 admin docs (nominatim-5et.13 / 5et.18):
+//
+//	Migrate → nominatim admin --migrate (after image bump; stop updates first)
+//	Freeze  → nominatim freeze (drop dynamic-update tables; no further OSM updates)
+func TestMigrateAndFreezeScriptContracts(t *testing.T) {
+	migrate, err := os.ReadFile("migrate.sh")
+	if err != nil {
+		t.Fatalf("reading migrate.sh: %v", err)
+	}
+	ms := string(migrate)
+	if !strings.Contains(ms, "require_bootstrap_ready") {
+		t.Error("migrate.sh must call require_bootstrap_ready")
+	}
+	if !strings.Contains(ms, "run_nominatim admin --migrate") {
+		t.Error("migrate.sh must invoke run_nominatim admin --migrate")
+	}
+
+	freeze, err := os.ReadFile("freeze.sh")
+	if err != nil {
+		t.Fatalf("reading freeze.sh: %v", err)
+	}
+	fs := string(freeze)
+	if !strings.Contains(fs, "require_bootstrap_ready") {
+		t.Error("freeze.sh must call require_bootstrap_ready")
+	}
+	if !strings.Contains(fs, "run_nominatim freeze") {
+		t.Error("freeze.sh must invoke run_nominatim freeze")
+	}
+
+	entrypoint, err := os.ReadFile("entrypoint.sh")
+	if err != nil {
+		t.Fatalf("reading entrypoint.sh: %v", err)
+	}
+	ep := string(entrypoint)
+	for _, needle := range []string{"Migrate", "migrate.sh", "Freeze", "freeze.sh"} {
+		if !strings.Contains(ep, needle) {
+			t.Errorf("entrypoint.sh must dispatch Migrate/Freeze (missing %q)", needle)
+		}
+	}
+}
+
+// TestRefreshScriptContract asserts Refresh runs nominatim refresh admin tasks
+// after bootstrap readiness (nominatim-5et.12), not on the API boot path.
+func TestRefreshScriptContract(t *testing.T) {
+	refresh, err := os.ReadFile("refresh.sh")
+	if err != nil {
+		t.Fatalf("reading refresh.sh: %v", err)
+	}
+	script := string(refresh)
+	if !strings.Contains(script, "require_bootstrap_ready") {
+		t.Error("refresh.sh must call require_bootstrap_ready")
+	}
+	if !strings.Contains(script, "run_nominatim refresh") {
+		t.Error("refresh.sh must invoke run_nominatim refresh")
+	}
+	for _, flag := range []string{"--postcodes", "--word-counts", "--functions", "--importance"} {
+		if !strings.Contains(script, flag) {
+			t.Errorf("refresh.sh default task set must include %s", flag)
+		}
+	}
+	if !strings.Contains(script, "NOMINATIM_REFRESH_TASKS") {
+		t.Error("refresh.sh must honor NOMINATIM_REFRESH_TASKS override")
+	}
+
+	entrypoint, err := os.ReadFile("entrypoint.sh")
+	if err != nil {
+		t.Fatalf("reading entrypoint.sh: %v", err)
+	}
+	ep := string(entrypoint)
+	if !strings.Contains(ep, "Refresh") {
+		t.Error("entrypoint.sh must dispatch Refresh")
+	}
+	if !strings.Contains(ep, "refresh.sh") {
+		t.Error("entrypoint.sh must exec refresh.sh for Refresh")
+	}
+}
+
 // TestReportSequenceScriptIsProbeOnly asserts sequence reporting is a dedicated
 // script for the operator probe Job, not wired into Update/Bootstrap (5et.35.3).
 func TestReportSequenceScriptIsProbeOnly(t *testing.T) {
