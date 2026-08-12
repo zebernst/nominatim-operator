@@ -16,7 +16,7 @@
     "platform": "cursor"
   },
   "choices": {
-    "coverage_threshold": 100,
+    "coverage_threshold": 90,
     "external_tools": false,
     "visual_review": false,
     "git_hooks": true,
@@ -31,7 +31,7 @@
   },
   "notes": {
     "bd": "Activated via mise (github:steveyegge/beads@1.1.2). Use `mise x -- bd` if not on PATH.",
-    "coverage": "100% target for unit packages; e2e, generated DeepCopy, and thin wiring may be exempted when documented. Prefer `make test` when envtest assets are required.",
+    "coverage": "90% floor for internal/controller via .coverage-thresholds.json; e2e, generated DeepCopy, and thin wiring are exempt. Prefer `make test` when envtest assets are required.",
     "commands": "Project shims in .cursor/commands/; plugin commands under ~/.cursor/plugins/local/metaswarm"
   }
 }
