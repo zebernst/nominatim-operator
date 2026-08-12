@@ -61,3 +61,4 @@ cover.out
 .beads/metrics/
 .beads/agents/
 .beads/interactions.jsonl
+.worktrees/
