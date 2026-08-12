@@ -142,10 +142,11 @@ bd prime                # Refresh Beads context
 ## Build & Test
 
 - Test command: `make test`
-- Coverage command: `go test $(go list ./... | grep -v /e2e) -coverprofile=coverage.out` (or `make test`, which writes `cover.out`)
+- Coverage command: `go test $(go list ./... | grep -v /e2e) -coverprofile=build/cover.out` (or `make test`, which writes `build/cover.out`)
 - Lint command: `make lint`
 - Format command: `make fmt`
 - Type check: `make vet`
+- Clean artifacts: `make clean` (removes `build/`)
 
 ## Architecture Overview
 
@@ -183,7 +184,8 @@ On Cursor, prefer plugin commands (`metaswarm-start-task`, …) or `.cursor/comm
 | `$create-issue` | Create a well-structured GitHub Issue |
 | `$plan-review-gate` | Adversarial plan review |
 
-Project shims live in `.cursor/commands/` (ignored by git). Do not use `.claude/commands/` or `CLAUDE.md` for this project — `AGENTS.md` is the single agent instruction file.
+Project shims live in `.cursor/commands/` (ignored by git). Do not add `CLAUDE.md` for this project — `AGENTS.md` is the single agent instruction file.
+Domain vocabulary: [`docs/CONTEXT.md`](docs/CONTEXT.md).
 
 ### Quality Gates
 

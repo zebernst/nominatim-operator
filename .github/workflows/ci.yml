@@ -60,7 +60,7 @@ jobs:
         run: make test
 
       - name: Coverage gate
-        run: ./hack/check-coverage.sh cover.out
+        run: ./hack/check-coverage.sh build/cover.out
 
   worker-shell:
     name: Worker shell

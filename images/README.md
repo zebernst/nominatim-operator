@@ -4,10 +4,10 @@ Own images for Nominatim on Kubernetes — **not** based on `mediagis/nominatim`
 
 | Image | Dockerfile | Registry | Plane |
 |-------|------------|----------|-------|
-| Operator (kubebuilder manager) | `operator.Dockerfile` | `ghcr.io/zebernst/nominatim-operator` | Control |
-| API (gunicorn + nominatim-api) | `api.Dockerfile` | `ghcr.io/zebernst/nominatim-api` | Serving |
-| Worker (nominatim CLI + Operation phases) | `worker.Dockerfile` | `ghcr.io/zebernst/nominatim-worker` | Data / write |
-| UI (static nominatim-ui) | `ui.Dockerfile` | `ghcr.io/zebernst/nominatim-ui` | Serving |
+| Operator (kubebuilder manager) | `images/operator/Dockerfile` | `ghcr.io/zebernst/nominatim-operator` | Control |
+| API (gunicorn + nominatim-api) | `images/api/Dockerfile` | `ghcr.io/zebernst/nominatim-api` | Serving |
+| Worker (nominatim CLI + Operation phases) | `images/worker/Dockerfile` | `ghcr.io/zebernst/nominatim-worker` | Data / write |
+| UI (static nominatim-ui) | `images/ui/Dockerfile` | `ghcr.io/zebernst/nominatim-ui` | Serving |
 
 Root operator architecture (planes, status SoT, replica/volume notes): see the repository [README](../README.md).
 
@@ -36,24 +36,24 @@ API and worker use **Ubuntu 24.04** and install Nominatim from **PyPI** (`nomina
 Override version at build time:
 
 ```bash
-docker build -f api.Dockerfile --build-arg NOMINATIM_VERSION=5.3.2 -t ghcr.io/zebernst/nominatim-api:dev .
-docker build -f ui.Dockerfile --build-arg NOMINATIM_UI_VERSION=3.12.0 -t ghcr.io/zebernst/nominatim-ui:dev .
+docker build -f images/api/Dockerfile --build-arg NOMINATIM_VERSION=5.3.2 -t ghcr.io/zebernst/nominatim-api:dev .
+docker build -f images/ui/Dockerfile --build-arg NOMINATIM_UI_VERSION=3.12.0 -t ghcr.io/zebernst/nominatim-ui:dev .
 ```
 
 ## Local builds
 
 ```bash
 # Operator
-docker build -t ghcr.io/zebernst/nominatim-operator:dev -f operator.Dockerfile .
+docker build -t ghcr.io/zebernst/nominatim-operator:dev -f images/operator/Dockerfile .
 
 # API
-docker build -t ghcr.io/zebernst/nominatim-api:dev -f api.Dockerfile .
+docker build -t ghcr.io/zebernst/nominatim-api:dev -f images/api/Dockerfile .
 
 # Worker
-docker build -t ghcr.io/zebernst/nominatim-worker:dev -f worker.Dockerfile .
+docker build -t ghcr.io/zebernst/nominatim-worker:dev -f images/worker/Dockerfile .
 
 # UI (packages https://github.com/osm-search/nominatim-ui/releases into nginx)
-docker build -t ghcr.io/zebernst/nominatim-ui:dev -f ui.Dockerfile .
+docker build -t ghcr.io/zebernst/nominatim-ui:dev -f images/ui/Dockerfile .
 # or: make docker-build-ui
 ```
 

@@ -1,5 +1,6 @@
 # More info: https://docs.docker.com/engine/reference/builder/#dockerignore-file
 # Ignore build and test binaries.
+build/
 bin/
 .git/
 .beads/
@@ -10,6 +11,7 @@ cover.out
 coverage.out
 testbin/
 dist/
+.worktrees/
 # Tests are never production assets — keep them out of every image build context.
 **/*_test.go
 **/*.bats
