@@ -166,10 +166,9 @@ var _ = Describe("owned CNPG objects against the vendored CNPG schema", func() {
 	It("resumes backups through the CNPG Cluster it just created", func() {
 		nom := persistNominatim(ownedClusterNominatim("envtest-resume", 1))
 		effects := &recordingCNPGEffects{}
-		reconciler.CNPGEffects = effects
 
 		Expect(reconciler.reconcileDatabase(ctx, nom)).To(Succeed())
-		Expect(reconciler.SetBackupPaused(ctx, nom, false)).To(Succeed())
+		Expect(setBackupPaused(ctx, k8sClient, effects, nom, false)).To(Succeed())
 
 		Expect(effects.resumeCalls).To(Equal(1))
 		Expect(effects.lastCluster).To(Equal(OwnedCNPGClusterName(nom)))
