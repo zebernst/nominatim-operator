@@ -26,6 +26,60 @@
 * **ci:** enforce `internal/controller` coverage against `.coverage-thresholds.json` (90% floor).
 * **test:** bats/shellcheck for worker helpers; envtest manager watch smoke; import e2e for multi-region Bootstrap and Rebuild API scale-down.
 
+## [1.0.0](https://github.com/zebernst/nominatim-operator/compare/0.1.1...1.0.0) (2026-08-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* the v1alpha1 kind "Nominatim" is now "NominatimInstance" and the CRD is nominatiminstances.nominatim.zebernst.dev. Existing manifests must update `kind:` and any RBAC referencing the `nominatims` resource; the singular name is now `nominatiminstance` (shortName `nom` is unchanged).
+
+### api
+
+* rename Nominatim kind to NominatimInstance ([#43](https://github.com/zebernst/nominatim-operator/issues/43)) ([368807f](https://github.com/zebernst/nominatim-operator/commit/368807f58a7f76fc6cc990a4e0cbe11e2eea8f13))
+
+
+### Features
+
+* **api:** default /status probes and typed runtime knobs ([#35](https://github.com/zebernst/nominatim-operator/issues/35)) ([d90c2f2](https://github.com/zebernst/nominatim-operator/commit/d90c2f2ce74b7ea9ffbb29435d738c9ba6dfc0f6))
+* **images:** package upstream nominatim-ui releases (5et.17) ([#45](https://github.com/zebernst/nominatim-operator/issues/45)) ([a214dbf](https://github.com/zebernst/nominatim-operator/commit/a214dbf9d36c40c660929199bd710facfddcda9a))
+* kind Monaco validation with declarative CNPG bootstrap ([bbf1544](https://github.com/zebernst/nominatim-operator/commit/bbf15442bd3c6f960b92a5eb127b78d58d8fbce3))
+* kind Monaco validation with declarative CNPG bootstrap ([f985d16](https://github.com/zebernst/nominatim-operator/commit/f985d16b10fda4db00a053fe4c7e99e33a28df15))
+* **operation:** implement Refresh NominatimOperation (5et.12) ([#36](https://github.com/zebernst/nominatim-operator/issues/36)) ([ae6398e](https://github.com/zebernst/nominatim-operator/commit/ae6398efc982dd2d509fe61db4a2d06005dc2100))
+* podSpec overlays and CNPG instance-tune surface ([#17](https://github.com/zebernst/nominatim-operator/issues/17)) ([c98b0c9](https://github.com/zebernst/nominatim-operator/commit/c98b0c9f16c5e3d607e1fa0c6c4425bedc1f379e))
+* **status:** operator-owned sequenceState probe ([#33](https://github.com/zebernst/nominatim-operator/issues/33)) ([7e414ef](https://github.com/zebernst/nominatim-operator/commit/7e414ef2fce1ba3f53d4ef06fc5e13c1948fc08f))
+* typed Nominatim config surface (spec.nominatim) ([#19](https://github.com/zebernst/nominatim-operator/issues/19)) ([f6aecd2](https://github.com/zebernst/nominatim-operator/commit/f6aecd23cb7893e5d7ac354b40b12ffccde9236e))
+* **worker:** download optional aux datasets via spec.auxData ([#39](https://github.com/zebernst/nominatim-operator/issues/39)) ([290ff5c](https://github.com/zebernst/nominatim-operator/commit/290ff5cf0c44543a9b462faf4273dca26cdfeca1))
+
+
+### Bug Fixes
+
+* **ci:** resolve lint and status conflict failures on PR [#15](https://github.com/zebernst/nominatim-operator/issues/15) ([68f7059](https://github.com/zebernst/nominatim-operator/commit/68f7059a01ab6d9b4e956938de1790821e3b9d67))
+* **controller:** drop and recreate CNPG Database before Reimport ([e200125](https://github.com/zebernst/nominatim-operator/commit/e200125965e1d8b36539e1efb55ed5729aa3e5e3))
+* **controller:** harden Operation write-plane mutex with atomic claim ([c50a1f3](https://github.com/zebernst/nominatim-operator/commit/c50a1f368dcc4b358d368b2e64875f8ad66ca248))
+* **controller:** harden Operation write-plane mutex with atomic claim ([8bc0050](https://github.com/zebernst/nominatim-operator/commit/8bc0050b8cc9942b43bff36c884677f04f35ddb1))
+* **controller:** preserve HTTPRoute rules[].matches (5et.32) ([#44](https://github.com/zebernst/nominatim-operator/issues/44)) ([65528b0](https://github.com/zebernst/nominatim-operator/commit/65528b04ac501a2ccd6b7df5eea2a6de25dd92b8))
+* move AddRegions chunking and Job preconditions into the operator ([#22](https://github.com/zebernst/nominatim-operator/issues/22)) ([8905a1c](https://github.com/zebernst/nominatim-operator/commit/8905a1cda38608b59ca9307312cb61b210221070))
+* **worker:** multi-file Bootstrap import and reject unimplemented ops ([#18](https://github.com/zebernst/nominatim-operator/issues/18)) ([b2c51f7](https://github.com/zebernst/nominatim-operator/commit/b2c51f7ed2a29fcf71316ebbf56f0b5f4f0982c6))
+
+
+### Documentation
+
+* add domain glossary (CONTEXT.md) ([#41](https://github.com/zebernst/nominatim-operator/issues/41)) ([7b920f8](https://github.com/zebernst/nominatim-operator/commit/7b920f843109b5b26d67a18b49fcc9f4eb794fb9))
+* plane separation, volume constraints, and *.Dockerfile names ([#34](https://github.com/zebernst/nominatim-operator/issues/34)) ([705b31a](https://github.com/zebernst/nominatim-operator/commit/705b31ab6c396a6c901439ae3f912aa8f37a18f2))
+* rewrite operator docs for human readers ahead of v1 ([#48](https://github.com/zebernst/nominatim-operator/issues/48)) ([c2c99c5](https://github.com/zebernst/nominatim-operator/commit/c2c99c54d4b496ff6491a54d3f6f7381a8f26aa2))
+
+
+### Miscellaneous Chores
+
+* tidy repo root into build/, images/, and docs/ ([#47](https://github.com/zebernst/nominatim-operator/issues/47)) ([f0829a7](https://github.com/zebernst/nominatim-operator/commit/f0829a7199a40ad25dbc36d1dad7f4202334143e))
+
+
+### Code Refactoring
+
+* **api:** read-only serving plane without project/flatnode mounts ([#31](https://github.com/zebernst/nominatim-operator/issues/31)) ([c136176](https://github.com/zebernst/nominatim-operator/commit/c1361769cae225a8f0aada4bf370f3a56122e9cf))
+* deepen Nominatim architecture (nominatim-kfy) ([#40](https://github.com/zebernst/nominatim-operator/issues/40)) ([42eb89e](https://github.com/zebernst/nominatim-operator/commit/42eb89ec5c81bd823a3f5d78995eaa3c3f713d5c))
+* **status:** treat status.regions as Bootstrap-done source of truth ([#32](https://github.com/zebernst/nominatim-operator/issues/32)) ([000e669](https://github.com/zebernst/nominatim-operator/commit/000e66952c86945859a8ef2d80048525e238241c))
+
 ## [0.1.1](https://github.com/zebernst/nominatim-operator/compare/0.1.0...0.1.1) (2026-07-27)
 
 
