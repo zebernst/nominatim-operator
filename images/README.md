@@ -116,7 +116,19 @@ CI runs both in the **Worker shell** job. Stubs under `scripts/test/stubs/` fake
 
 ### Sequence state / update lag
 
-After a Succeeded Bootstrap / AddRegions / Reimport / Update / CatchUp Operation, the Nominatim reconciler creates a short-lived **sequence probe** Job (operator-owned) that mounts the project PVC read-only, runs `scripts/report-sequence.sh`, and merge-patches ConfigMap `{name}-sequence`. The reconciler copies `report.json` into `status.regions[].sequenceState` (`sequenceNumber@timestamp`). Worker Operation scripts do **not** talk to the Kubernetes API.
+After a Succeeded Bootstrap / AddRegions / Reimport / Update / CatchUp Operation, the Nominatim reconciler creates a short-lived **sequence probe** Job (operator-owned) that mounts the project PVC read-only, runs `scripts/report-sequence.sh`, and merge-patches ConfigMap `{name}-sequence`. The reconciler copies `report.json` into `status.regions[].sequenceState` (`sequenceNumber@timestamp`) and `aux-data.json` into `status.auxData` (Wikipedia importance / postcode file presence). Worker Operation scripts do **not** talk to the Kubernetes API.
+
+### Auxiliary data (Wikipedia importance, postcodes)
+
+`spec.auxData` toggles optional downloads from [nominatim.org/data](https://nominatim.org/data/) into the operation staging PVC during Bootstrap (and Refresh when enabled):
+
+| Field | Staging / project file | Upstream URL |
+|-------|------------------------|--------------|
+| `wikimediaImportance` | `wikimedia-importance.csv.gz` | `…/wikimedia-importance.csv.gz` |
+| `secondaryImportance` | `secondary_importance.sql.gz` | `…/wikimedia-secondary-importance.sql.gz` |
+| `usPostcodes` | `us_postcodes.csv.gz` | `…/us_postcodes.csv.gz` |
+
+The worker downloads into staging (resume-friendly), then **copies** files onto the project PVC so import and the sequence probe see durable files (not broken staging symlinks). `Refresh` appends `--wiki-data` / `--secondary-importance` when those files are present for post-import backfill.
 
 This is per-region **pyosmium / Geofabrik** cursor state — not Nominatim `NOMINATIM_REPLICATION_*` lag.
 

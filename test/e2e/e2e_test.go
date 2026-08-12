@@ -398,6 +398,40 @@ var _ = Describe("Manager", Ordered, func() {
 			}
 		})
 
+		// nominatim-5et.11: spec.auxData must land on Operation Jobs as NOMINATIM_AUX_* env.
+		It("wires spec.auxData onto Operation Job env", func() {
+			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-smoke-operation-refresh.yaml")
+			By("creating smoke-refresh to observe aux env wiring")
+			cmd := exec.Command("kubectl", "apply", "-f", fixture)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func() {
+				cmd := exec.Command("kubectl", "delete", "-f", fixture, "--ignore-not-found=true", "--wait=false")
+				_, _ = utils.Run(cmd)
+			})
+
+			expectOperationArmed(appNamespace, "smoke-refresh")
+
+			By("asserting NOMINATIM_AUX_* env on the Refresh Job")
+			Eventually(func(g Gomega) {
+				for _, tc := range []struct{ name, want string }{
+					{"NOMINATIM_AUX_US_POSTCODES", "true"},
+					{"NOMINATIM_AUX_SECONDARY_IMPORTANCE", "true"},
+					{"NOMINATIM_AUX_WIKIMEDIA_IMPORTANCE", "false"},
+				} {
+					cmd := exec.Command("kubectl", "get", "job", "smoke-refresh",
+						"-n", appNamespace,
+						"-o", fmt.Sprintf(
+							`jsonpath={.spec.template.spec.containers[0].env[?(@.name=="%s")].value}`,
+							tc.name,
+						))
+					out, err := utils.Run(cmd)
+					g.Expect(err).NotTo(HaveOccurred(), tc.name)
+					g.Expect(strings.TrimSpace(out)).To(Equal(tc.want), tc.name)
+				}
+			}, 2*time.Minute, time.Second).Should(Succeed())
+		})
+
 		// Mutex smoke: a second write-heavy Operation must terminal-Fail with Conflict once a
 		// peer has armed a Job (hardened write-plane claim; nominatim-5et.3 follow-up).
 		It("fails a second write-heavy Operation with Conflict while Migrate holds the write plane", func() {
@@ -522,6 +556,17 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(names).To(ContainElement("europe/monaco"))
 				g.Expect(names).To(ContainElement("europe/andorra"))
 			}, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("asserting status.auxData.usPostcodes after Bootstrap aux download + sequence probe")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "nominatim", nomName,
+					"-n", validationNamespace,
+					"-o", "jsonpath={.status.auxData.usPostcodes}")
+				out, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(strings.TrimSpace(out)).To(Equal("true"),
+					"Bootstrap with spec.auxData.usPostcodes should materialize us_postcodes.csv.gz and report status.auxData")
+			}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
 			waitForAPIServing(validationNamespace, nomName+"-api")
 

@@ -167,6 +167,50 @@ func TestRefreshScriptContract(t *testing.T) {
 	}
 }
 
+// TestAuxDataDownloadContract asserts common.sh downloads aux datasets when
+// NOMINATIM_AUX_* env vars are set and only symlinks present staging files.
+func TestAuxDataDownloadContract(t *testing.T) {
+	common, err := os.ReadFile("common.sh")
+	if err != nil {
+		t.Fatalf("reading common.sh: %v", err)
+	}
+	script := string(common)
+
+	for _, needle := range []string{
+		"ensure_aux_data_downloads",
+		"materialize_aux_file_to_project",
+		"NOMINATIM_AUX_WIKIMEDIA_IMPORTANCE",
+		"NOMINATIM_AUX_SECONDARY_IMPORTANCE",
+		"NOMINATIM_AUX_US_POSTCODES",
+		"https://nominatim.org/data",
+		"wikimedia-secondary-importance.sql.gz",
+	} {
+		if !strings.Contains(script, needle) {
+			t.Errorf("common.sh missing aux data contract %q", needle)
+		}
+	}
+	if strings.Contains(script, `link_staging_name "wikimedia-importance.csv.gz"`) {
+		t.Error("common.sh must not symlink aux files into project; materialize durable copies instead")
+	}
+
+	refresh, err := os.ReadFile("refresh.sh")
+	if err != nil {
+		t.Fatalf("reading refresh.sh: %v", err)
+	}
+	rs := string(refresh)
+	if !strings.Contains(rs, "--wiki-data") || !strings.Contains(rs, "--secondary-importance") {
+		t.Error("refresh.sh must backfill wiki/secondary importance when aux files are present")
+	}
+
+	report, err := os.ReadFile("report-sequence.sh")
+	if err != nil {
+		t.Fatalf("reading report-sequence.sh: %v", err)
+	}
+	if !strings.Contains(string(report), "aux-data.json") {
+		t.Error("report-sequence.sh must publish aux-data.json for status.auxData")
+	}
+}
+
 // TestReportSequenceScriptIsProbeOnly asserts sequence reporting is a dedicated
 // script for the operator probe Job, not wired into Update/Bootstrap (5et.35.3).
 func TestReportSequenceScriptIsProbeOnly(t *testing.T) {

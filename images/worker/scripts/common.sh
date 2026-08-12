@@ -8,6 +8,7 @@ IMPORT_FINISHED="${IMPORT_FINISHED:-${PROJECT_DIR}/import-finished}"
 IMPORTED_LIST="${IMPORTED_LIST:-${PROJECT_DIR}/imported-regions.txt}"
 ENV_DEFAULTS="${ENV_DEFAULTS:-/opt/nominatim/env.defaults}"
 DOWNURL="${NOMINATIM_DOWNURL:-https://download.geofabrik.de}"
+AUX_DATA_BASE_URL="${NOMINATIM_AUX_DATA_URL:-https://nominatim.org/data}"
 CURL_USER_AGENT="${USER_AGENT:-nominatim-worker}"
 THREADS="${THREADS:-$(nproc)}"
 # Ubuntu packages pyosmium helpers under /usr/lib/python3-pyosmium (on PATH in the image).
@@ -19,7 +20,8 @@ log() { echo "[nominatim-worker] $*" >&2; }
 die() { echo "[nominatim-worker] ERROR: $*" >&2; exit 1; }
 
 truthy() {
-  case "${1,,}" in
+  # Portable lowercase (macOS /bin/bash 3.2 lacks ${var,,}; worker image is bash 5).
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
     true | 1 | yes | on) return 0 ;;
     *) return 1 ;;
   esac
@@ -63,12 +65,65 @@ link_staging_name() {
   ln -sfn "${target}" "${link}"
 }
 
+download_aux_file() {
+  local staging_name="$1"
+  local url="$2"
+  local target="${STAGING_DIR}/${staging_name}"
+
+  if [ -f "${target}" ] && [ -s "${target}" ]; then
+    log "Using existing aux file: ${staging_name}"
+    return 0
+  fi
+  log "Downloading aux data ${staging_name} from ${url}"
+  curl -L -A "${CURL_USER_AGENT}" --fail-with-body -C - --create-dirs \
+    --connect-timeout 30 --max-time 7200 \
+    -o "${target}" "${url}"
+}
+
+# Copy a staged aux file onto the project PVC as a regular file (not a symlink to
+# staging). Nominatim import reads from PROJECT_DIR; the sequence probe mounts only
+# the project volume, so status.auxData requires durable project copies.
+materialize_aux_file_to_project() {
+  local name="$1"
+  local src="${STAGING_DIR}/${name}"
+  local dst="${PROJECT_DIR}/${name}"
+
+  if [ ! -f "${src}" ] || [ ! -s "${src}" ]; then
+    return 0
+  fi
+  mkdir -p "${PROJECT_DIR}"
+  if [ -L "${dst}" ] || [ ! -f "${dst}" ] || [ ! -s "${dst}" ]; then
+    log "Materializing aux file into project: ${name}"
+    rm -f "${dst}"
+    cp -f "${src}" "${dst}"
+  fi
+}
+
+# ensure_aux_data_downloads fetches enabled auxiliary datasets into IMPORT_STAGING
+# (resume-friendly), then materializes them onto PROJECT_DIR. Operator sets
+# NOMINATIM_AUX_* from spec.auxData; unset/false skips download.
+ensure_aux_data_downloads() {
+  mkdir -p "${STAGING_DIR}" "${PROJECT_DIR}"
+  if truthy "${NOMINATIM_AUX_WIKIMEDIA_IMPORTANCE:-false}"; then
+    download_aux_file "wikimedia-importance.csv.gz" \
+      "${AUX_DATA_BASE_URL}/wikimedia-importance.csv.gz"
+    materialize_aux_file_to_project "wikimedia-importance.csv.gz"
+  fi
+  if truthy "${NOMINATIM_AUX_SECONDARY_IMPORTANCE:-false}"; then
+    download_aux_file "secondary_importance.sql.gz" \
+      "${AUX_DATA_BASE_URL}/wikimedia-secondary-importance.sql.gz"
+    materialize_aux_file_to_project "secondary_importance.sql.gz"
+  fi
+  if truthy "${NOMINATIM_AUX_US_POSTCODES:-false}"; then
+    download_aux_file "us_postcodes.csv.gz" \
+      "${AUX_DATA_BASE_URL}/us_postcodes.csv.gz"
+    materialize_aux_file_to_project "us_postcodes.csv.gz"
+  fi
+}
+
 link_staging() {
   mkdir -p "${STAGING_DIR}" "${PROJECT_DIR}"
   link_staging_name "data.osm.pbf"
-  link_staging_name "wikimedia-importance.csv.gz"
-  link_staging_name "us_postcodes.csv.gz"
-  link_staging_name "secondary_importance.sql.gz"
 }
 
 seed_project_env() {
@@ -438,6 +493,7 @@ require_bootstrap_ready() {
 prepare_worker() {
   require_db_env
   mkdir -p "${STAGING_DIR}" "${PROJECT_DIR}" "${PROJECT_DIR}/update"
+  ensure_aux_data_downloads
   link_staging
   seed_project_env
   wait_for_postgres

@@ -37,6 +37,27 @@ print(json.dumps(out, separators=(",", ":"), sort_keys=True))
 PY
 )"
 
+aux_report="$(
+  PROJECT_DIR="${PROJECT_DIR}" python3 - <<'PY'
+import json, os, pathlib
+
+project = pathlib.Path(os.environ["PROJECT_DIR"])
+
+def present(name: str) -> bool:
+    path = project / name
+    try:
+        return path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+print(json.dumps({
+    "wikimediaImportance": present("wikimedia-importance.csv.gz"),
+    "secondaryImportance": present("secondary_importance.sql.gz"),
+    "usPostcodes": present("us_postcodes.csv.gz"),
+}, separators=(",", ":"), sort_keys=True))
+PY
+)"
+
 # Always print for Job logs / debugging.
 printf '%s\n' "${report}"
 
@@ -55,9 +76,12 @@ fi
 ns="$(cat "${ns_file}")"
 token="$(cat "${token_file}")"
 cm_name="${nom_name}-sequence"
-body="$(REPORT_JSON="${report}" python3 - <<'PY'
+body="$(REPORT_JSON="${report}" AUX_JSON="${aux_report}" python3 - <<'PY'
 import json, os
-print(json.dumps({"data": {"report.json": os.environ["REPORT_JSON"]}}))
+print(json.dumps({"data": {
+    "report.json": os.environ["REPORT_JSON"],
+    "aux-data.json": os.environ["AUX_JSON"],
+}}))
 PY
 )"
 

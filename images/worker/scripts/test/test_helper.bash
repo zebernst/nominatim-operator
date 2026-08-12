@@ -21,6 +21,9 @@ setup() {
   unset NOMINATIM_REPLICATION_URL || true
   unset IMPORT_STYLE || true
   unset NOMINATIM_DATABASE_WEBUSER || true
+  unset NOMINATIM_AUX_WIKIMEDIA_IMPORTANCE || true
+  unset NOMINATIM_AUX_SECONDARY_IMPORTANCE || true
+  unset NOMINATIM_AUX_US_POSTCODES || true
 
   mkdir -p "${PROJECT_DIR}" "${IMPORT_STAGING}"
   chmod +x "${BATS_TEST_DIRNAME}/stubs/"*

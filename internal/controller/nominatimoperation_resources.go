@@ -350,6 +350,7 @@ func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominat
 		env = append(env, dbEnvVars(parent.Status.Database.ConnectionSecretName)...)
 	}
 	env = append(env, effectiveNominatimConfigEnv(parent)...)
+	env = append(env, effectiveAuxDataEnv(parent)...)
 
 	if parent.Spec.Flatnode != nil {
 		flatClaim := volumeClaimName(parent.Spec.Flatnode.Volume, parent.Name+"-flatnode")
