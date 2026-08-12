@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/part-of: nominatim-validation
 spec:
   type: Rebuild
-  nominatimRef:
+  nominatimInstanceRef:
     name: monaco
   # Keep aligned with the parent Spec so Rebuild does not leave Andorra as drift
   # and spawn an AddRegions Operation mid-suite.

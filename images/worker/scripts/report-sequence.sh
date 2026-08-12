@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Report Geofabrik sequence.state files for the operator (stdout + ConfigMap data patch).
 # Invoked only by the operator-owned sequence probe Job — not by Bootstrap/Update.
-# Cluster SoT for lag is Nominatim status.regions[].sequenceState (nominatim-5et.35.3).
+# Cluster SoT for lag is NominatimInstance status.regions[].sequenceState (nominatim-5et.35.3).
 set -euo pipefail
 
 PROJECT_DIR="${PROJECT_DIR:-/nominatim}"

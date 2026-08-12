@@ -1,6 +1,6 @@
 # Kind validation lab
 
-Canonical Monaco Nominatim fixture (shared with the kind validation lab):
+Canonical Monaco NominatimInstance fixture (shared with the kind validation lab):
 
 [`../e2e/testdata/nominatim-monaco.yaml`](../e2e/testdata/nominatim-monaco.yaml)
 
@@ -36,7 +36,7 @@ recreates it, and only arms the worker Job once the replacement is a different o
 Before that drop, the Operation registers itself on `status.activeOperationRefs` and
 quiesces the API Deployment (Rebuild always suspends, even when
 `suspendDuringOperations: Never`) so open connections cannot block `DROP DATABASE`.
-While `nominatim.zebernst.dev/rebuild-db-reset=pending`, the Nominatim reconciler
+While `nominatim.zebernst.dev/rebuild-db-reset=pending`, the NominatimInstance reconciler
 skips recreating the owned Database so it does not fight the delete.
 
 That ordering is asserted in three places:

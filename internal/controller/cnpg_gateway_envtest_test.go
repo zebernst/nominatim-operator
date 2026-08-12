@@ -42,9 +42,9 @@ import (
 // envtest runs no CNPG or Gateway controller: nothing here reconciles the objects further,
 // so status stays empty and no Postgres or Gateway is programmed.
 
-// persistNominatim creates nom in envtest so the Nominatim CRD validates the spec and the
+// persistNominatim creates nom in envtest so the NominatimInstance CRD validates the spec and the
 // API server assigns the real UID that ends up in the owner references under test.
-func persistNominatim(nom *nominatimv1alpha1.Nominatim) *nominatimv1alpha1.Nominatim {
+func persistNominatim(nom *nominatimv1alpha1.NominatimInstance) *nominatimv1alpha1.NominatimInstance {
 	GinkgoHelper()
 	nom.UID = ""
 	nom.ResourceVersion = ""
@@ -61,10 +61,10 @@ func getUnstructured(gvk schema.GroupVersionKind, name, namespace string) *unstr
 }
 
 var _ = Describe("owned CNPG objects against the vendored CNPG schema", func() {
-	var reconciler *NominatimReconciler
+	var reconciler *NominatimInstanceReconciler
 
 	BeforeEach(func() {
-		reconciler = &NominatimReconciler{Client: k8sClient, Scheme: scheme.Scheme}
+		reconciler = &NominatimInstanceReconciler{Client: k8sClient, Scheme: scheme.Scheme}
 	})
 
 	It("creates a Cluster and Database the API server accepts, without churning them", func() {
@@ -202,10 +202,10 @@ var _ = Describe("owned CNPG objects against the vendored CNPG schema", func() {
 })
 
 var _ = Describe("owned HTTPRoutes against the vendored Gateway API schema", func() {
-	var reconciler *NominatimReconciler
+	var reconciler *NominatimInstanceReconciler
 
 	BeforeEach(func() {
-		reconciler = &NominatimReconciler{Client: k8sClient, Scheme: scheme.Scheme}
+		reconciler = &NominatimInstanceReconciler{Client: k8sClient, Scheme: scheme.Scheme}
 	})
 
 	It("creates the API HTTPRoute alongside the Deployment and Service", func() {
@@ -326,7 +326,7 @@ var _ = Describe("optional GVK discovery with the vendored CRDs installed", func
 			Expect(available).To(BeTrue(), "%s should be discoverable from test/crds", gvk)
 		}
 
-		r := &NominatimReconciler{
+		r := &NominatimInstanceReconciler{
 			Client:         mgr.GetClient(),
 			Scheme:         mgr.GetScheme(),
 			ControllerName: "nominatim-live-mapper",

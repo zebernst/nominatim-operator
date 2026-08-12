@@ -2,7 +2,7 @@
 # Rebuild: full re-bootstrap. Operator arms this with NOMINATIM_REBUILD_CONFIRM=1
 # after drop/recreate of the owned DB (empty/ready application database). This script
 # clears worker-local resume bookmarks on the project PVC (import-finished /
-# imported-regions.txt) — not Nominatim CR status; the operator replaces
+# imported-regions.txt) — not NominatimInstance CR status; the operator replaces
 # status.regions when Rebuild Succeeds — then runs Bootstrap.
 set -euo pipefail
 

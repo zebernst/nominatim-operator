@@ -34,9 +34,9 @@ import (
 )
 
 // Manager-driven reconcile proves SetupWithManager watches actually fire: the API
-// Deployment must appear after creating a Nominatim without ever calling Reconcile()
+// Deployment must appear after creating a NominatimInstance without ever calling Reconcile()
 // from the test (nominatim-5et.29).
-var _ = Describe("Nominatim manager-driven reconcile", Ordered, func() {
+var _ = Describe("NominatimInstance manager-driven reconcile", Ordered, func() {
 	const (
 		nomName    = "mgr-driven"
 		secretName = "mgr-driven-pg"
@@ -48,7 +48,7 @@ var _ = Describe("Nominatim manager-driven reconcile", Ordered, func() {
 	)
 
 	BeforeAll(func() {
-		By("starting a manager with the Nominatim reconciler registered")
+		By("starting a manager with the NominatimInstance reconciler registered")
 		mgrCtx, cancel := context.WithCancel(context.Background())
 		mgrCancel = cancel
 
@@ -59,7 +59,7 @@ var _ = Describe("Nominatim manager-driven reconcile", Ordered, func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect((&NominatimReconciler{
+		Expect((&NominatimInstanceReconciler{
 			Client:         mgr.GetClient(),
 			Scheme:         mgr.GetScheme(),
 			ControllerName: "nominatim-manager-driven",
@@ -79,7 +79,7 @@ var _ = Describe("Nominatim manager-driven reconcile", Ordered, func() {
 	})
 
 	AfterEach(func() {
-		nom := &nominatimv1alpha1.Nominatim{}
+		nom := &nominatimv1alpha1.NominatimInstance{}
 		err := k8sClient.Get(context.Background(), nomKey, nom)
 		if apierrors.IsNotFound(err) {
 			return
@@ -87,21 +87,21 @@ var _ = Describe("Nominatim manager-driven reconcile", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(k8sClient.Delete(context.Background(), nom)).To(Succeed())
 		Eventually(func() bool {
-			err := k8sClient.Get(context.Background(), nomKey, &nominatimv1alpha1.Nominatim{})
+			err := k8sClient.Get(context.Background(), nomKey, &nominatimv1alpha1.NominatimInstance{})
 			return apierrors.IsNotFound(err)
 		}, 30*time.Second, time.Second).Should(BeTrue())
 	})
 
 	It("creates the API Deployment via watches without calling Reconcile()", func() {
-		By("creating a connection Secret and a regions-empty Nominatim (smoke/attach mode)")
+		By("creating a connection Secret and a regions-empty NominatimInstance (smoke/attach mode)")
 		Expect(k8sClient.Create(context.Background(), &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: "default"},
 			Data:       map[string][]byte{"uri": []byte("postgres://nominatim")},
 		})).To(Succeed())
 
-		Expect(k8sClient.Create(context.Background(), &nominatimv1alpha1.Nominatim{
+		Expect(k8sClient.Create(context.Background(), &nominatimv1alpha1.NominatimInstance{
 			ObjectMeta: metav1.ObjectMeta{Name: nomName, Namespace: "default"},
-			Spec: nominatimv1alpha1.NominatimSpec{
+			Spec: nominatimv1alpha1.NominatimInstanceSpec{
 				Project: nominatimv1alpha1.ProjectSpec{
 					Volume: nominatimv1alpha1.VolumeSource{ClaimName: "nominatim-project"},
 				},

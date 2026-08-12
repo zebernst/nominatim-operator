@@ -116,7 +116,7 @@ CI runs both in the **Worker shell** job. Stubs under `scripts/test/stubs/` fake
 
 ### Sequence state / update lag
 
-After a Succeeded Bootstrap / AddRegions / Rebuild / Update / CatchUp Operation, the Nominatim reconciler creates a short-lived **sequence probe** Job (operator-owned) that mounts the project PVC read-only, runs `scripts/report-sequence.sh`, and merge-patches ConfigMap `{name}-sequence`. The reconciler copies `report.json` into `status.regions[].sequenceState` (`sequenceNumber@timestamp`) and `aux-data.json` into `status.auxData` (Wikipedia importance / postcode file presence). Worker Operation scripts do **not** talk to the Kubernetes API.
+After a Succeeded Bootstrap / AddRegions / Rebuild / Update / CatchUp Operation, the NominatimInstance reconciler creates a short-lived **sequence probe** Job (operator-owned) that mounts the project PVC read-only, runs `scripts/report-sequence.sh`, and merge-patches ConfigMap `{name}-sequence`. The reconciler copies `report.json` into `status.regions[].sequenceState` (`sequenceNumber@timestamp`) and `aux-data.json` into `status.auxData` (Wikipedia importance / postcode file presence). Worker Operation scripts do **not** talk to the Kubernetes API.
 
 ### Auxiliary data (Wikipedia importance, postcodes)
 

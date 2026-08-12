@@ -34,13 +34,13 @@ import (
 	nominatimv1alpha1 "github.com/zebernst/nominatim-operator/api/v1alpha1"
 )
 
-func minimalNominatim(name string) *nominatimv1alpha1.Nominatim {
-	return &nominatimv1alpha1.Nominatim{
+func minimalNominatim(name string) *nominatimv1alpha1.NominatimInstance {
+	return &nominatimv1alpha1.NominatimInstance{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 		},
-		Spec: nominatimv1alpha1.NominatimSpec{
+		Spec: nominatimv1alpha1.NominatimInstanceSpec{
 			Project: nominatimv1alpha1.ProjectSpec{
 				Volume: nominatimv1alpha1.VolumeSource{
 					ClaimName: "nominatim-project",
@@ -65,7 +65,7 @@ func ensureConnectionSecret(ctx context.Context, name string) {
 	}
 }
 
-func conditionStatus(nom *nominatimv1alpha1.Nominatim, condType string) metav1.ConditionStatus {
+func conditionStatus(nom *nominatimv1alpha1.NominatimInstance, condType string) metav1.ConditionStatus {
 	c := meta.FindStatusCondition(nom.Status.Conditions, condType)
 	if c == nil {
 		return ""
@@ -73,7 +73,7 @@ func conditionStatus(nom *nominatimv1alpha1.Nominatim, condType string) metav1.C
 	return c.Status
 }
 
-var _ = Describe("Nominatim Controller", func() {
+var _ = Describe("NominatimInstance Controller", func() {
 	ctx := context.Background()
 
 	Context("When reconciling a resource", func() {
@@ -85,9 +85,9 @@ var _ = Describe("Nominatim Controller", func() {
 		}
 
 		BeforeEach(func() {
-			By("creating connection secret and Nominatim resource")
+			By("creating connection secret and NominatimInstance resource")
 			ensureConnectionSecret(ctx, "nominatim-pg-secret")
-			nom := &nominatimv1alpha1.Nominatim{}
+			nom := &nominatimv1alpha1.NominatimInstance{}
 			err := k8sClient.Get(ctx, typeNamespacedName, nom)
 			if err != nil && errors.IsNotFound(err) {
 				Expect(k8sClient.Create(ctx, minimalNominatim(resourceName))).To(Succeed())
@@ -95,7 +95,7 @@ var _ = Describe("Nominatim Controller", func() {
 		})
 
 		AfterEach(func() {
-			resource := &nominatimv1alpha1.Nominatim{}
+			resource := &nominatimv1alpha1.NominatimInstance{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			if errors.IsNotFound(err) {
 				return
@@ -103,18 +103,18 @@ var _ = Describe("Nominatim Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			resource.Status.ActiveOperationRefs = nil
 			_ = k8sClient.Status().Update(ctx, resource)
-			controllerutil.RemoveFinalizer(resource, nominatimv1alpha1.NominatimFinalizer)
+			controllerutil.RemoveFinalizer(resource, nominatimv1alpha1.NominatimInstanceFinalizer)
 			_ = k8sClient.Update(ctx, resource)
 			err = k8sClient.Delete(ctx, resource)
 			Expect(client.IgnoreNotFound(err)).NotTo(HaveOccurred())
 			Eventually(func() bool {
-				err := k8sClient.Get(ctx, typeNamespacedName, &nominatimv1alpha1.Nominatim{})
+				err := k8sClient.Get(ctx, typeNamespacedName, &nominatimv1alpha1.NominatimInstance{})
 				return errors.IsNotFound(err)
 			}).Should(BeTrue())
 		})
 
 		It("should successfully reconcile the resource", func() {
-			controllerReconciler := &NominatimReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			controllerReconciler := &NominatimInstanceReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 			// Finalizer add returns early; second pass updates status.
@@ -122,10 +122,10 @@ var _ = Describe("Nominatim Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("should reject a Nominatim without spec.project", func() {
-			invalid := &nominatimv1alpha1.Nominatim{
+		It("should reject a NominatimInstance without spec.project", func() {
+			invalid := &nominatimv1alpha1.NominatimInstance{
 				ObjectMeta: metav1.ObjectMeta{Name: "missing-project", Namespace: "default"},
-				Spec: nominatimv1alpha1.NominatimSpec{
+				Spec: nominatimv1alpha1.NominatimInstanceSpec{
 					Database: nominatimv1alpha1.DatabaseSpec{
 						ConnectionSecretRef: &nominatimv1alpha1.LocalObjectReference{Name: "nominatim-pg-secret"},
 					},
@@ -145,15 +145,15 @@ var _ = Describe("Nominatim Controller", func() {
 		})
 
 		It("should set Ready=True when desired and observed regions are empty", func() {
-			r := &NominatimReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			r := &NominatimInstanceReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 			_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
-			nom := &nominatimv1alpha1.Nominatim{}
+			nom := &nominatimv1alpha1.NominatimInstance{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, nom)).To(Succeed())
-			Expect(controllerutil.ContainsFinalizer(nom, nominatimv1alpha1.NominatimFinalizer)).To(BeTrue())
+			Expect(controllerutil.ContainsFinalizer(nom, nominatimv1alpha1.NominatimInstanceFinalizer)).To(BeTrue())
 			Expect(nom.Status.ObservedGeneration).To(Equal(nom.Generation))
 			Expect(nom.Status.Database.ConnectionSecretName).To(Equal("nominatim-pg-secret"))
 			Expect(nom.Status.Database.Degraded).To(BeTrue())
@@ -163,12 +163,12 @@ var _ = Describe("Nominatim Controller", func() {
 		})
 
 		It("should set Progressing when desired regions are missing from status", func() {
-			nom := &nominatimv1alpha1.Nominatim{}
+			nom := &nominatimv1alpha1.NominatimInstance{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, nom)).To(Succeed())
 			nom.Spec.Regions = []string{"north-america/us"}
 			Expect(k8sClient.Update(ctx, nom)).To(Succeed())
 
-			r := &NominatimReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			r := &NominatimInstanceReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 			_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
@@ -181,9 +181,9 @@ var _ = Describe("Nominatim Controller", func() {
 		})
 
 		It("should mark RegionRemovalUnsupported when status has regions removed from spec", func() {
-			nom := &nominatimv1alpha1.Nominatim{}
+			nom := &nominatimv1alpha1.NominatimInstance{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, nom)).To(Succeed())
-			r := &NominatimReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			r := &NominatimInstanceReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 
@@ -200,11 +200,11 @@ var _ = Describe("Nominatim Controller", func() {
 		})
 
 		It("should update observedGeneration when reconcile-at annotation is nudged", func() {
-			r := &NominatimReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			r := &NominatimInstanceReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 
-			nom := &nominatimv1alpha1.Nominatim{}
+			nom := &nominatimv1alpha1.NominatimInstance{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, nom)).To(Succeed())
 			beforeGen := nom.Status.ObservedGeneration
 
@@ -224,10 +224,10 @@ var _ = Describe("Nominatim Controller", func() {
 		})
 
 		It("should error when connection secret is missing during reconcile", func() {
-			r := &NominatimReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			r := &NominatimInstanceReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 
-			nom := &nominatimv1alpha1.Nominatim{}
+			nom := &nominatimv1alpha1.NominatimInstance{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, nom)).To(Succeed())
 			nom.Spec.Database.ConnectionSecretRef = &nominatimv1alpha1.LocalObjectReference{Name: "does-not-exist"}
 			Expect(k8sClient.Update(ctx, nom)).To(Succeed())
@@ -237,28 +237,28 @@ var _ = Describe("Nominatim Controller", func() {
 		})
 
 		It("should remove finalizer on delete when no active operations", func() {
-			r := &NominatimReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			r := &NominatimInstanceReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 
-			nom := &nominatimv1alpha1.Nominatim{}
+			nom := &nominatimv1alpha1.NominatimInstance{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, nom)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, nom)).To(Succeed())
 			Expect(k8sClient.Get(ctx, typeNamespacedName, nom)).To(Succeed())
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func() bool {
-				err := k8sClient.Get(ctx, typeNamespacedName, &nominatimv1alpha1.Nominatim{})
+				err := k8sClient.Get(ctx, typeNamespacedName, &nominatimv1alpha1.NominatimInstance{})
 				return errors.IsNotFound(err)
 			}).Should(BeTrue())
 		})
 
 		It("should block finalizer removal while active operations remain", func() {
-			r := &NominatimReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			r := &NominatimInstanceReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 
-			nom := &nominatimv1alpha1.Nominatim{}
+			nom := &nominatimv1alpha1.NominatimInstance{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, nom)).To(Succeed())
 			nom.Status.ActiveOperationRefs = []corev1.ObjectReference{{Name: "op-busy"}}
 			Expect(k8sClient.Status().Update(ctx, nom)).To(Succeed())
@@ -266,7 +266,7 @@ var _ = Describe("Nominatim Controller", func() {
 			Expect(k8sClient.Get(ctx, typeNamespacedName, nom)).To(Succeed())
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).To(HaveOccurred())
-			Expect(controllerutil.ContainsFinalizer(nom, nominatimv1alpha1.NominatimFinalizer)).To(BeTrue())
+			Expect(controllerutil.ContainsFinalizer(nom, nominatimv1alpha1.NominatimInstanceFinalizer)).To(BeTrue())
 			// Clear so AfterEach can delete.
 			Expect(k8sClient.Get(ctx, typeNamespacedName, nom)).To(Succeed())
 			nom.Status.ActiveOperationRefs = nil
@@ -275,34 +275,34 @@ var _ = Describe("Nominatim Controller", func() {
 	})
 
 	Context("SetupWithManager", func() {
-		It("registers Nominatim controller watches", func() {
+		It("registers NominatimInstance controller watches", func() {
 			mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 				Scheme: k8sClient.Scheme(),
 			})
 			Expect(err).NotTo(HaveOccurred())
-			r := &NominatimReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}
+			r := &NominatimInstanceReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}
 			Expect(r.SetupWithManager(mgr)).To(Succeed())
 		})
 	})
 
 	Context("Operation watch mapping", func() {
-		It("maps NominatimOperation nominatimRef to parent reconcile request", func() {
+		It("maps NominatimOperation nominatimInstanceRef to parent reconcile request", func() {
 			op := &nominatimv1alpha1.NominatimOperation{
 				ObjectMeta: metav1.ObjectMeta{Name: "op1", Namespace: "default"},
 				Spec: nominatimv1alpha1.NominatimOperationSpec{
-					Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-					NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "parent-nom"},
+					Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+					NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "parent-nom"},
 				},
 			}
-			reqs := mapOperationToNominatim(ctx, op)
+			reqs := mapOperationToNominatimInstance(ctx, op)
 			Expect(reqs).To(HaveLen(1))
 			Expect(reqs[0].Name).To(Equal("parent-nom"))
 			Expect(reqs[0].Namespace).To(Equal("default"))
 		})
 
-		It("ignores operations without nominatimRef", func() {
-			Expect(mapOperationToNominatim(ctx, &corev1.Pod{})).To(BeEmpty())
-			Expect(mapOperationToNominatim(ctx, &nominatimv1alpha1.NominatimOperation{})).To(BeEmpty())
+		It("ignores operations without nominatimInstanceRef", func() {
+			Expect(mapOperationToNominatimInstance(ctx, &corev1.Pod{})).To(BeEmpty())
+			Expect(mapOperationToNominatimInstance(ctx, &nominatimv1alpha1.NominatimOperation{})).To(BeEmpty())
 		})
 	})
 })

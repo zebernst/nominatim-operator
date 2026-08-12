@@ -33,8 +33,8 @@ const (
 
 func TestEffectiveNominatimConfigEnv_BeforeBootstrapUsesSpec(t *testing.T) {
 	maxDiff := int32(50)
-	nom := &nominatimv1alpha1.Nominatim{
-		Spec: nominatimv1alpha1.NominatimSpec{
+	nom := &nominatimv1alpha1.NominatimInstance{
+		Spec: nominatimv1alpha1.NominatimInstanceSpec{
 			Nominatim: &nominatimv1alpha1.NominatimConfigSpec{
 				ImportStyle: testImportStyleAddress,
 				Tokenizer:   "icu",
@@ -100,15 +100,15 @@ func TestEffectiveAPIEnv_GunicornWorkers(t *testing.T) {
 func boolPtr(v bool) *bool { return &v }
 
 func TestEffectiveNominatimConfigEnv_AfterBootstrapUsesSealedImportTime(t *testing.T) {
-	nom := &nominatimv1alpha1.Nominatim{
-		Spec: nominatimv1alpha1.NominatimSpec{
+	nom := &nominatimv1alpha1.NominatimInstance{
+		Spec: nominatimv1alpha1.NominatimInstanceSpec{
 			Nominatim: &nominatimv1alpha1.NominatimConfigSpec{
 				ImportStyle: testImportStyleFull, // drifted
 				Tokenizer:   "icu",
 				Languages:   []string{"fr"},
 			},
 		},
-		Status: nominatimv1alpha1.NominatimStatus{
+		Status: nominatimv1alpha1.NominatimInstanceStatus{
 			Regions: []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}},
 			ObservedNominatim: &nominatimv1alpha1.ObservedNominatimConfig{
 				ImportStyle: testImportStyleExtratags,
@@ -126,9 +126,9 @@ func TestEffectiveNominatimConfigEnv_AfterBootstrapUsesSealedImportTime(t *testi
 }
 
 func TestSealAndDriftImportConfig(t *testing.T) {
-	nom := &nominatimv1alpha1.Nominatim{
+	nom := &nominatimv1alpha1.NominatimInstance{
 		ObjectMeta: metav1.ObjectMeta{Generation: 3},
-		Spec: nominatimv1alpha1.NominatimSpec{
+		Spec: nominatimv1alpha1.NominatimInstanceSpec{
 			Nominatim: &nominatimv1alpha1.NominatimConfigSpec{
 				ImportStyle: testImportStyleAddress,
 				Tokenizer:   "icu",

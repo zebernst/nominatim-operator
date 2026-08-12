@@ -73,20 +73,20 @@ const (
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
 
-// APIName is the owned API Deployment/Service name for a Nominatim instance.
-func APIName(nom *nominatimv1alpha1.Nominatim) string { return nom.Name + "-api" }
+// APIName is the owned API Deployment/Service name for a NominatimInstance.
+func APIName(nom *nominatimv1alpha1.NominatimInstance) string { return nom.Name + "-api" }
 
-// UIName is the owned UI Deployment/Service name for a Nominatim instance.
-func UIName(nom *nominatimv1alpha1.Nominatim) string { return nom.Name + "-ui" }
+// UIName is the owned UI Deployment/Service name for a NominatimInstance.
+func UIName(nom *nominatimv1alpha1.NominatimInstance) string { return nom.Name + "-ui" }
 
 // ProjectPVCName is the default project PVC name when the template omits metadata.name.
-func ProjectPVCName(nom *nominatimv1alpha1.Nominatim) string { return nom.Name + "-project" }
+func ProjectPVCName(nom *nominatimv1alpha1.NominatimInstance) string { return nom.Name + "-project" }
 
 // FlatnodePVCName is the default flatnode PVC name when the template omits metadata.name.
-func FlatnodePVCName(nom *nominatimv1alpha1.Nominatim) string { return nom.Name + "-flatnode" }
+func FlatnodePVCName(nom *nominatimv1alpha1.NominatimInstance) string { return nom.Name + "-flatnode" }
 
-// commonLabels returns the standard label set for owned Nominatim workload objects.
-func commonLabels(nom *nominatimv1alpha1.Nominatim, component string) map[string]string {
+// commonLabels returns the standard label set for owned NominatimInstance workload objects.
+func commonLabels(nom *nominatimv1alpha1.NominatimInstance, component string) map[string]string {
 	labels := map[string]string{
 		"app.kubernetes.io/name":     "nominatim",
 		"app.kubernetes.io/instance": nom.Name,
@@ -102,7 +102,7 @@ func commonLabels(nom *nominatimv1alpha1.Nominatim, component string) map[string
 // ensureBootstrapOperation so status.regions can unlock API/UI in the same pass.
 // Project/flatnode PVCs remain for worker Jobs (write plane); the API Deployment does
 // not mount them (nominatim-5et.35.1).
-func (r *NominatimReconciler) reconcileWorkloads(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
+func (r *NominatimInstanceReconciler) reconcileWorkloads(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) error {
 	if _, err := r.reconcilePVC(ctx, nom, nom.Spec.Project.Volume, ProjectPVCName(nom), ComponentProject); err != nil {
 		return fmt.Errorf("reconcile project volume: %w", err)
 	}
@@ -126,7 +126,7 @@ func (r *NominatimReconciler) reconcileWorkloads(ctx context.Context, nom *nomin
 // Instances with no desired regions never Bootstrap, so API/UI may be created
 // immediately (smoke / attach-only). suspendDuringOperations does not apply here —
 // that knob is day-2 scale-down only.
-func servingWorkloadsAllowed(nom *nominatimv1alpha1.Nominatim) bool {
+func servingWorkloadsAllowed(nom *nominatimv1alpha1.NominatimInstance) bool {
 	if len(nom.Spec.Regions) == 0 {
 		return true
 	}
@@ -137,7 +137,7 @@ func servingWorkloadsAllowed(nom *nominatimv1alpha1.Nominatim) bool {
 // through an existing ClaimName untouched, or creates (and owns) a PVC from
 // VolumeClaimTemplate when ClaimName is empty. Storage size/class are passed through
 // verbatim from spec — never hardcoded here.
-func (r *NominatimReconciler) reconcilePVC(ctx context.Context, nom *nominatimv1alpha1.Nominatim, vs nominatimv1alpha1.VolumeSource, defaultName, component string) (string, error) {
+func (r *NominatimInstanceReconciler) reconcilePVC(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance, vs nominatimv1alpha1.VolumeSource, defaultName, component string) (string, error) {
 	if vs.ClaimName != "" {
 		return vs.ClaimName, nil
 	}
@@ -236,7 +236,7 @@ func dbEnvVars(secretName string) []corev1.EnvVar {
 // apiPodFilesystem returns the API pod volumes/mounts/env for a read-only serving
 // plane: ephemeral emptyDir workdir plus Nominatim config from the CR (no project
 // or flatnode PVCs — those belong to worker Jobs).
-func apiPodFilesystem(nom *nominatimv1alpha1.Nominatim) ([]corev1.Volume, []corev1.VolumeMount, []corev1.EnvVar) {
+func apiPodFilesystem(nom *nominatimv1alpha1.NominatimInstance) ([]corev1.Volume, []corev1.VolumeMount, []corev1.EnvVar) {
 	volumes := []corev1.Volume{{
 		Name: apiWorkdirVolumeName,
 		VolumeSource: corev1.VolumeSource{
@@ -320,7 +320,7 @@ func operationImpactMatches(impact nominatimv1alpha1.OperationImpact, opType nom
 // Rebuild always suspends the API regardless of suspendDuringOperations: the Operation
 // drops the owned CNPG Database (reclaim=delete) before the worker Job starts, and open
 // API connections block DROP DATABASE indefinitely.
-func (r *NominatimReconciler) shouldSuspendAPI(ctx context.Context, nom *nominatimv1alpha1.Nominatim, impact nominatimv1alpha1.OperationImpact) (bool, error) {
+func (r *NominatimInstanceReconciler) shouldSuspendAPI(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance, impact nominatimv1alpha1.OperationImpact) (bool, error) {
 	if impact == "" {
 		impact = nominatimv1alpha1.OperationImpactNever
 	}
@@ -350,7 +350,7 @@ func (r *NominatimReconciler) shouldSuspendAPI(ctx context.Context, nom *nominat
 // Until Bootstrap has populated status.regions (when regions are desired), no API
 // objects are created — and any leftover owned API Deployment/Service/HTTPRoute
 // are removed. suspendDuringOperations only scales an already-allowed API.
-func (r *NominatimReconciler) reconcileAPI(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
+func (r *NominatimInstanceReconciler) reconcileAPI(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) error {
 	if !servingWorkloadsAllowed(nom) {
 		return r.deleteServingComponent(ctx, nom, APIName(nom), ComponentAPI)
 	}
@@ -448,7 +448,7 @@ func (r *NominatimReconciler) reconcileAPI(ctx context.Context, nom *nominatimv1
 // reconcileUI reconciles the optional UI Deployment, Service, and HTTPRoute. It is a
 // no-op when spec.ui is unset. Like the API, UI objects are not created until
 // Bootstrap has populated status.regions when regions are desired.
-func (r *NominatimReconciler) reconcileUI(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
+func (r *NominatimInstanceReconciler) reconcileUI(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) error {
 	uiSpec := nom.Spec.UI
 	if uiSpec == nil {
 		// Still clean up a stray UI if Bootstrap is in progress and UI was removed from spec.
@@ -527,7 +527,7 @@ func (r *NominatimReconciler) reconcileUI(ctx context.Context, nom *nominatimv1a
 // deleteServingComponent removes an owned API/UI Deployment, Service, and HTTPRoute
 // if present (IgnoreNotFound / no CRD). Used while Bootstrap has not yet unlocked
 // the serving plane.
-func (r *NominatimReconciler) deleteServingComponent(ctx context.Context, nom *nominatimv1alpha1.Nominatim, name, component string) error {
+func (r *NominatimInstanceReconciler) deleteServingComponent(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance, name, component string) error {
 	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: nom.Namespace}}
 	if err := r.Delete(ctx, deploy); client.IgnoreNotFound(err) != nil {
 		return fmt.Errorf("delete %s deployment %q: %w", component, name, err)
@@ -548,7 +548,7 @@ func (r *NominatimReconciler) deleteServingComponent(ctx context.Context, nom *n
 
 // reconcileService reconciles a ClusterIP Service fronting a workload Deployment on
 // workloadServicePort (80) -> workloadContainerPort (8080).
-func (r *NominatimReconciler) reconcileService(ctx context.Context, nom *nominatimv1alpha1.Nominatim, name string, selector map[string]string, component string) error {
+func (r *NominatimInstanceReconciler) reconcileService(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance, name string, selector map[string]string, component string) error {
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: nom.Namespace}}
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
 		if err := controllerutil.SetControllerReference(nom, svc, r.Scheme); err != nil {
@@ -572,7 +572,7 @@ func (r *NominatimReconciler) reconcileService(ctx context.Context, nom *nominat
 // reconcileHTTPRoute reconciles an unstructured gateway.networking.k8s.io/v1 HTTPRoute
 // attaching to route.ParentRefs/Hostnames and backending to serviceName on
 // workloadServicePort.
-func (r *NominatimReconciler) reconcileHTTPRoute(ctx context.Context, nom *nominatimv1alpha1.Nominatim, name, serviceName string, route *nominatimv1alpha1.RouteSpec, component string) error {
+func (r *NominatimInstanceReconciler) reconcileHTTPRoute(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance, name, serviceName string, route *nominatimv1alpha1.RouteSpec, component string) error {
 	httpRoute := &unstructured.Unstructured{}
 	httpRoute.SetGroupVersionKind(HTTPRouteGVK)
 	httpRoute.SetName(name)

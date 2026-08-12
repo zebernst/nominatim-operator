@@ -32,21 +32,21 @@ const (
 )
 
 // BootstrapOperationName is the deterministic name for the auto-created Bootstrap
-// NominatimOperation for a given Nominatim instance.
-func BootstrapOperationName(nom *nominatimv1alpha1.Nominatim) string {
+// NominatimOperation for a given NominatimInstance.
+func BootstrapOperationName(nom *nominatimv1alpha1.NominatimInstance) string {
 	return nom.Name + bootstrapNameSuffix
 }
 
 // listOperationsForParent lists NominatimOperations in the same namespace whose
-// nominatimRef targets nom.
-func (r *NominatimReconciler) listOperationsForParent(ctx context.Context, nom *nominatimv1alpha1.Nominatim) ([]nominatimv1alpha1.NominatimOperation, error) {
+// nominatimInstanceRef targets nom.
+func (r *NominatimInstanceReconciler) listOperationsForParent(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) ([]nominatimv1alpha1.NominatimOperation, error) {
 	list := &nominatimv1alpha1.NominatimOperationList{}
 	if err := r.List(ctx, list, client.InNamespace(nom.Namespace)); err != nil {
 		return nil, err
 	}
 	out := make([]nominatimv1alpha1.NominatimOperation, 0, len(list.Items))
 	for _, op := range list.Items {
-		if op.Spec.NominatimRef.Name == nom.Name {
+		if op.Spec.NominatimInstanceRef.Name == nom.Name {
 			out = append(out, op)
 		}
 	}
@@ -56,7 +56,7 @@ func (r *NominatimReconciler) listOperationsForParent(ctx context.Context, nom *
 // ensureBootstrapOperation creates the auto-bootstrap Operation when the instance has
 // desired regions, no observed regions yet, and no Bootstrap Operation (active or
 // otherwise) already targets this parent.
-func (r *NominatimReconciler) ensureBootstrapOperation(ctx context.Context, nom *nominatimv1alpha1.Nominatim, peers []nominatimv1alpha1.NominatimOperation) error {
+func (r *NominatimInstanceReconciler) ensureBootstrapOperation(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance, peers []nominatimv1alpha1.NominatimOperation) error {
 	if len(nom.Spec.Regions) == 0 {
 		return nil
 	}
@@ -82,9 +82,9 @@ func (r *NominatimReconciler) ensureBootstrapOperation(ctx context.Context, nom 
 			Namespace: nom.Namespace,
 		},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
-			Regions:      append([]string(nil), nom.Spec.Regions...),
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Regions:              append([]string(nil), nom.Spec.Regions...),
 		},
 	}
 	if err := controllerutil.SetControllerReference(nom, op, r.Scheme); err != nil {

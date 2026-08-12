@@ -67,10 +67,10 @@ func isOperationTypeImplemented(t nominatimv1alpha1.NominatimOperationType) bool
 	}
 }
 
-// Mutex policy for NominatimOperations targeting the same Nominatim:
+// Mutex policy for NominatimOperations targeting the same NominatimInstance:
 //
 // At most one write-heavy Operation (Bootstrap, AddRegions, Rebuild, Migrate,
-// Freeze) may be Pending or Running per Nominatim. If another write-heavy
+// Freeze) may be Pending or Running per NominatimInstance. If another write-heavy
 // Operation already holds the write plane (Running or Job armed), a new
 // Operation is set to Failed with reason Conflict (no Job created). Two fresh
 // write-heavy peers without Jobs use a lex-name creation race (requeue, not
@@ -137,10 +137,10 @@ func isTerminalOperationPhase(phase nominatimv1alpha1.NominatimOperationPhase) b
 }
 
 // effectiveRegions returns the region set an Operation acts on: Operation.spec.regions
-// when set, else falling back to the parent Nominatim's spec.regions. Shared by the
+// when set, else falling back to the parent NominatimInstance's spec.regions. Shared by the
 // pre-Job region gate (see requiresRegionGate) and buildOperationJob so both agree on
 // what "no regions configured" means.
-func effectiveRegions(op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim) []string {
+func effectiveRegions(op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.NominatimInstance) []string {
 	if len(op.Spec.Regions) > 0 {
 		return op.Spec.Regions
 	}
@@ -162,13 +162,13 @@ func requiresRegionGate(t nominatimv1alpha1.NominatimOperationType) bool {
 	}
 }
 
-// bootstrapComplete reports whether a regions-mode Nominatim (parent.Spec.Regions
+// bootstrapComplete reports whether a regions-mode NominatimInstance (parent.Spec.Regions
 // non-empty) has finished its initial Bootstrap. This is the cluster source of
 // truth for "import complete" (not project PVC import-finished):
 // either status.regions already has entries, or a peer Bootstrap Operation
-// targeting this Nominatim has Succeeded (brief window before status sync).
+// targeting this NominatimInstance has Succeeded (brief window before status sync).
 // PBF-only parents never need this gate — callers check parent.Spec.Regions first.
-func bootstrapComplete(parent *nominatimv1alpha1.Nominatim, peers []nominatimv1alpha1.NominatimOperation) bool {
+func bootstrapComplete(parent *nominatimv1alpha1.NominatimInstance, peers []nominatimv1alpha1.NominatimOperation) bool {
 	if len(parent.Status.Regions) > 0 {
 		return true
 	}
@@ -176,14 +176,14 @@ func bootstrapComplete(parent *nominatimv1alpha1.Nominatim, peers []nominatimv1a
 		peer := &peers[i]
 		if peer.Spec.Type == nominatimv1alpha1.NominatimOperationBootstrap &&
 			peer.Status.Phase == nominatimv1alpha1.NominatimOperationPhaseSucceeded &&
-			peer.Spec.NominatimRef.Name == parent.Name {
+			peer.Spec.NominatimInstanceRef.Name == parent.Name {
 			return true
 		}
 	}
 	return false
 }
 
-func resolveStagingSpec(op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim) nominatimv1alpha1.StagingSpec {
+func resolveStagingSpec(op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.NominatimInstance) nominatimv1alpha1.StagingSpec {
 	out := nominatimv1alpha1.StagingSpec{}
 	if parent.Spec.Staging != nil {
 		out = *parent.Spec.Staging.DeepCopy()
@@ -214,8 +214,8 @@ func volumeClaimName(vs nominatimv1alpha1.VolumeSource, fallback string) string 
 }
 
 // workerImageForOperation resolves the Job image from Operation.spec.image,
-// then Nominatim.spec.worker.image, else the default worker repository:tag.
-func workerImageForOperation(op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim) string {
+// then NominatimInstance.spec.worker.image, else the default worker repository:tag.
+func workerImageForOperation(op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.NominatimInstance) string {
 	if op != nil && op.Spec.Image != nil {
 		return resolveImage(op.Spec.Image, defaultWorkerRepository)
 	}
@@ -226,7 +226,7 @@ func workerImageForOperation(op *nominatimv1alpha1.NominatimOperation, parent *n
 }
 
 // workerPullPolicyForOperation resolves ImagePullPolicy the same way as workerImageForOperation.
-func workerPullPolicyForOperation(op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim) corev1.PullPolicy {
+func workerPullPolicyForOperation(op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.NominatimInstance) corev1.PullPolicy {
 	if op != nil && op.Spec.Image != nil {
 		return resolvePullPolicy(op.Spec.Image)
 	}
@@ -278,13 +278,13 @@ func operationLabels(op *nominatimv1alpha1.NominatimOperation) map[string]string
 		"app.kubernetes.io/name":                "nominatim-operation",
 		"app.kubernetes.io/instance":            op.Name,
 		"app.kubernetes.io/managed-by":          "nominatim-operator",
-		"nominatim.zebernst.dev/nominatim":      op.Spec.NominatimRef.Name,
+		"nominatim.zebernst.dev/nominatim":      op.Spec.NominatimInstanceRef.Name,
 		"nominatim.zebernst.dev/operation":      op.Name,
 		"nominatim.zebernst.dev/operation-type": string(op.Spec.Type),
 	}
 }
 
-func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim, stagingClaim, image string, pullPolicy corev1.PullPolicy) (*batchv1.Job, error) {
+func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.NominatimInstance, stagingClaim, image string, pullPolicy corev1.PullPolicy) (*batchv1.Job, error) {
 	projectClaim := volumeClaimName(parent.Spec.Project.Volume, parent.Name+"-project")
 
 	volumes := []corev1.Volume{
@@ -398,7 +398,7 @@ func pbfURLForRegion(region string) string {
 
 func conflictMessage(peer *nominatimv1alpha1.NominatimOperation) string {
 	return fmt.Sprintf(
-		"%s: another active Operation %q (type=%s, phase=%s) targets the same Nominatim",
+		"%s: another active Operation %q (type=%s, phase=%s) targets the same NominatimInstance",
 		reasonConflict, peer.Name, peer.Spec.Type, peer.Status.Phase,
 	)
 }

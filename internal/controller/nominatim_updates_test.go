@@ -54,7 +54,7 @@ func TestReconcileUpdates_DisabledNoOp(t *testing.T) {
 	nom := baseNominatim("upd-off")
 	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/liechtenstein"}}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	res, err := r.reconcileUpdates(context.Background(), nom, parentOps(t, r, context.Background(), nom))
 	if err != nil {
@@ -84,7 +84,7 @@ func TestReconcileUpdates_DueCreatesUpdateAndCursor(t *testing.T) {
 	}
 	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/germany"}}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	res, err := r.reconcileUpdates(ctx, nom, parentOps(t, r, ctx, nom))
 	if err != nil {
@@ -141,13 +141,13 @@ func TestReconcileUpdates_SkipsOnWriteHeavyConflict(t *testing.T) {
 	boot := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-active", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseRunning},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, boot).WithObjects(nom, boot).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	res, err := r.reconcileUpdates(ctx, nom, parentOps(t, r, ctx, nom))
 	if err != nil {
@@ -190,13 +190,13 @@ func TestReconcileUpdates_SkipsOnCreationRacePeer(t *testing.T) {
 	boot := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-racing", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: ""},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, boot).WithObjects(nom, boot).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	res, err := r.reconcileUpdates(ctx, nom, parentOps(t, r, ctx, nom))
 	if err != nil {
@@ -228,7 +228,7 @@ func TestReconcileUpdates_NoCronJobCreated(t *testing.T) {
 	nom.Spec.Updates = &nominatimv1alpha1.UpdatesSpec{Enabled: true, Schedule: "*/5 * * * *"}
 	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/liechtenstein"}}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if _, err := r.reconcileUpdates(context.Background(), nom, parentOps(t, r, context.Background(), nom)); err != nil {
 		t.Fatal(err)

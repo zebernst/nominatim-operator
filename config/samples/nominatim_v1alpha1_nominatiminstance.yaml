@@ -1,5 +1,5 @@
 apiVersion: nominatim.zebernst.dev/v1alpha1
-kind: Nominatim
+kind: NominatimInstance
 metadata:
   labels:
     app.kubernetes.io/name: nominatim-operator

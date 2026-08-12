@@ -4,16 +4,16 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.2
-  name: nominatims.nominatim.zebernst.dev
+  name: nominatiminstances.nominatim.zebernst.dev
 spec:
   group: nominatim.zebernst.dev
   names:
-    kind: Nominatim
-    listKind: NominatimList
-    plural: nominatims
+    kind: NominatimInstance
+    listKind: NominatimInstanceList
+    plural: nominatiminstances
     shortNames:
     - nom
-    singular: nominatim
+    singular: nominatiminstance
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -26,8 +26,9 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Nominatim is the Schema for the nominatims API (GitOps desired
-          state for one install).
+        description: |-
+          NominatimInstance is the Schema for the nominatiminstances API
+          (GitOps desired state for one managed install of Nominatim).
         properties:
           apiVersion:
             description: |-
@@ -47,8 +48,8 @@ spec:
           metadata:
             type: object
           spec:
-            description: NominatimSpec defines the desired state of Nominatim (GitOps
-              surface).
+            description: NominatimInstanceSpec defines the desired state of a NominatimInstance
+              (GitOps surface).
             properties:
               api:
                 description: API configures the geocoding API workload.
@@ -165,7 +166,7 @@ spec:
                 description: Database attaches or creates Postgres for this instance.
                 properties:
                   cluster:
-                    description: Cluster creates a CNPG Cluster owned by this Nominatim.
+                    description: Cluster creates a CNPG Cluster owned by this NominatimInstance.
                     properties:
                       affinity:
                         description: |-
@@ -1339,7 +1340,7 @@ spec:
                       when due.
                     type: boolean
                   schedule:
-                    description: Schedule is a cron expression evaluated by the Nominatim
+                    description: Schedule is a cron expression evaluated by the NominatimInstance
                       controller.
                     type: string
                 type: object
@@ -1373,7 +1374,7 @@ spec:
             - project
             type: object
           status:
-            description: NominatimStatus defines the observed state of Nominatim.
+            description: NominatimInstanceStatus defines the observed state of a NominatimInstance.
             properties:
               activeOperationRefs:
                 description: ActiveOperationRefs references NominatimOperation(s)

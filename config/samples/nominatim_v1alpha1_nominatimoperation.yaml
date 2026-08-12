@@ -8,7 +8,7 @@ metadata:
 spec:
   # Imperative finite workflow — do NOT manage via Flux/GitOps Kustomizations.
   type: Update
-  nominatimRef:
+  nominatimInstanceRef:
     name: nominatim-sample
   # Optional: regions for AddRegions / Rebuild
   # regions:

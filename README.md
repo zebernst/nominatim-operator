@@ -4,7 +4,7 @@ Kubernetes operator for running [Nominatim](https://nominatim.org/) in-cluster.
 
 | Kind | Purpose |
 |------|---------|
-| `Nominatim` (`nominatim.zebernst.dev/v1alpha1`) | GitOps desired state (one top-level CR) |
+| `NominatimInstance` (`nominatim.zebernst.dev/v1alpha1`) | GitOps desired state (one top-level CR) |
 | `NominatimOperation` | Controller-created finite workflows (Jobs); **not** Flux-driven |
 
 Images: `ghcr.io/zebernst/nominatim-{api,worker,operator}` — rebuilt for Kubernetes from upstream `nominatim-db` / `nominatim-api` (**not** `mediagis/nominatim`). See [`images/README.md`](images/README.md).
@@ -44,7 +44,7 @@ Operation Jobs remain single-writer against those volumes; concurrency is the Op
 
 ## Install
 
-Helm chart: [`charts/nominatim-operator`](charts/nominatim-operator/README.md). Sample CR: [`config/samples/nominatim_v1alpha1_nominatim.yaml`](config/samples/nominatim_v1alpha1_nominatim.yaml).
+Helm chart: [`charts/nominatim-operator`](charts/nominatim-operator/README.md). Sample CR: [`config/samples/nominatim_v1alpha1_nominatiminstance.yaml`](config/samples/nominatim_v1alpha1_nominatiminstance.yaml).
 
 ## Development
 

@@ -92,21 +92,21 @@ func (f *failingClient) Get(ctx context.Context, key client.ObjectKey, obj clien
 	return f.Client.Get(ctx, key, obj, opts...)
 }
 
-// emptySchemeReconciler returns a reconciler whose scheme has no Nominatim types
+// emptySchemeReconciler returns a reconciler whose scheme has no NominatimInstance types
 // registered, so controllerutil.SetControllerReference always fails (matches the
-// existing nominatim_database_test.go pattern for exercising that branch). The Nominatim
+// existing nominatim_database_test.go pattern for exercising that branch). The NominatimInstance
 // object passed to reconcile calls is only used in-memory and must not be seeded into the
 // fake client, since the client tracker would itself reject an unregistered type.
-func emptySchemeReconciler() *NominatimReconciler {
+func emptySchemeReconciler() *NominatimInstanceReconciler {
 	s := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(s)
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	return &NominatimReconciler{Client: c, Scheme: s}
+	return &NominatimInstanceReconciler{Client: c, Scheme: s}
 }
 
 const testConnectionSecretName = "pg-secret"
 
-func nominatimWithConnectionSecret(name string) *nominatimv1alpha1.Nominatim {
+func nominatimWithConnectionSecret(name string) *nominatimv1alpha1.NominatimInstance {
 	nom := baseNominatim(name)
 	nom.Spec.Database = nominatimv1alpha1.DatabaseSpec{
 		ConnectionSecretRef: &nominatimv1alpha1.LocalObjectReference{Name: testConnectionSecretName},
@@ -118,7 +118,7 @@ func TestReconcilePVC_ClaimNamePassthrough(t *testing.T) {
 	scheme := testScheme(t)
 	nom := baseNominatim("pvc-claimname")
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	name, err := r.reconcilePVC(context.Background(), nom, nominatimv1alpha1.VolumeSource{ClaimName: "existing-pvc"}, "default-name", ComponentProject)
 	if err != nil {
@@ -152,7 +152,7 @@ func TestReconcilePVC_CreateFromTemplate_NoHardcodedStorageClass(t *testing.T) {
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	name, err := r.reconcilePVC(context.Background(), nom, nom.Spec.Project.Volume, ProjectPVCName(nom), ComponentProject)
 	if err != nil {
@@ -190,7 +190,7 @@ func TestReconcilePVC_ExplicitTemplateName(t *testing.T) {
 	scheme := testScheme(t)
 	nom := baseNominatim("pvc-explicit-name")
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	vs := nominatimv1alpha1.VolumeSource{
 		VolumeClaimTemplate: &nominatimv1alpha1.VolumeClaimTemplate{
@@ -222,7 +222,7 @@ func TestReconcilePVC_ErrorsWithoutClaimNameOrTemplate(t *testing.T) {
 	scheme := testScheme(t)
 	nom := baseNominatim("pvc-empty")
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	if _, err := r.reconcilePVC(context.Background(), nom, nominatimv1alpha1.VolumeSource{}, "default-name", ComponentProject); err == nil {
 		t.Fatal("expected error for empty volume source")
 	}
@@ -232,7 +232,7 @@ func TestReconcileAPI_RequiresConnectionSecretName(t *testing.T) {
 	scheme := testScheme(t)
 	nom := baseNominatim("api-nosecret")
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	if err := r.reconcileAPI(context.Background(), nom); err == nil {
 		t.Fatal("expected error when connectionSecretName is empty")
 	}
@@ -243,7 +243,7 @@ func TestReconcileAPI_CreatesDeploymentAndServiceWithDBEnv(t *testing.T) {
 	nom := nominatimWithConnectionSecret("api-basic")
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileAPI: %v", err)
@@ -308,7 +308,7 @@ func TestReconcileAPI_OmitsFlatnodeEvenWhenSpecSet(t *testing.T) {
 	}
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileAPI: %v", err)
@@ -344,7 +344,7 @@ func TestReconcileUI_NoopWhenUnset(t *testing.T) {
 	scheme := testScheme(t)
 	nom := baseNominatim("ui-unset")
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	if err := r.reconcileUI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileUI: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestReconcileUI_CreatesDeploymentServiceRoute(t *testing.T) {
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileUI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileUI: %v", err)
@@ -396,13 +396,13 @@ func TestShouldSuspendAPI_ImpactMatrix(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "op-update", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationUpdate,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 	}
 	nom.Status.ActiveOperationRefs = []corev1.ObjectReference{{Name: "op-update"}}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, op).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	cases := []struct {
 		impact nominatimv1alpha1.OperationImpact
@@ -434,13 +434,13 @@ func TestShouldSuspendAPI_RebuildAlwaysSuspendsEvenWithNever(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "op-rebuild", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationRebuild,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationRebuild,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 	}
 	nom.Status.ActiveOperationRefs = []corev1.ObjectReference{{Name: "op-rebuild"}}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, op).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	got, err := r.shouldSuspendAPI(context.Background(), nom, nominatimv1alpha1.OperationImpactNever)
 	if err != nil {
@@ -456,7 +456,7 @@ func TestShouldSuspendAPI_SkipsMissingOperations(t *testing.T) {
 	nom := baseNominatim("suspend-missing")
 	nom.Status.ActiveOperationRefs = []corev1.ObjectReference{{Name: "gone"}}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	got, err := r.shouldSuspendAPI(context.Background(), nom, nominatimv1alpha1.OperationImpactAll)
 	if err != nil {
@@ -485,9 +485,9 @@ func TestServingWorkloadsAllowed(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			nom := &nominatimv1alpha1.Nominatim{
-				Spec:   nominatimv1alpha1.NominatimSpec{Regions: tc.spec},
-				Status: nominatimv1alpha1.NominatimStatus{Regions: tc.status},
+			nom := &nominatimv1alpha1.NominatimInstance{
+				Spec:   nominatimv1alpha1.NominatimInstanceSpec{Regions: tc.spec},
+				Status: nominatimv1alpha1.NominatimInstanceStatus{Regions: tc.status},
 			}
 			if got := servingWorkloadsAllowed(nom); got != tc.want {
 				t.Fatalf("servingWorkloadsAllowed=%v want %v", got, tc.want)
@@ -513,7 +513,7 @@ func TestReconcileAPI_SkipsUntilBootstrapRegionsSynced(t *testing.T) {
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, existing).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileAPI: %v", err)
@@ -532,7 +532,7 @@ func TestReconcileAPI_CreatesAfterBootstrapRegionsSynced(t *testing.T) {
 	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}}
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileAPI: %v", err)
@@ -550,7 +550,7 @@ func TestReconcileUI_SkipsUntilBootstrapRegionsSynced(t *testing.T) {
 	nom.Spec.UI = &nominatimv1alpha1.UISpec{}
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileUI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileUI: %v", err)
@@ -571,14 +571,14 @@ func TestReconcileAPI_SuspendDuringOperationsScalesToZero(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "busy-op", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationUpdate,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 	}
 	nom.Status.ActiveOperationRefs = []corev1.ObjectReference{{Name: "busy-op"}}
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, op).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileAPI: %v", err)
@@ -600,13 +600,13 @@ func TestReconcileAPI_DefaultNeverKeepsAPIUp(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "busy-op", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 	}
 	nom.Status.ActiveOperationRefs = []corev1.ObjectReference{{Name: "busy-op"}}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, op).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileAPI: %v", err)
@@ -627,7 +627,7 @@ func TestReconcileAPI_ExplicitReplicasHonoredWhenNotSuspended(t *testing.T) {
 	nom.Spec.API = &nominatimv1alpha1.APISpec{Replicas: &three}
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileAPI: %v", err)
@@ -649,7 +649,7 @@ func TestReconcileAPI_CustomImage(t *testing.T) {
 	}
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileAPI: %v", err)
@@ -672,7 +672,7 @@ func TestReconcileAPI_DefaultStatusProbes(t *testing.T) {
 	nom := nominatimWithConnectionSecret("api-status-probes")
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileAPI: %v", err)
@@ -703,7 +703,7 @@ func TestReconcileAPI_GunicornWorkersEnv(t *testing.T) {
 	nom.Spec.API = &nominatimv1alpha1.APISpec{GunicornWorkers: &workers}
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatal(err)
 	}
@@ -742,7 +742,7 @@ func TestReconcileAPI_PodSpecOverlay(t *testing.T) {
 	}
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileAPI(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileAPI: %v", err)
@@ -792,7 +792,7 @@ func TestReconcileAPI_PodSpecInvalidJSON(t *testing.T) {
 	}
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	if err := r.reconcileAPI(context.Background(), nom); err == nil {
 		t.Fatal("expected error for invalid podSpec JSON")
 	}
@@ -802,8 +802,8 @@ func TestBuildOperationJob_WorkerPodSpecOverlay(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "job-podspec", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationUpdate,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
+			Type:                 nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
 		},
 	}
 	overlay, _ := json.Marshal(corev1.PodSpec{
@@ -816,9 +816,9 @@ func TestBuildOperationJob_WorkerPodSpecOverlay(t *testing.T) {
 			},
 		}},
 	})
-	parent := &nominatimv1alpha1.Nominatim{
+	parent := &nominatimv1alpha1.NominatimInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "mynom", Namespace: "ns"},
-		Spec: nominatimv1alpha1.NominatimSpec{
+		Spec: nominatimv1alpha1.NominatimInstanceSpec{
 			Project: nominatimv1alpha1.ProjectSpec{
 				Volume: nominatimv1alpha1.VolumeSource{ClaimName: "project-pvc"},
 			},
@@ -826,7 +826,7 @@ func TestBuildOperationJob_WorkerPodSpecOverlay(t *testing.T) {
 				PodSpec: &runtime.RawExtension{Raw: overlay},
 			},
 		},
-		Status: nominatimv1alpha1.NominatimStatus{
+		Status: nominatimv1alpha1.NominatimInstanceStatus{
 			Database: nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: "db"},
 		},
 	}
@@ -855,7 +855,7 @@ func TestReconcileWorkloads_FullFlow(t *testing.T) {
 	nom.Spec.UI = &nominatimv1alpha1.UISpec{}
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileWorkloads(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileWorkloads: %v", err)
@@ -882,7 +882,7 @@ func TestReconcileWorkloads_PropagatesProjectVolumeError(t *testing.T) {
 	nom := baseNominatim("workloads-badvol")
 	nom.Spec.Project.Volume = nominatimv1alpha1.VolumeSource{}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	if err := r.reconcileWorkloads(context.Background(), nom); err == nil {
 		t.Fatal("expected error for invalid project volume source")
 	}
@@ -894,7 +894,7 @@ func TestReconcileWorkloads_PropagatesFlatnodeVolumeError(t *testing.T) {
 	nom.Spec.Flatnode = &nominatimv1alpha1.FlatnodeSpec{Volume: nominatimv1alpha1.VolumeSource{}}
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	if err := r.reconcileWorkloads(context.Background(), nom); err == nil {
 		t.Fatal("expected error for invalid flatnode volume source")
 	}
@@ -964,7 +964,7 @@ func TestReconcileWorkloads_PropagatesAPIError(t *testing.T) {
 	// No database status set -> reconcileAPI must fail on empty connectionSecretName,
 	// and reconcileWorkloads must propagate that error.
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	if err := r.reconcileWorkloads(context.Background(), nom); err == nil {
 		t.Fatal("expected reconcileWorkloads to propagate reconcileAPI error")
 	}
@@ -977,7 +977,7 @@ func TestReconcilePVC_GetError(t *testing.T) {
 	fc := &failingClient{Client: base, failGet: map[string]error{
 		ProjectPVCName(nom): fmt.Errorf("boom"),
 	}}
-	r := &NominatimReconciler{Client: fc, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: fc, Scheme: scheme}
 
 	vs := nominatimv1alpha1.VolumeSource{
 		VolumeClaimTemplate: &nominatimv1alpha1.VolumeClaimTemplate{
@@ -998,7 +998,7 @@ func TestReconcilePVC_CreateError(t *testing.T) {
 	nom := baseNominatim("pvc-create-error")
 	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	fc := &failingClient{Client: base, failCreate: []failSpec{{kind: "PersistentVolumeClaim"}}}
-	r := &NominatimReconciler{Client: fc, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: fc, Scheme: scheme}
 
 	vs := nominatimv1alpha1.VolumeSource{
 		VolumeClaimTemplate: &nominatimv1alpha1.VolumeClaimTemplate{
@@ -1084,7 +1084,7 @@ func TestReconcileHTTPRoute_SetNestedSliceError(t *testing.T) {
 	}}
 	existing.SetGroupVersionKind(HTTPRouteGVK)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, existing).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	route := &nominatimv1alpha1.RouteSpec{ParentRefs: []nominatimv1alpha1.ParentReference{{Name: "gw"}}}
 	if err := r.reconcileHTTPRoute(context.Background(), nom, APIName(nom), APIName(nom), route, ComponentAPI); err == nil {
@@ -1098,7 +1098,7 @@ func TestReconcileAPI_ServiceErrorPropagates(t *testing.T) {
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	fc := &failingClient{Client: base, failCreate: []failSpec{{kind: "Service", name: APIName(nom)}}}
-	r := &NominatimReconciler{Client: fc, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: fc, Scheme: scheme}
 
 	if err := r.reconcileAPI(context.Background(), nom); err == nil {
 		t.Fatal("expected reconcileAPI to propagate Service creation error")
@@ -1117,7 +1117,7 @@ func TestReconcileUI_ServiceErrorPropagates(t *testing.T) {
 	nom.Spec.UI = &nominatimv1alpha1.UISpec{Replicas: &two}
 	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	fc := &failingClient{Client: base, failCreate: []failSpec{{kind: "Service", name: UIName(nom)}}}
-	r := &NominatimReconciler{Client: fc, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: fc, Scheme: scheme}
 
 	if err := r.reconcileUI(context.Background(), nom); err == nil {
 		t.Fatal("expected reconcileUI to propagate Service creation error")
@@ -1137,7 +1137,7 @@ func TestShouldSuspendAPI_GetErrorPropagates(t *testing.T) {
 	nom.Status.ActiveOperationRefs = []corev1.ObjectReference{{Name: "op-x"}}
 	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	fc := &failingClient{Client: base, failGet: map[string]error{"op-x": fmt.Errorf("boom")}}
-	r := &NominatimReconciler{Client: fc, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: fc, Scheme: scheme}
 
 	if _, err := r.shouldSuspendAPI(context.Background(), nom, nominatimv1alpha1.OperationImpactAll); err == nil {
 		t.Fatal("expected shouldSuspendAPI to propagate non-NotFound Get error")
@@ -1152,7 +1152,7 @@ func TestReconcileAPI_SuspendEvaluationErrorPropagates(t *testing.T) {
 	nom.Status.ActiveOperationRefs = []corev1.ObjectReference{{Name: "op-x"}}
 	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	fc := &failingClient{Client: base, failGet: map[string]error{"op-x": fmt.Errorf("boom")}}
-	r := &NominatimReconciler{Client: fc, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: fc, Scheme: scheme}
 
 	if err := r.reconcileAPI(context.Background(), nom); err == nil {
 		t.Fatal("expected reconcileAPI to propagate suspend evaluation error")
@@ -1169,7 +1169,7 @@ func TestReconcile_PropagatesWorkloadsError(t *testing.T) {
 	// Force reconcileWorkloads to fail: flatnode set with an empty (invalid) volume source.
 	nom.Spec.Flatnode = &nominatimv1alpha1.FlatnodeSpec{Volume: nominatimv1alpha1.VolumeSource{}}
 	base := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom, secret).Build()
-	r := &NominatimReconciler{Client: base, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: base, Scheme: scheme}
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: nom.Name, Namespace: nom.Namespace}}
 
 	// First reconcile only adds the finalizer.

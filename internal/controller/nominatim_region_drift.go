@@ -37,7 +37,7 @@ const (
 // spec.regions diverges from status.regions. Removals never delete DB data — they
 // only surface ConditionRegionRemovalUnsupported (set in syncStatus).
 // ops is the Reconcile-scoped parent Operation list (one list per pass).
-func (r *NominatimReconciler) reconcileRegionDrift(ctx context.Context, nom *nominatimv1alpha1.Nominatim, ops []nominatimv1alpha1.NominatimOperation) error {
+func (r *NominatimInstanceReconciler) reconcileRegionDrift(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance, ops []nominatimv1alpha1.NominatimOperation) error {
 	// Bootstrap owns the empty→first-import path. Observation of Succeeded ops
 	// into status.regions happens in observeRegionsFromSucceededOps (Reconcile).
 	if len(nom.Status.Regions) == 0 {
@@ -67,9 +67,9 @@ func (r *NominatimReconciler) reconcileRegionDrift(ctx context.Context, nom *nom
 	}
 }
 
-func (r *NominatimReconciler) ensureAddRegionsOperation(
+func (r *NominatimInstanceReconciler) ensureAddRegionsOperation(
 	ctx context.Context,
-	nom *nominatimv1alpha1.Nominatim,
+	nom *nominatimv1alpha1.NominatimInstance,
 	peers []nominatimv1alpha1.NominatimOperation,
 	missing []string,
 ) error {
@@ -118,9 +118,9 @@ func (r *NominatimReconciler) ensureAddRegionsOperation(
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: nom.Namespace},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationAddRegions,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
-			Regions:      []string{next},
+			Type:                 nominatimv1alpha1.NominatimOperationAddRegions,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Regions:              []string{next},
 		},
 	}
 	if err := controllerutil.SetControllerReference(nom, op, r.Scheme); err != nil {
@@ -133,9 +133,9 @@ func (r *NominatimReconciler) ensureAddRegionsOperation(
 	return nil
 }
 
-func (r *NominatimReconciler) ensureRebuildOperation(
+func (r *NominatimInstanceReconciler) ensureRebuildOperation(
 	ctx context.Context,
-	nom *nominatimv1alpha1.Nominatim,
+	nom *nominatimv1alpha1.NominatimInstance,
 	peers []nominatimv1alpha1.NominatimOperation,
 	desired []string,
 ) error {
@@ -168,9 +168,9 @@ func (r *NominatimReconciler) ensureRebuildOperation(
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: nom.Namespace},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationRebuild,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
-			Regions:      append([]string(nil), desired...),
+			Type:                 nominatimv1alpha1.NominatimOperationRebuild,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+			Regions:              append([]string(nil), desired...),
 		},
 	}
 	if err := controllerutil.SetControllerReference(nom, op, r.Scheme); err != nil {

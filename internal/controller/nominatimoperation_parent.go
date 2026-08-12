@@ -28,10 +28,10 @@ import (
 )
 
 // operationRefKind is the Kind used in corev1.ObjectReference entries this controller writes
-// to a parent Nominatim's status.activeOperationRefs.
+// to a parent NominatimInstance's status.activeOperationRefs.
 const operationRefKind = "NominatimOperation"
 
-// operationObjectReference builds the reference tracked on the parent Nominatim's status
+// operationObjectReference builds the reference tracked on the parent NominatimInstance's status
 // while this Operation is Pending or Running.
 func operationObjectReference(op *nominatimv1alpha1.NominatimOperation) corev1.ObjectReference {
 	return corev1.ObjectReference{
@@ -49,21 +49,21 @@ func sameOperationRef(a, b corev1.ObjectReference) bool {
 }
 
 // syncParentActiveOperationRef adds (active=true) or removes (active=false) this Operation's
-// reference on the parent Nominatim's status.activeOperationRefs.
+// reference on the parent NominatimInstance's status.activeOperationRefs.
 //
 // It re-fetches the parent immediately before every write attempt — never reusing an
 // earlier in-memory copy — and retries on resourceVersion conflicts, so a concurrent
-// Nominatim reconcile's status.database write is never stomped by our status.Update. A
+// NominatimInstance reconcile's status.database write is never stomped by our status.Update. A
 // missing parent (already deleted) is treated as a no-op rather than an error.
 func (r *NominatimOperationReconciler) syncParentActiveOperationRef(ctx context.Context, op *nominatimv1alpha1.NominatimOperation, active bool) error {
-	if op.Spec.NominatimRef.Name == "" {
+	if op.Spec.NominatimInstanceRef.Name == "" {
 		return nil
 	}
 	ref := operationObjectReference(op)
-	key := types.NamespacedName{Name: op.Spec.NominatimRef.Name, Namespace: op.Namespace}
+	key := types.NamespacedName{Name: op.Spec.NominatimInstanceRef.Name, Namespace: op.Namespace}
 
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		parent := &nominatimv1alpha1.Nominatim{}
+		parent := &nominatimv1alpha1.NominatimInstance{}
 		if err := r.Get(ctx, key, parent); err != nil {
 			return client.IgnoreNotFound(err)
 		}
@@ -92,7 +92,7 @@ func (r *NominatimOperationReconciler) syncParentActiveOperationRef(ctx context.
 	})
 }
 
-// syncParentSideEffects keeps the parent Nominatim's status.activeOperationRefs current for
+// syncParentSideEffects keeps the parent NominatimInstance's status.activeOperationRefs current for
 // this Operation's phase, and — once the Operation has reached (or already sits at) a
 // terminal phase — resumes CNPG backups and reapplies the runtime postgres profile.
 //
@@ -100,7 +100,7 @@ func (r *NominatimOperationReconciler) syncParentActiveOperationRef(ctx context.
 // earlier in Reconcile) so they always act on the latest status.database. A missing parent
 // is tolerated (already deleted) rather than treated as an error.
 func (r *NominatimOperationReconciler) syncParentSideEffects(ctx context.Context, op *nominatimv1alpha1.NominatimOperation) error {
-	if op.Spec.NominatimRef.Name == "" {
+	if op.Spec.NominatimInstanceRef.Name == "" {
 		return nil
 	}
 
@@ -112,8 +112,8 @@ func (r *NominatimOperationReconciler) syncParentSideEffects(ctx context.Context
 		return nil
 	}
 
-	parent := &nominatimv1alpha1.Nominatim{}
-	key := types.NamespacedName{Name: op.Spec.NominatimRef.Name, Namespace: op.Namespace}
+	parent := &nominatimv1alpha1.NominatimInstance{}
+	key := types.NamespacedName{Name: op.Spec.NominatimInstanceRef.Name, Namespace: op.Namespace}
 	if err := r.Get(ctx, key, parent); err != nil {
 		return client.IgnoreNotFound(err)
 	}
