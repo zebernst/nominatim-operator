@@ -46,6 +46,8 @@ jobs:
             file: images/api/Dockerfile
           - image: nominatim-worker
             file: images/worker/Dockerfile
+          - image: nominatim-ui
+            file: images/ui/Dockerfile
     steps:
       - name: Checkout
         uses: actions/checkout@v7
