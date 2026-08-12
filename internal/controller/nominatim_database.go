@@ -291,10 +291,10 @@ func ensureCNPGManagedWebRole(cluster *unstructured.Unstructured) error {
 
 // reconcileOwnedCNPGDatabase owns a CNPG Database CR that declaratively installs Nominatim
 // extensions (hstore/postgis/…) on the initdb application database.
-// While a Reimport Operation is mid drop/recreate (reset=pending), skip CreateOrUpdate so
-// we do not fight the Operation's Delete or recreate under the pre-Reimport UID.
+// While a Rebuild Operation is mid drop/recreate (reset=pending), skip CreateOrUpdate so
+// we do not fight the Operation's Delete or recreate under the pre-Rebuild UID.
 func (r *NominatimReconciler) reconcileOwnedCNPGDatabase(ctx context.Context, nom *nominatimv1alpha1.Nominatim, clusterName string) error {
-	pending, err := hasPendingReimportDatabaseReset(ctx, r.Client, nom)
+	pending, err := hasPendingRebuildDatabaseReset(ctx, r.Client, nom)
 	if err != nil {
 		return err
 	}
@@ -304,9 +304,9 @@ func (r *NominatimReconciler) reconcileOwnedCNPGDatabase(ctx context.Context, no
 	return ensureOwnedCNPGDatabase(ctx, r.Client, r.Scheme, nom, clusterName)
 }
 
-// hasPendingReimportDatabaseReset is true when an active Reimport Operation against nom
+// hasPendingRebuildDatabaseReset is true when an active Rebuild Operation against nom
 // has recorded the drop/recreate handshake as pending (not yet done).
-func hasPendingReimportDatabaseReset(ctx context.Context, c client.Client, nom *nominatimv1alpha1.Nominatim) (bool, error) {
+func hasPendingRebuildDatabaseReset(ctx context.Context, c client.Client, nom *nominatimv1alpha1.Nominatim) (bool, error) {
 	list := &nominatimv1alpha1.NominatimOperationList{}
 	if err := c.List(ctx, list, client.InNamespace(nom.Namespace)); err != nil {
 		return false, err
@@ -316,13 +316,13 @@ func hasPendingReimportDatabaseReset(ctx context.Context, c client.Client, nom *
 		if op.Spec.NominatimRef.Name != nom.Name {
 			continue
 		}
-		if op.Spec.Type != nominatimv1alpha1.NominatimOperationReimport {
+		if op.Spec.Type != nominatimv1alpha1.NominatimOperationRebuild {
 			continue
 		}
 		if !isActiveOperationPhase(op.Status.Phase) {
 			continue
 		}
-		if op.Annotations[annotationReimportDBReset] == reimportDBResetPending {
+		if op.Annotations[annotationRebuildDBReset] == rebuildDBResetPending {
 			return true, nil
 		}
 	}
@@ -330,7 +330,7 @@ func hasPendingReimportDatabaseReset(ctx context.Context, c client.Client, nom *
 }
 
 // ensureOwnedCNPGDatabase CreateOrUpdates the owned CNPG Database CR for nom.
-// Used by the Nominatim reconciler and by Reimport database reset.
+// Used by the Nominatim reconciler and by Rebuild database reset.
 func ensureOwnedCNPGDatabase(ctx context.Context, c client.Client, scheme *runtime.Scheme, nom *nominatimv1alpha1.Nominatim, clusterName string) error {
 	dbName := OwnedCNPGDatabaseName(nom)
 
@@ -375,7 +375,7 @@ func applyOwnedCNPGDatabaseSpec(db *unstructured.Unstructured, clusterName strin
 	if err := unstructured.SetNestedSlice(db.Object, exts, "spec", "extensions"); err != nil {
 		return err
 	}
-	// delete reclaim so Reimport can drop+recreate the application database via the CR.
+	// delete reclaim so Rebuild can drop+recreate the application database via the CR.
 	if err := unstructured.SetNestedField(db.Object, cnpgDatabaseReclaimDelete, "spec", "databaseReclaimPolicy"); err != nil {
 		return err
 	}

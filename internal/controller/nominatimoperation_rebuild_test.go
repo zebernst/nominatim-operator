@@ -43,9 +43,9 @@ import (
 var errInjected = errors.New("injected failure")
 
 const (
-	reimportTestUIDOld   = "uid-old"
-	reimportTestUIDNew   = "uid-new"
-	reimportTestUIDFresh = "uid-fresh"
+	rebuildTestUIDOld   = "uid-old"
+	rebuildTestUIDNew   = "uid-new"
+	rebuildTestUIDFresh = "uid-fresh"
 )
 
 func newOwnedCNPGDatabase(nom *nominatimv1alpha1.Nominatim, uid string, applied bool) *unstructured.Unstructured {
@@ -72,9 +72,9 @@ func readyOwnedCNPGCluster(nom *nominatimv1alpha1.Nominatim) *unstructured.Unstr
 	return cluster
 }
 
-// reimportParent is a Nominatim that owns its CNPG Cluster, i.e. the only mode in which
-// Reimport drops and recreates the Database CR.
-func reimportParent(name string) *nominatimv1alpha1.Nominatim {
+// rebuildParent is a Nominatim that owns its CNPG Cluster, i.e. the only mode in which
+// Rebuild drops and recreates the Database CR.
+func rebuildParent(name string) *nominatimv1alpha1.Nominatim {
 	parent := baseNominatim(name)
 	instances := int32(1)
 	parent.Spec.Database = nominatimv1alpha1.DatabaseSpec{
@@ -88,7 +88,7 @@ func reimportParent(name string) *nominatimv1alpha1.Nominatim {
 	return parent
 }
 
-func reimportOp(name string, parent *nominatimv1alpha1.Nominatim, annotations map[string]string) *nominatimv1alpha1.NominatimOperation {
+func rebuildOp(name string, parent *nominatimv1alpha1.Nominatim, annotations map[string]string) *nominatimv1alpha1.NominatimOperation {
 	return &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
@@ -96,7 +96,7 @@ func reimportOp(name string, parent *nominatimv1alpha1.Nominatim, annotations ma
 			Annotations: annotations,
 		},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationReimport,
+			Type:         nominatimv1alpha1.NominatimOperationRebuild,
 			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
 			Regions:      []string{"europe/monaco"},
 		},
@@ -107,8 +107,8 @@ func reimportOp(name string, parent *nominatimv1alpha1.Nominatim, annotations ma
 // the moment the replacement Database reports applied=true.
 func pendingResetAnnotations(prevUID string) map[string]string {
 	return map[string]string{
-		annotationReimportDBReset:   reimportDBResetPending,
-		annotationReimportDBPrevUID: prevUID,
+		annotationRebuildDBReset:   rebuildDBResetPending,
+		annotationRebuildDBPrevUID: prevUID,
 	}
 }
 
@@ -196,45 +196,45 @@ func failOperationUpdate(err error) interceptor.Funcs {
 	}
 }
 
-func TestEnsureReimportDatabaseReset_SkipsNonReimport(t *testing.T) {
+func TestEnsureRebuildDatabaseReset_SkipsNonRebuild(t *testing.T) {
 	r := &NominatimOperationReconciler{}
 	op := &nominatimv1alpha1.NominatimOperation{
 		Spec: nominatimv1alpha1.NominatimOperationSpec{Type: nominatimv1alpha1.NominatimOperationBootstrap},
 	}
-	ready, err := r.ensureReimportDatabaseReset(context.Background(), op, baseNominatim("skip"))
+	ready, err := r.ensureRebuildDatabaseReset(context.Background(), op, baseNominatim("skip"))
 	if err != nil || !ready {
 		t.Fatalf("ready=%v err=%v want ready=true", ready, err)
 	}
 }
 
-func TestEnsureReimportDatabaseReset_SkipsNonOwnedCluster(t *testing.T) {
+func TestEnsureRebuildDatabaseReset_SkipsNonOwnedCluster(t *testing.T) {
 	r := &NominatimOperationReconciler{}
 	op := &nominatimv1alpha1.NominatimOperation{
-		Spec: nominatimv1alpha1.NominatimOperationSpec{Type: nominatimv1alpha1.NominatimOperationReimport},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{Type: nominatimv1alpha1.NominatimOperationRebuild},
 	}
 	parent := baseNominatim("secret-mode")
 	parent.Spec.Database = nominatimv1alpha1.DatabaseSpec{
 		ConnectionSecretRef: &nominatimv1alpha1.LocalObjectReference{Name: "ext"},
 	}
 	parent.Status.Database.Mode = nominatimv1alpha1.DatabaseModeConnectionSecret
-	ready, err := r.ensureReimportDatabaseReset(context.Background(), op, parent)
+	ready, err := r.ensureRebuildDatabaseReset(context.Background(), op, parent)
 	if err != nil || !ready {
 		t.Fatalf("ready=%v err=%v want ready=true for connection-secret mode", ready, err)
 	}
 }
 
-func TestEnsureReimportDatabaseReset_DeletesThenRecreates(t *testing.T) {
+func TestEnsureRebuildDatabaseReset_DeletesThenRecreates(t *testing.T) {
 	scheme := testScheme(t)
-	parent := reimportParent("ri-reset")
-	oldDB := newOwnedCNPGDatabase(parent, reimportTestUIDOld, true)
-	op := reimportOp("ri-op", parent, nil)
+	parent := rebuildParent("ri-reset")
+	oldDB := newOwnedCNPGDatabase(parent, rebuildTestUIDOld, true)
+	op := rebuildOp("ri-op", parent, nil)
 
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithObjects(parent, op, oldDB, cnpgAppSecret(parent), readyOwnedCNPGCluster(parent)).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 
 	// Pass 1: delete existing Database, not ready yet.
-	ready, err := r.ensureReimportDatabaseReset(context.Background(), op, parent)
+	ready, err := r.ensureRebuildDatabaseReset(context.Background(), op, parent)
 	if err != nil {
 		t.Fatalf("pass1: %v", err)
 	}
@@ -242,8 +242,8 @@ func TestEnsureReimportDatabaseReset_DeletesThenRecreates(t *testing.T) {
 		t.Fatal("pass1: expected ready=false after requesting delete")
 	}
 	gotOp := getOperation(t, c, op)
-	if gotOp.Annotations[annotationReimportDBPrevUID] != reimportTestUIDOld {
-		t.Fatalf("prev uid annotation=%q", gotOp.Annotations[annotationReimportDBPrevUID])
+	if gotOp.Annotations[annotationRebuildDBPrevUID] != rebuildTestUIDOld {
+		t.Fatalf("prev uid annotation=%q", gotOp.Annotations[annotationRebuildDBPrevUID])
 	}
 	db := &unstructured.Unstructured{}
 	db.SetGroupVersionKind(CNPGDatabaseGVK)
@@ -258,7 +258,7 @@ func TestEnsureReimportDatabaseReset_DeletesThenRecreates(t *testing.T) {
 
 	// Pass 2: recreate Database CR (status.applied still false).
 	op = gotOp
-	ready, err = r.ensureReimportDatabaseReset(context.Background(), op, parent)
+	ready, err = r.ensureRebuildDatabaseReset(context.Background(), op, parent)
 	if err != nil {
 		t.Fatalf("pass2: %v", err)
 	}
@@ -273,98 +273,98 @@ func TestEnsureReimportDatabaseReset_DeletesThenRecreates(t *testing.T) {
 
 	// Simulate CNPG applying extensions on the new Database.
 	_ = unstructured.SetNestedField(db.Object, true, "status", "applied")
-	db.SetUID(reimportTestUIDNew)
+	db.SetUID(rebuildTestUIDNew)
 	if err := c.Update(context.Background(), db); err != nil {
 		t.Fatalf("mark applied: %v", err)
 	}
 
 	// Pass 3: applied with new UID → done.
 	op = getOperation(t, c, op)
-	ready, err = r.ensureReimportDatabaseReset(context.Background(), op, parent)
+	ready, err = r.ensureRebuildDatabaseReset(context.Background(), op, parent)
 	if err != nil || !ready {
 		t.Fatalf("pass3: ready=%v err=%v", ready, err)
 	}
-	if got := getOperation(t, c, op); got.Annotations[annotationReimportDBReset] != reimportDBResetDone {
-		t.Fatalf("reset annotation=%q want %q", got.Annotations[annotationReimportDBReset], reimportDBResetDone)
+	if got := getOperation(t, c, op); got.Annotations[annotationRebuildDBReset] != rebuildDBResetDone {
+		t.Fatalf("reset annotation=%q want %q", got.Annotations[annotationRebuildDBReset], rebuildDBResetDone)
 	}
 
 	// Pass 4: idempotent once done.
-	ready, err = r.ensureReimportDatabaseReset(context.Background(), op, parent)
+	ready, err = r.ensureRebuildDatabaseReset(context.Background(), op, parent)
 	if err != nil || !ready {
 		t.Fatalf("pass4: ready=%v err=%v", ready, err)
 	}
 }
 
-// A Reimport on a parent whose Database CR was never created still has to run the
+// A Rebuild on a parent whose Database CR was never created still has to run the
 // handshake, recording "none" so the recreate branch is not mistaken for the drop branch.
-func TestEnsureReimportDatabaseReset_FirstPassRecordsNoneWhenDatabaseMissing(t *testing.T) {
+func TestEnsureRebuildDatabaseReset_FirstPassRecordsNoneWhenDatabaseMissing(t *testing.T) {
 	scheme := testScheme(t)
-	parent := reimportParent("ri-absent")
-	op := reimportOp("ri-absent-op", parent, nil)
+	parent := rebuildParent("ri-absent")
+	op := rebuildOp("ri-absent-op", parent, nil)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(parent, op).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 
-	ready, err := r.ensureReimportDatabaseReset(context.Background(), op, parent)
+	ready, err := r.ensureRebuildDatabaseReset(context.Background(), op, parent)
 	if err != nil {
-		t.Fatalf("ensureReimportDatabaseReset: %v", err)
+		t.Fatalf("ensureRebuildDatabaseReset: %v", err)
 	}
 	if ready {
 		t.Fatal("expected ready=false on the first pass")
 	}
 	got := getOperation(t, c, op)
-	if got.Annotations[annotationReimportDBPrevUID] != reimportDBPrevUIDNone {
+	if got.Annotations[annotationRebuildDBPrevUID] != rebuildDBPrevUIDNone {
 		t.Fatalf("prev uid annotation=%q want %q",
-			got.Annotations[annotationReimportDBPrevUID], reimportDBPrevUIDNone)
+			got.Annotations[annotationRebuildDBPrevUID], rebuildDBPrevUIDNone)
 	}
-	if got.Annotations[annotationReimportDBReset] != reimportDBResetPending {
+	if got.Annotations[annotationRebuildDBReset] != rebuildDBResetPending {
 		t.Fatalf("reset annotation=%q want %q",
-			got.Annotations[annotationReimportDBReset], reimportDBResetPending)
+			got.Annotations[annotationRebuildDBReset], rebuildDBResetPending)
 	}
 }
 
 // prevUID="none" means there was nothing to drop, so the same-UID guard must not apply
 // and the freshly created Database can arm the Job as soon as it reports applied=true.
-func TestEnsureReimportDatabaseReset_ReadyWhenPrevUIDNoneAndApplied(t *testing.T) {
+func TestEnsureRebuildDatabaseReset_ReadyWhenPrevUIDNoneAndApplied(t *testing.T) {
 	scheme := testScheme(t)
-	parent := reimportParent("ri-none-applied")
-	op := reimportOp("ri-none-applied-op", parent, pendingResetAnnotations(reimportDBPrevUIDNone))
+	parent := rebuildParent("ri-none-applied")
+	op := rebuildOp("ri-none-applied-op", parent, pendingResetAnnotations(rebuildDBPrevUIDNone))
 	c := fake.NewClientBuilder().WithScheme(scheme).
-		WithObjects(parent, op, newOwnedCNPGDatabase(parent, reimportTestUIDFresh, true)).Build()
+		WithObjects(parent, op, newOwnedCNPGDatabase(parent, rebuildTestUIDFresh, true)).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 
-	ready, err := r.ensureReimportDatabaseReset(context.Background(), op, parent)
+	ready, err := r.ensureRebuildDatabaseReset(context.Background(), op, parent)
 	if err != nil || !ready {
 		t.Fatalf("ready=%v err=%v want ready=true", ready, err)
 	}
-	if got := getOperation(t, c, op); got.Annotations[annotationReimportDBReset] != reimportDBResetDone {
-		t.Fatalf("reset annotation=%q want %q", got.Annotations[annotationReimportDBReset], reimportDBResetDone)
+	if got := getOperation(t, c, op); got.Annotations[annotationRebuildDBReset] != rebuildDBResetDone {
+		t.Fatalf("reset annotation=%q want %q", got.Annotations[annotationRebuildDBReset], rebuildDBResetDone)
 	}
 }
 
 // The stale-object guard: CNPG has not finished the drop yet, so the Database still carries
 // the recorded UID and the Job must stay unarmed even though status.applied is true.
-func TestEnsureReimportDatabaseReset_WaitsWhileUIDUnchanged(t *testing.T) {
+func TestEnsureRebuildDatabaseReset_WaitsWhileUIDUnchanged(t *testing.T) {
 	scheme := testScheme(t)
-	parent := reimportParent("ri-same-uid")
-	op := reimportOp("ri-same-uid-op", parent, pendingResetAnnotations(reimportTestUIDOld))
+	parent := rebuildParent("ri-same-uid")
+	op := rebuildOp("ri-same-uid-op", parent, pendingResetAnnotations(rebuildTestUIDOld))
 	c := fake.NewClientBuilder().WithScheme(scheme).
-		WithObjects(parent, op, newOwnedCNPGDatabase(parent, reimportTestUIDOld, true)).Build()
+		WithObjects(parent, op, newOwnedCNPGDatabase(parent, rebuildTestUIDOld, true)).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 
-	ready, err := r.ensureReimportDatabaseReset(context.Background(), op, parent)
+	ready, err := r.ensureRebuildDatabaseReset(context.Background(), op, parent)
 	if err != nil {
-		t.Fatalf("ensureReimportDatabaseReset: %v", err)
+		t.Fatalf("ensureRebuildDatabaseReset: %v", err)
 	}
 	if ready {
 		t.Fatal("expected ready=false while the Database still has the recorded UID")
 	}
-	if got := getOperation(t, c, op); got.Annotations[annotationReimportDBReset] != reimportDBResetPending {
+	if got := getOperation(t, c, op); got.Annotations[annotationRebuildDBReset] != rebuildDBResetPending {
 		t.Fatalf("reset annotation=%q want %q",
-			got.Annotations[annotationReimportDBReset], reimportDBResetPending)
+			got.Annotations[annotationRebuildDBReset], rebuildDBResetPending)
 	}
 }
 
-func TestEnsureReimportDatabaseReset_WaitsUntilReplacementApplied(t *testing.T) {
+func TestEnsureRebuildDatabaseReset_WaitsUntilReplacementApplied(t *testing.T) {
 	cases := []struct {
 		name    string
 		mutate  func(db *unstructured.Unstructured)
@@ -391,19 +391,19 @@ func TestEnsureReimportDatabaseReset_WaitsUntilReplacementApplied(t *testing.T) 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			scheme := testScheme(t)
-			parent := reimportParent("ri-pending")
-			op := reimportOp("ri-pending-op", parent, pendingResetAnnotations(reimportTestUIDOld))
-			db := newOwnedCNPGDatabase(parent, reimportTestUIDNew, false)
+			parent := rebuildParent("ri-pending")
+			op := rebuildOp("ri-pending-op", parent, pendingResetAnnotations(rebuildTestUIDOld))
+			db := newOwnedCNPGDatabase(parent, rebuildTestUIDNew, false)
 			tc.mutate(db)
 			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(parent, op, db).Build()
 			r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 
-			ready, err := r.ensureReimportDatabaseReset(context.Background(), op, parent)
+			ready, err := r.ensureRebuildDatabaseReset(context.Background(), op, parent)
 			if tc.wantErr && err == nil {
 				t.Fatal("expected an error for a non-boolean status.applied")
 			}
 			if !tc.wantErr && err != nil {
-				t.Fatalf("ensureReimportDatabaseReset: %v", err)
+				t.Fatalf("ensureRebuildDatabaseReset: %v", err)
 			}
 			if ready {
 				t.Fatal("expected ready=false until the replacement reports applied=true")
@@ -413,18 +413,18 @@ func TestEnsureReimportDatabaseReset_WaitsUntilReplacementApplied(t *testing.T) 
 }
 
 // Falls back to the conventional owned Cluster name when status has not caught up, so a
-// Reimport that races cluster-create still recreates the Database against the right Cluster.
-func TestEnsureReimportDatabaseReset_RecreateFallsBackToOwnedClusterName(t *testing.T) {
+// Rebuild that races cluster-create still recreates the Database against the right Cluster.
+func TestEnsureRebuildDatabaseReset_RecreateFallsBackToOwnedClusterName(t *testing.T) {
 	scheme := testScheme(t)
-	parent := reimportParent("ri-fallback")
+	parent := rebuildParent("ri-fallback")
 	parent.Status.Database.ClusterName = ""
-	op := reimportOp("ri-fallback-op", parent, pendingResetAnnotations(reimportDBPrevUIDNone))
+	op := rebuildOp("ri-fallback-op", parent, pendingResetAnnotations(rebuildDBPrevUIDNone))
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(parent, op).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 
-	ready, err := r.ensureReimportDatabaseReset(context.Background(), op, parent)
+	ready, err := r.ensureRebuildDatabaseReset(context.Background(), op, parent)
 	if err != nil {
-		t.Fatalf("ensureReimportDatabaseReset: %v", err)
+		t.Fatalf("ensureRebuildDatabaseReset: %v", err)
 	}
 	if ready {
 		t.Fatal("expected ready=false right after recreating the Database")
@@ -438,30 +438,30 @@ func TestEnsureReimportDatabaseReset_RecreateFallsBackToOwnedClusterName(t *test
 
 // Records the UID and stays not-ready when the Database vanishes between the reclaim patch
 // and the delete, so a concurrent delete cannot be mistaken for a finished handshake.
-func TestEnsureReimportDatabaseReset_FirstPassDatabaseVanishesAfterReclaim(t *testing.T) {
+func TestEnsureRebuildDatabaseReset_FirstPassDatabaseVanishesAfterReclaim(t *testing.T) {
 	scheme := testScheme(t)
-	parent := reimportParent("ri-vanish")
-	op := reimportOp("ri-vanish-op", parent, nil)
+	parent := rebuildParent("ri-vanish")
+	op := rebuildOp("ri-vanish-op", parent, nil)
 	c := fake.NewClientBuilder().WithScheme(scheme).
-		WithObjects(parent, op, newOwnedCNPGDatabase(parent, reimportTestUIDOld, true)).
+		WithObjects(parent, op, newOwnedCNPGDatabase(parent, rebuildTestUIDOld, true)).
 		WithInterceptorFuncs(failDatabaseGetAfter(1, cnpgDatabaseNotFound(OwnedCNPGDatabaseName(parent)))).
 		Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 
-	ready, err := r.ensureReimportDatabaseReset(context.Background(), op, parent)
+	ready, err := r.ensureRebuildDatabaseReset(context.Background(), op, parent)
 	if err != nil {
-		t.Fatalf("ensureReimportDatabaseReset: %v", err)
+		t.Fatalf("ensureRebuildDatabaseReset: %v", err)
 	}
 	if ready {
 		t.Fatal("expected ready=false after the Database vanished")
 	}
-	if got := getOperation(t, c, op); got.Annotations[annotationReimportDBPrevUID] != reimportTestUIDOld {
-		t.Fatalf("prev uid annotation=%q want %q", got.Annotations[annotationReimportDBPrevUID], reimportTestUIDOld)
+	if got := getOperation(t, c, op); got.Annotations[annotationRebuildDBPrevUID] != rebuildTestUIDOld {
+		t.Fatalf("prev uid annotation=%q want %q", got.Annotations[annotationRebuildDBPrevUID], rebuildTestUIDOld)
 	}
 }
 
-func TestEnsureReimportDatabaseReset_SurfacesAPIErrors(t *testing.T) {
-	parent := reimportParent("ri-errors")
+func TestEnsureRebuildDatabaseReset_SurfacesAPIErrors(t *testing.T) {
+	parent := rebuildParent("ri-errors")
 	dbName := OwnedCNPGDatabaseName(parent)
 
 	cases := []struct {
@@ -540,14 +540,14 @@ func TestEnsureReimportDatabaseReset_SurfacesAPIErrors(t *testing.T) {
 		},
 		{
 			name:        "pending pass get",
-			annotations: pendingResetAnnotations(reimportTestUIDOld),
+			annotations: pendingResetAnnotations(rebuildTestUIDOld),
 			withDB:      true,
 			funcs:       failDatabaseGetAfter(0, errInjected),
 			wantMessage: errInjected.Error(),
 		},
 		{
 			name:        "recreate",
-			annotations: pendingResetAnnotations(reimportTestUIDOld),
+			annotations: pendingResetAnnotations(rebuildTestUIDOld),
 			funcs: interceptor.Funcs{
 				Create: func(
 					ctx context.Context,
@@ -562,7 +562,7 @@ func TestEnsureReimportDatabaseReset_SurfacesAPIErrors(t *testing.T) {
 		},
 		{
 			name:        "done annotation patch",
-			annotations: pendingResetAnnotations(reimportTestUIDOld),
+			annotations: pendingResetAnnotations(rebuildTestUIDOld),
 			withDB:      true,
 			funcs:       failOperationUpdate(errInjected),
 			wantMessage: errInjected.Error(),
@@ -572,11 +572,11 @@ func TestEnsureReimportDatabaseReset_SurfacesAPIErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			scheme := testScheme(t)
-			op := reimportOp("ri-errors-op", parent, tc.annotations)
+			op := rebuildOp("ri-errors-op", parent, tc.annotations)
 			objs := []client.Object{parent, op}
 			if tc.withDB {
 				// A new UID means the "done annotation patch" case reaches the final patch.
-				db := newOwnedCNPGDatabase(parent, reimportTestUIDNew, true)
+				db := newOwnedCNPGDatabase(parent, rebuildTestUIDNew, true)
 				if tc.retainDB {
 					_ = unstructured.SetNestedField(db.Object, "retain", "spec", "databaseReclaimPolicy")
 				}
@@ -586,7 +586,7 @@ func TestEnsureReimportDatabaseReset_SurfacesAPIErrors(t *testing.T) {
 				WithObjects(objs...).WithInterceptorFuncs(tc.funcs).Build()
 			r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 
-			ready, err := r.ensureReimportDatabaseReset(context.Background(), op, parent)
+			ready, err := r.ensureRebuildDatabaseReset(context.Background(), op, parent)
 			if err == nil {
 				t.Fatalf("expected an error for %s (database %q)", tc.name, dbName)
 			}
@@ -602,7 +602,7 @@ func TestEnsureReimportDatabaseReset_SurfacesAPIErrors(t *testing.T) {
 
 func TestEnsureDatabaseReclaimDelete_NoopWhenPolicyAlreadyDelete(t *testing.T) {
 	scheme := testScheme(t)
-	parent := reimportParent("rc-noop")
+	parent := rebuildParent("rc-noop")
 	db := newOwnedCNPGDatabase(parent, "uid-1", true)
 	updates := 0
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(db).
@@ -627,10 +627,10 @@ func TestEnsureDatabaseReclaimDelete_NoopWhenPolicyAlreadyDelete(t *testing.T) {
 }
 
 // A Database left on "retain" (hand-edited, or created by an older operator) must be
-// switched to "delete" or CNPG would keep the Postgres database across the Reimport.
+// switched to "delete" or CNPG would keep the Postgres database across the Rebuild.
 func TestEnsureDatabaseReclaimDelete_PatchesRetainPolicy(t *testing.T) {
 	scheme := testScheme(t)
-	parent := reimportParent("rc-retain")
+	parent := rebuildParent("rc-retain")
 	db := newOwnedCNPGDatabase(parent, "uid-1", true)
 	_ = unstructured.SetNestedField(db.Object, "retain", "spec", "databaseReclaimPolicy")
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(db).Build()
@@ -662,7 +662,7 @@ func TestEnsureDatabaseReclaimDelete_SurfacesAPIErrors(t *testing.T) {
 	for name, funcs := range cases {
 		t.Run(name, func(t *testing.T) {
 			scheme := testScheme(t)
-			parent := reimportParent("rc-" + name)
+			parent := rebuildParent("rc-" + name)
 			db := newOwnedCNPGDatabase(parent, "uid-1", true)
 			_ = unstructured.SetNestedField(db.Object, "retain", "spec", "databaseReclaimPolicy")
 			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(db).
@@ -679,7 +679,7 @@ func TestEnsureDatabaseReclaimDelete_SurfacesAPIErrors(t *testing.T) {
 // error rather than silently leaving the reclaim policy alone before the delete.
 func TestEnsureDatabaseReclaimDelete_RejectsUnpatchableSpec(t *testing.T) {
 	scheme := testScheme(t)
-	parent := reimportParent("rc-malformed")
+	parent := rebuildParent("rc-malformed")
 	db := newOwnedCNPGDatabase(parent, "uid-1", true)
 	db.Object["spec"] = "not-an-object"
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(db).Build()
@@ -689,21 +689,21 @@ func TestEnsureDatabaseReclaimDelete_RejectsUnpatchableSpec(t *testing.T) {
 	}
 }
 
-func TestPatchReimportResetAnnotations_SurfacesGetError(t *testing.T) {
+func TestPatchRebuildResetAnnotations_SurfacesGetError(t *testing.T) {
 	scheme := testScheme(t)
-	parent := reimportParent("patch-missing")
-	op := reimportOp("patch-missing-op", parent, nil)
+	parent := rebuildParent("patch-missing")
+	op := rebuildOp("patch-missing-op", parent, nil)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(parent).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 
-	err := r.patchReimportResetAnnotations(context.Background(), op, reimportDBResetPending, reimportTestUIDOld)
+	err := r.patchRebuildResetAnnotations(context.Background(), op, rebuildDBResetPending, rebuildTestUIDOld)
 	if !apierrors.IsNotFound(err) {
 		t.Fatalf("err=%v want NotFound for an Operation that no longer exists", err)
 	}
 }
 
 func TestCNPGOwnedDatabaseApplied(t *testing.T) {
-	parent := reimportParent("applied")
+	parent := rebuildParent("applied")
 	dbName := OwnedCNPGDatabaseName(parent)
 
 	cases := []struct {
@@ -776,7 +776,7 @@ func TestCNPGClusterReadyForJobs(t *testing.T) {
 		{
 			name: "degraded skips the wait",
 			parent: func() *nominatimv1alpha1.Nominatim {
-				parent := reimportParent("ready-degraded")
+				parent := rebuildParent("ready-degraded")
 				parent.Status.Database.Degraded = true
 				return parent
 			},
@@ -784,7 +784,7 @@ func TestCNPGClusterReadyForJobs(t *testing.T) {
 		},
 		{
 			name:   "owned cluster ready and database applied",
-			parent: func() *nominatimv1alpha1.Nominatim { return reimportParent("ready-owned") },
+			parent: func() *nominatimv1alpha1.Nominatim { return rebuildParent("ready-owned") },
 			objects: func(parent *nominatimv1alpha1.Nominatim) []client.Object {
 				return []client.Object{readyOwnedCNPGCluster(parent), appliedDB(parent)}
 			},
@@ -793,7 +793,7 @@ func TestCNPGClusterReadyForJobs(t *testing.T) {
 		{
 			name: "owned cluster name falls back to the conventional name",
 			parent: func() *nominatimv1alpha1.Nominatim {
-				parent := reimportParent("ready-fallback")
+				parent := rebuildParent("ready-fallback")
 				parent.Status.Database.ClusterName = ""
 				return parent
 			},
@@ -819,11 +819,11 @@ func TestCNPGClusterReadyForJobs(t *testing.T) {
 		},
 		{
 			name:   "missing cluster waits",
-			parent: func() *nominatimv1alpha1.Nominatim { return reimportParent("ready-missing") },
+			parent: func() *nominatimv1alpha1.Nominatim { return rebuildParent("ready-missing") },
 		},
 		{
 			name:   "cluster without conditions waits",
-			parent: func() *nominatimv1alpha1.Nominatim { return reimportParent("ready-nocond") },
+			parent: func() *nominatimv1alpha1.Nominatim { return rebuildParent("ready-nocond") },
 			objects: func(parent *nominatimv1alpha1.Nominatim) []client.Object {
 				cluster := readyOwnedCNPGCluster(parent)
 				unstructured.RemoveNestedField(cluster.Object, "status", "conditions")
@@ -832,7 +832,7 @@ func TestCNPGClusterReadyForJobs(t *testing.T) {
 		},
 		{
 			name:   "cluster not ready waits",
-			parent: func() *nominatimv1alpha1.Nominatim { return reimportParent("ready-notready") },
+			parent: func() *nominatimv1alpha1.Nominatim { return rebuildParent("ready-notready") },
 			objects: func(parent *nominatimv1alpha1.Nominatim) []client.Object {
 				cluster := readyOwnedCNPGCluster(parent)
 				_ = unstructured.SetNestedSlice(cluster.Object, []interface{}{
@@ -883,7 +883,7 @@ func TestCNPGClusterReadyForJobs(t *testing.T) {
 
 func TestCNPGClusterReadyForJobs_SurfacesClusterGetError(t *testing.T) {
 	scheme := testScheme(t)
-	parent := reimportParent("ready-geterr")
+	parent := rebuildParent("ready-geterr")
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithObjects(parent, readyOwnedCNPGCluster(parent)).
 		WithInterceptorFuncs(interceptor.Funcs{
@@ -911,11 +911,11 @@ func TestCNPGClusterReadyForJobs_SurfacesClusterGetError(t *testing.T) {
 	}
 }
 
-func TestReconcileReimport_WaitsForDatabaseResetBeforeJob(t *testing.T) {
+func TestReconcileRebuild_WaitsForDatabaseResetBeforeJob(t *testing.T) {
 	scheme := testScheme(t)
-	parent := reimportParent("ri-job")
-	oldDB := newOwnedCNPGDatabase(parent, reimportTestUIDOld, true)
-	op := reimportOp("ri-job-op", parent, nil)
+	parent := rebuildParent("ri-job")
+	oldDB := newOwnedCNPGDatabase(parent, rebuildTestUIDOld, true)
+	op := rebuildOp("ri-job-op", parent, nil)
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(parent, &nominatimv1alpha1.NominatimOperation{}).
 		WithObjects(parent, op, oldDB, cnpgAppSecret(parent), readyOwnedCNPGCluster(parent)).Build()
@@ -939,13 +939,13 @@ func TestReconcileReimport_WaitsForDatabaseResetBeforeJob(t *testing.T) {
 
 // activeOperationRefs must be registered before the Job exists so the parent can scale the
 // API to zero and CNPG can DROP DATABASE under reclaim=delete.
-func TestReconcileReimport_RegistersActiveRefBeforeJob(t *testing.T) {
+func TestReconcileRebuild_RegistersActiveRefBeforeJob(t *testing.T) {
 	scheme := testScheme(t)
-	parent := reimportParent("ri-ref")
-	op := reimportOp("ri-ref-op", parent, nil)
+	parent := rebuildParent("ri-ref")
+	op := rebuildOp("ri-ref-op", parent, nil)
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(parent, &nominatimv1alpha1.NominatimOperation{}).
-		WithObjects(parent, op, newOwnedCNPGDatabase(parent, reimportTestUIDOld, true),
+		WithObjects(parent, op, newOwnedCNPGDatabase(parent, rebuildTestUIDOld, true),
 			cnpgAppSecret(parent), readyOwnedCNPGCluster(parent)).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 
@@ -965,10 +965,10 @@ func TestReconcileReimport_RegistersActiveRefBeforeJob(t *testing.T) {
 }
 
 // DROP DATABASE cannot proceed while the API Deployment still has pods.
-func TestEnsureReimportDatabaseReset_WaitsForAPIQuiesced(t *testing.T) {
+func TestEnsureRebuildDatabaseReset_WaitsForAPIQuiesced(t *testing.T) {
 	scheme := testScheme(t)
-	parent := reimportParent("ri-api")
-	op := reimportOp("ri-api-op", parent, nil)
+	parent := rebuildParent("ri-api")
+	op := rebuildOp("ri-api-op", parent, nil)
 	replicas := int32(1)
 	api := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: APIName(parent), Namespace: parent.Namespace},
@@ -977,12 +977,12 @@ func TestEnsureReimportDatabaseReset_WaitsForAPIQuiesced(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(&nominatimv1alpha1.NominatimOperation{}).
-		WithObjects(parent, op, api, newOwnedCNPGDatabase(parent, reimportTestUIDOld, true)).Build()
+		WithObjects(parent, op, api, newOwnedCNPGDatabase(parent, rebuildTestUIDOld, true)).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 
-	ready, err := r.ensureReimportDatabaseReset(context.Background(), op, parent)
+	ready, err := r.ensureRebuildDatabaseReset(context.Background(), op, parent)
 	if err != nil {
-		t.Fatalf("ensureReimportDatabaseReset: %v", err)
+		t.Fatalf("ensureRebuildDatabaseReset: %v", err)
 	}
 	if ready {
 		t.Fatal("expected ready=false while the API Deployment still has ReadyReplicas")
@@ -1001,17 +1001,17 @@ func TestEnsureReimportDatabaseReset_WaitsForAPIQuiesced(t *testing.T) {
 	}, db); err != nil {
 		t.Fatalf("Database should still exist until the API is quiesced: %v", err)
 	}
-	if string(db.GetUID()) != reimportTestUIDOld {
-		t.Fatalf("uid=%q want %q (delete must wait for API drain)", db.GetUID(), reimportTestUIDOld)
+	if string(db.GetUID()) != rebuildTestUIDOld {
+		t.Fatalf("uid=%q want %q (delete must wait for API drain)", db.GetUID(), rebuildTestUIDOld)
 	}
 }
 
-// The Nominatim reconciler must not CreateOrUpdate the owned Database while a Reimport is
-// mid drop/recreate, or it will fight the Operation's Delete under the pre-Reimport UID.
-func TestReconcileOwnedCNPGDatabase_SkipsWhileReimportResetPending(t *testing.T) {
+// The Nominatim reconciler must not CreateOrUpdate the owned Database while a Rebuild is
+// mid drop/recreate, or it will fight the Operation's Delete under the pre-Rebuild UID.
+func TestReconcileOwnedCNPGDatabase_SkipsWhileRebuildResetPending(t *testing.T) {
 	scheme := testScheme(t)
-	parent := reimportParent("ri-skip")
-	op := reimportOp("ri-skip-op", parent, pendingResetAnnotations(reimportTestUIDOld))
+	parent := rebuildParent("ri-skip")
+	op := rebuildOp("ri-skip-op", parent, pendingResetAnnotations(rebuildTestUIDOld))
 	op.Status.Phase = nominatimv1alpha1.NominatimOperationPhasePending
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(parent, op).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
@@ -1031,13 +1031,13 @@ func TestReconcileOwnedCNPGDatabase_SkipsWhileReimportResetPending(t *testing.T)
 
 // The Job may only be created once the Operation records reset=done, i.e. after the
 // replacement Database exists under a new UID with status.applied=true.
-func TestReconcileReimport_CreatesJobAfterDatabaseResetCompletes(t *testing.T) {
+func TestReconcileRebuild_CreatesJobAfterDatabaseResetCompletes(t *testing.T) {
 	scheme := testScheme(t)
-	parent := reimportParent("ri-armed")
-	op := reimportOp("ri-armed-op", parent, pendingResetAnnotations(reimportTestUIDOld))
+	parent := rebuildParent("ri-armed")
+	op := rebuildOp("ri-armed-op", parent, pendingResetAnnotations(rebuildTestUIDOld))
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(parent, op).
-		WithObjects(parent, op, newOwnedCNPGDatabase(parent, reimportTestUIDNew, true),
+		WithObjects(parent, op, newOwnedCNPGDatabase(parent, rebuildTestUIDNew, true),
 			cnpgAppSecret(parent), readyOwnedCNPGCluster(parent)).Build()
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
 
@@ -1047,15 +1047,15 @@ func TestReconcileReimport_CreatesJobAfterDatabaseResetCompletes(t *testing.T) {
 		t.Fatalf("reconcile: %v", err)
 	}
 
-	if got := getOperation(t, c, op); got.Annotations[annotationReimportDBReset] != reimportDBResetDone {
-		t.Fatalf("reset annotation=%q want %q", got.Annotations[annotationReimportDBReset], reimportDBResetDone)
+	if got := getOperation(t, c, op); got.Annotations[annotationRebuildDBReset] != rebuildDBResetDone {
+		t.Fatalf("reset annotation=%q want %q", got.Annotations[annotationRebuildDBReset], rebuildDBResetDone)
 	}
 	job := &batchv1.Job{}
 	key := types.NamespacedName{Name: op.Name, Namespace: parent.Namespace}
 	if err := c.Get(context.Background(), key, job); err != nil {
-		t.Fatalf("expected the Reimport Job once the Database reset is done: %v", err)
+		t.Fatalf("expected the Rebuild Job once the Database reset is done: %v", err)
 	}
 	if !jobHasDatabaseDSN(job) {
-		t.Fatal("Reimport Job must carry NOMINATIM_DATABASE_DSN")
+		t.Fatal("Rebuild Job must carry NOMINATIM_DATABASE_DSN")
 	}
 }

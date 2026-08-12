@@ -30,19 +30,19 @@ import (
 // Nominatim settings like IMPORT_STYLE / TOKENIZER must remain settable via spec.nominatim
 // or podSpec). Connection credentials stay exact-match only (not all PG*).
 var operatorReservedEnvExact = map[string]struct{}{
-	"OPERATION_TYPE":             {},
-	"PROJECT_DIR":                {},
-	"IMPORT_STAGING":             {},
-	"PBF_URL":                    {},
-	"NOMINATIM_DATABASE_DSN":     {},
-	"NOMINATIM_FLATNODE_FILE":    {},
-	"NOMINATIM_REIMPORT_CONFIRM": {},
-	"NOMINATIM_REGIONS":          {},
-	"PGHOST":                     {},
-	"PGPORT":                     {},
-	"PGDATABASE":                 {},
-	"PGUSER":                     {},
-	"PGPASSWORD":                 {},
+	"OPERATION_TYPE":            {},
+	"PROJECT_DIR":               {},
+	"IMPORT_STAGING":            {},
+	"PBF_URL":                   {},
+	"NOMINATIM_DATABASE_DSN":    {},
+	"NOMINATIM_FLATNODE_FILE":   {},
+	"NOMINATIM_REBUILD_CONFIRM": {},
+	"NOMINATIM_REGIONS":         {},
+	"PGHOST":                    {},
+	"PGPORT":                    {},
+	"PGDATABASE":                {},
+	"PGUSER":                    {},
+	"PGPASSWORD":                {},
 }
 
 func isReservedEnvName(name string) bool {

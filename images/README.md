@@ -72,18 +72,18 @@ The worker entrypoint dispatches on `OPERATION_TYPE` (or the first CLI arg):
 |------|--------|------|
 | `Bootstrap` | `scripts/bootstrap.sh` | Fresh or resumed `nominatim import` |
 | `AddRegions` | `scripts/add-regions.sh` | `nominatim add-data` for new Geofabrik regions |
-| `Reimport` | `scripts/reimport.sh` | Clear markers + Bootstrap (`NOMINATIM_REIMPORT_CONFIRM=1`). Operator drops/recreates the owned CNPG Database CR first so extensions are reinstalled on an empty DB. |
+| `Rebuild` | `scripts/rebuild.sh` | Clear markers + Bootstrap (`NOMINATIM_REBUILD_CONFIRM=1`). Operator drops/recreates the owned CNPG Database CR first so extensions are reinstalled on an empty DB. |
 | `Update` | `scripts/update.sh` | Geofabrik diffs via `pyosmium-get-changes` |
 | `CatchUp` | `scripts/catch-up.sh` | Update loop until idle |
 | `Refresh` | `scripts/refresh.sh` | `nominatim refresh` admin tasks (default: `--postcodes --word-counts --functions --importance`; override with `NOMINATIM_REFRESH_TASKS`) |
 | `Migrate` | `scripts/migrate.sh` | `nominatim admin --migrate` after rolling the worker image to a newer `nominatim-db` (then roll API). Stop Update/CatchUp first — Migrate is write-heavy. Prefer `suspendDuringOperations: WriteHeavy` (or All) while migrating; upstream advises not serving during upgrades. |
 | `Freeze` | `scripts/freeze.sh` | `nominatim freeze` — drop tables kept only for OSM diffs (same as import `--no-updates`). Serving continues; Update/AddRegions/aux imports that need update structures will fail afterward. Do not Freeze before TIGER/aux data you still plan to load. |
 
-These are thin phases invoked by `NominatimOperation` Jobs. Orchestration (mutex, scale API, pause backups, empty DB for Reimport) stays in the operator — not in bash.
+These are thin phases invoked by `NominatimOperation` Jobs. Orchestration (mutex, scale API, pause backups, empty DB for Rebuild) stays in the operator — not in bash.
 
 **Write-plane mutex:** the operator serializes conflicting Operations via parent `status.activeOperationRefs` (retry-on-conflict CAS), not Kubernetes Leases. A peer that is already `Running` or has a `JobRef` causes terminal `Conflict`. Two fresh write-heavy peers in a creation race requeue (lexicographically smaller name wins) instead of both failing.
 
-`Refresh` is not write-heavy for the Operation mutex (it still conflicts with an active Bootstrap / AddRegions / Reimport / Migrate / Freeze peer). Do not run it in parallel with Update / CatchUp / AddRegions — upstream Nominatim forbids parallel refresh with add-data / replication-style updates. Staging PVC is still created for Job shape consistency even though Refresh does not download extracts.
+`Refresh` is not write-heavy for the Operation mutex (it still conflicts with an active Bootstrap / AddRegions / Rebuild / Migrate / Freeze peer). Do not run it in parallel with Update / CatchUp / AddRegions — upstream Nominatim forbids parallel refresh with add-data / replication-style updates. Staging PVC is still created for Job shape consistency even though Refresh does not download extracts.
 
 `Migrate` and `Freeze` are write-heavy (mutex with Update/CatchUp and other write-heavy peers; default `pauseBackupsDuringOperations: WriteHeavy` applies).
 
@@ -91,14 +91,14 @@ These are thin phases invoked by `NominatimOperation` Jobs. Orchestration (mutex
 
 | Concern | Source of truth | Not SoT |
 |---------|-----------------|--------|
-| Which regions are imported | `status.regions` (synced from Succeeded Bootstrap / AddRegions / Reimport) | `imported-regions.txt` on the project PVC |
+| Which regions are imported | `status.regions` (synced from Succeeded Bootstrap / AddRegions / Rebuild) | `imported-regions.txt` on the project PVC |
 | Bootstrap done (regions mode) | `status.regions` non-empty **or** a peer Bootstrap Operation `Succeeded` | `import-finished` on the project PVC |
 | API/UI may exist | `servingWorkloadsAllowed`: no desired regions, or `status.regions` populated | PVC markers |
 | Day-2 Jobs (AddRegions / Update / CatchUp) | Operator `BootstrapIncomplete` gate via `bootstrapComplete` | Worker file checks alone |
 | Day-2 admin (`Refresh`) | Worker `require_bootstrap_ready` (no region gate; Refresh does not need `NOMINATIM_REGIONS`) | API boot path |
 | Schema / serve-only (`Migrate` / `Freeze`) | Worker `require_bootstrap_ready`; write-heavy mutex (stop updates first) | Image bumps for Migrate are outside the Job |
 
-Project PVC files remain **worker-local resume bookmarks** (Bootstrap still writes `import-finished`; Reimport clears markers before re-bootstrap). Workers call `require_bootstrap_ready`, which heals a missing marker when the Nominatim schema is already ready and only fails when both the marker and schema are absent — last-resort, not cluster coordination.
+Project PVC files remain **worker-local resume bookmarks** (Bootstrap still writes `import-finished`; Rebuild clears markers before re-bootstrap). Workers call `require_bootstrap_ready`, which heals a missing marker when the Nominatim schema is already ready and only fails when both the marker and schema are absent — last-resort, not cluster coordination.
 
 **PBF-only** parents (`Spec.Regions` empty) skip the operator Bootstrap gate; the worker schema/marker belt is then the only guard before AddRegions/Update.
 
@@ -116,7 +116,7 @@ CI runs both in the **Worker shell** job. Stubs under `scripts/test/stubs/` fake
 
 ### Sequence state / update lag
 
-After a Succeeded Bootstrap / AddRegions / Reimport / Update / CatchUp Operation, the Nominatim reconciler creates a short-lived **sequence probe** Job (operator-owned) that mounts the project PVC read-only, runs `scripts/report-sequence.sh`, and merge-patches ConfigMap `{name}-sequence`. The reconciler copies `report.json` into `status.regions[].sequenceState` (`sequenceNumber@timestamp`) and `aux-data.json` into `status.auxData` (Wikipedia importance / postcode file presence). Worker Operation scripts do **not** talk to the Kubernetes API.
+After a Succeeded Bootstrap / AddRegions / Rebuild / Update / CatchUp Operation, the Nominatim reconciler creates a short-lived **sequence probe** Job (operator-owned) that mounts the project PVC read-only, runs `scripts/report-sequence.sh`, and merge-patches ConfigMap `{name}-sequence`. The reconciler copies `report.json` into `status.regions[].sequenceState` (`sequenceNumber@timestamp`) and `aux-data.json` into `status.auxData` (Wikipedia importance / postcode file presence). Worker Operation scripts do **not** talk to the Kubernetes API.
 
 ### Auxiliary data (Wikipedia importance, postcodes)
 
