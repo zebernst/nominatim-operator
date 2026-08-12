@@ -206,6 +206,25 @@ func resolvePullPolicy(spec *nominatimv1alpha1.ImageSpec) corev1.PullPolicy {
 	return ""
 }
 
+// uiAPIEndpointEnv returns NOMINATIM_API_ENDPOINT for the UI container when the
+// Nominatim API publishes a hostname (browser-reachable). Empty when unknown so
+// the UI image entrypoint falls back to "/".
+func uiAPIEndpointEnv(nom *nominatimv1alpha1.NominatimInstance) []corev1.EnvVar {
+	if nom.Spec.API == nil || nom.Spec.API.Route == nil {
+		return nil
+	}
+	for _, host := range nom.Spec.API.Route.Hostnames {
+		if host == "" {
+			continue
+		}
+		return []corev1.EnvVar{{
+			Name:  "NOMINATIM_API_ENDPOINT",
+			Value: "https://" + host + "/",
+		}}
+	}
+	return nil
+}
+
 // dbEnvVars maps the CNPG/connection-secret conventional keys onto the environment
 // variables consumed by the Nominatim API image. Keys are marked optional since
 // connectionSecretRef (degraded) secrets are not schema-validated by this operator.
@@ -488,6 +507,7 @@ func (r *NominatimInstanceReconciler) reconcileUI(ctx context.Context, nom *nomi
 					Ports: []corev1.ContainerPort{
 						{Name: "http", ContainerPort: workloadContainerPort},
 					},
+					Env: uiAPIEndpointEnv(nom),
 				},
 			},
 		}

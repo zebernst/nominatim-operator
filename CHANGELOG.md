@@ -4,6 +4,7 @@
 
 ### Features
 
+* **images:** add `ghcr.io/zebernst/nominatim-ui` — packages upstream [osm-search/nominatim-ui](https://github.com/osm-search/nominatim-ui/releases) into unprivileged nginx; release workflow + `make docker-build-ui`; operator defaults `spec.ui` to this image and sets `NOMINATIM_API_ENDPOINT` from `spec.api.route.hostnames` when present (nominatim-5et.17).
 * **controller/worker:** `spec.auxData` toggles Wikipedia importance, secondary importance, and US postcode downloads during Bootstrap staging; `status.auxData` reports observed files via the sequence probe (nominatim-5et.11).
 * **controller/worker:** implement `NominatimOperation` types `Migrate` (`nominatim admin --migrate`) and `Freeze` (`nominatim freeze`) per upstream 4.5 Migration / Import docs; both are write-heavy so Update/CatchUp cannot run beside them. All CRD Operation types are now implemented (nominatim-5et.13 / 5et.18).
 * **controller/worker:** implement `NominatimOperation` type `Refresh` — worker `refresh.sh` runs `nominatim refresh` (default `--postcodes --word-counts --functions --importance`, overridable via `NOMINATIM_REFRESH_TASKS`) (nominatim-5et.12).

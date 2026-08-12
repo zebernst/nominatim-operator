@@ -357,13 +357,15 @@ type NominatimAPIConfigSpec struct {
 }
 
 // UISpec configures an optional Nominatim UI Deployment and route.
+// Image defaults to ghcr.io/zebernst/nominatim-ui (upstream osm-search/nominatim-ui release package).
 type UISpec struct {
 	// Replicas for the UI Deployment.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	Replicas *int32 `json:"replicas,omitempty"`
 
-	// Image for the UI container (sole supported image hatch; podSpec.containers[].image is ignored).
+	// Image for the UI container. Defaults to ghcr.io/zebernst/nominatim-ui:latest.
+	// Sole supported image hatch; podSpec.containers[].image is ignored.
 	// +optional
 	Image *ImageSpec `json:"image,omitempty"`
 

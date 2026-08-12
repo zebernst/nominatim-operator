@@ -152,6 +152,7 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 API_IMG ?= ghcr.io/zebernst/nominatim-api:latest
 WORKER_IMG ?= ghcr.io/zebernst/nominatim-worker:latest
+UI_IMG ?= ghcr.io/zebernst/nominatim-ui:latest
 
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
@@ -165,8 +166,12 @@ docker-build-api: ## Build nominatim-api image.
 docker-build-worker: ## Build nominatim-worker image.
 	$(CONTAINER_TOOL) build -t ${WORKER_IMG} -f worker.Dockerfile .
 
+.PHONY: docker-build-ui
+docker-build-ui: ## Build nominatim-ui image (upstream osm-search/nominatim-ui release).
+	$(CONTAINER_TOOL) build -t ${UI_IMG} -f ui.Dockerfile .
+
 .PHONY: docker-build-all
-docker-build-all: docker-build docker-build-api docker-build-worker ## Build operator, api, and worker images.
+docker-build-all: docker-build docker-build-api docker-build-worker docker-build-ui ## Build operator, api, worker, and ui images.
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.

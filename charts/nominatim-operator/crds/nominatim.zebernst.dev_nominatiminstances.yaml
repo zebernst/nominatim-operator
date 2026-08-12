@@ -1268,8 +1268,9 @@ spec:
                 description: UI configures an optional UI workload.
                 properties:
                   image:
-                    description: Image for the UI container (sole supported image
-                      hatch; podSpec.containers[].image is ignored).
+                    description: |-
+                      Image for the UI container. Defaults to ghcr.io/zebernst/nominatim-ui:latest.
+                      Sole supported image hatch; podSpec.containers[].image is ignored.
                     properties:
                       pullPolicy:
                         description: PullPolicy for the container.
