@@ -490,12 +490,18 @@ require_bootstrap_ready() {
   die "Import not finished (${IMPORT_FINISHED} missing and Nominatim schema incomplete); run Bootstrap first (operator gate uses status.regions)"
 }
 
-prepare_worker() {
+prepare_db() {
   require_db_env
   mkdir -p "${STAGING_DIR}" "${PROJECT_DIR}" "${PROJECT_DIR}/update"
-  ensure_aux_data_downloads
-  link_staging
   seed_project_env
   wait_for_postgres
   fix_project_ownership
+}
+
+# Import-shaped Operations (Bootstrap/Reimport/AddRegions) also fetch aux datasets
+# and link staging PBF extracts onto the project dir.
+prepare_import() {
+  prepare_db
+  ensure_aux_data_downloads
+  link_staging
 }

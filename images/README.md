@@ -104,7 +104,7 @@ Project PVC files remain **worker-local resume bookmarks** (Bootstrap still writ
 
 ### Worker script tests
 
-Resume / region parsing helpers in `scripts/common.sh` have bats coverage under `scripts/test/`:
+Resume / region parsing helpers and phase-scoped `prepare_db` / `prepare_import` in `scripts/common.sh` have bats coverage under `scripts/test/`:
 
 ```bash
 # Requires bats-core + shellcheck on PATH (brew install bats-core shellcheck).

@@ -10,7 +10,7 @@ SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPTS_DIR}/common.sh"
 
-prepare_worker
+prepare_import
 
 require_bootstrap_ready
 

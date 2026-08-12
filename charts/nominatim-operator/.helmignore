@@ -12,3 +12,7 @@
 *.tmproj
 .vscode/
 .beads/
+# Tests are never production assets.
+*_test.go
+*.bats
+test/

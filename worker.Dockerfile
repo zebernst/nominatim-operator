@@ -47,7 +47,7 @@ RUN useradd --system --create-home --home-dir /srv/nominatim --shell /usr/sbin/n
     && chown -R nominatim:nominatim /srv/nominatim "${PROJECT_DIR}" "${IMPORT_STAGING}"
 
 COPY images/worker/env.defaults /opt/nominatim/env.defaults
-COPY images/worker/scripts/ /opt/nominatim/scripts/
+COPY images/worker/scripts/*.sh /opt/nominatim/scripts/
 RUN chmod 0755 /opt/nominatim/scripts/*.sh
 
 WORKDIR /nominatim
