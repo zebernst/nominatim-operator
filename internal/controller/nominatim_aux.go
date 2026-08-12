@@ -31,6 +31,8 @@ const (
 	envAuxSecondaryImportance = "NOMINATIM_AUX_SECONDARY_IMPORTANCE"
 	envAuxUSPostcodes         = "NOMINATIM_AUX_US_POSTCODES"
 	sequenceAuxReportCMKey    = "aux-data.json"
+	envBoolTrue               = "true"
+	envBoolFalse              = "false"
 )
 
 func effectiveAuxDataEnv(nom *nominatimv1alpha1.Nominatim) []corev1.EnvVar {
@@ -51,9 +53,9 @@ func auxDataEnabled(v *bool) bool {
 
 func boolEnv(v bool) string {
 	if v {
-		return "true"
+		return envBoolTrue
 	}
-	return "false"
+	return envBoolFalse
 }
 
 // parseAuxDataReport decodes aux dataset presence JSON from the sequence probe ConfigMap.
