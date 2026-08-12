@@ -505,3 +505,29 @@ prepare_import() {
   ensure_aux_data_downloads
   link_staging
 }
+
+# Update.sh exit contract for CatchUp (internal; Jobs only see the final CatchUp exit):
+#   0  — idle: no diffs applied this round
+#   10 — applied: diffs imported (CatchUp continues)
+#   *  — failure
+UPDATE_APPLIED_EXIT=10
+
+update_round_exit_code() {
+  if [ "${1:-false}" = "true" ]; then
+    return "${UPDATE_APPLIED_EXIT}"
+  fi
+  return 0
+}
+
+# Shared by Update and AddRegions once the phase knows whether work happened.
+index_if_changed() {
+  local changed="${1:-false}"
+  local changed_msg="${2:-Re-indexing}"
+  local idle_msg="${3:-No new data applied}"
+  if [ "${changed}" = "true" ]; then
+    log "${changed_msg}"
+    run_nominatim index --project-dir "${PROJECT_DIR}" --threads "${THREADS}"
+  else
+    log "${idle_msg}"
+  fi
+}

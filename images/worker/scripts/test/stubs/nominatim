@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Stub nominatim for bats. Records invocations under PROJECT_DIR.
+# shellcheck shell=bash
+set -euo pipefail
+
+if [[ "${1:-}" == "index" ]]; then
+  : "${PROJECT_DIR:?PROJECT_DIR is required for nominatim stub}"
+  touch "${PROJECT_DIR}/nominatim-index.ran"
+  exit 0
+fi
+
+exit 0

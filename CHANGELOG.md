@@ -16,6 +16,7 @@
 * **build:** keep tests out of production assets — `.dockerignore` / `.helmignore` exclude `*_test.go`, bats, and `test/` trees; worker image `COPY *.sh` only.
 * **controller:** split sequence probe ensure (`ensureSequenceProbes`) from status observe (`applySequenceReportConfigMap`); probe Jobs unchanged (nominatim-kfy.6).
 * **test:** drop parent-ref Get/Status `*ErrorPropagates` lattice and duplicate API/UI HTTPRoute error tests; keep one error lock per remaining seam. AGENTS.md / metaswarm coverage claim matches the 90% `.coverage-thresholds.json` floor (nominatim-kfy.7).
+* **worker:** CatchUp loops on Update exit contract (`0` idle / `10` applied) instead of a staging flag file; Update/AddRegions share `index_if_changed` (nominatim-kfy.8).
 * **controller:** unify write-plane peer evaluation in `evaluateWritePlane` — Operation claim (`Hold` / `RaceWait` / `Ok`) and Nominatim schedule probes (`ScheduleBusy`) share one module; deleted shallow `findConflictingOperation` (nominatim-kfy.1).
 * **controller:** harden Operation write-plane mutex — atomic claim via parent `status.activeOperationRefs` (retry-on-conflict); creation-race peers requeue instead of dual terminal `Conflict`; terminal `Conflict` only when a peer is `Running` or has armed a Job.
 * **api:** default HTTP startup/readiness/liveness probes on `/status`; typed `spec.nominatim.api` runtime knobs (pool, query/request timeouts, CORS, default language); `spec.api.gunicornWorkers` with entrypoint cgroup-CPU fallback (nominatim-5et.14).
