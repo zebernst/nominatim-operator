@@ -51,14 +51,10 @@ const (
 
 // reconcileSequenceObservation ensures probe Jobs after Succeeded write Operations,
 // then copies report.json into status.regions[].sequenceState. Workers never call
-// the Kubernetes API.
-func (r *NominatimReconciler) reconcileSequenceObservation(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
+// the Kubernetes API. ops is the Reconcile-scoped parent Operation list.
+func (r *NominatimReconciler) reconcileSequenceObservation(ctx context.Context, nom *nominatimv1alpha1.Nominatim, ops []nominatimv1alpha1.NominatimOperation) error {
 	if len(nom.Status.Regions) == 0 {
 		return nil
-	}
-	ops, err := r.listOperationsForParent(ctx, nom)
-	if err != nil {
-		return fmt.Errorf("list operations for sequence observation: %w", err)
 	}
 	if err := r.ensureSequenceProbes(ctx, nom, ops); err != nil {
 		return err

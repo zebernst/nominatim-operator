@@ -36,12 +36,8 @@ const (
 // reconcileRegionDrift creates AddRegions or Reimport NominatimOperations when
 // spec.regions diverges from status.regions. Removals never delete DB data — they
 // only surface ConditionRegionRemovalUnsupported (set in syncStatus).
-func (r *NominatimReconciler) reconcileRegionDrift(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
-	ops, err := r.listOperationsForParent(ctx, nom)
-	if err != nil {
-		return fmt.Errorf("list operations for region drift: %w", err)
-	}
-
+// ops is the Reconcile-scoped parent Operation list (one list per pass).
+func (r *NominatimReconciler) reconcileRegionDrift(ctx context.Context, nom *nominatimv1alpha1.Nominatim, ops []nominatimv1alpha1.NominatimOperation) error {
 	// Bootstrap owns the empty→first-import path. Observation of Succeeded ops
 	// into status.regions happens in observeRegionsFromSucceededOps (Reconcile).
 	if len(nom.Status.Regions) == 0 {

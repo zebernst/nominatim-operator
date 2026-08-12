@@ -114,7 +114,7 @@ func TestReconcileSequenceObservation_CreatesProbeAndAppliesConfigMap(t *testing
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, op).WithObjects(nom, op).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileSequenceObservation(ctx, nom); err != nil {
+	if err := r.reconcileSequenceObservation(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("reconcileSequenceObservation: %v", err)
 	}
 
@@ -155,7 +155,7 @@ func TestReconcileSequenceObservation_CreatesProbeAndAppliesConfigMap(t *testing
 	if err := c.Update(ctx, cm); err != nil {
 		t.Fatalf("cm update: %v", err)
 	}
-	if err := r.reconcileSequenceObservation(ctx, nom); err != nil {
+	if err := r.reconcileSequenceObservation(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("second observe: %v", err)
 	}
 	if nom.Status.Regions[0].SequenceState != "9@now" {
@@ -211,13 +211,12 @@ func TestEnsureSequenceProbes_DoesNotApplyReport(t *testing.T) {
 	}
 }
 
-func TestReconcileSequenceObservation_ListErrorPropagates(t *testing.T) {
+func TestListOperationsForParent_ErrorPropagates(t *testing.T) {
 	scheme := testScheme(t)
-	nom := nominatimWithConnectionSecret("seq-list-err")
-	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: regionPhaseImported}}
+	nom := nominatimWithConnectionSecret("ops-list-err")
 	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: &failingListClient{Client: base}, Scheme: scheme}
-	if err := r.reconcileSequenceObservation(context.Background(), nom); err == nil {
+	if _, err := r.listOperationsForParent(context.Background(), nom); err == nil {
 		t.Fatal("expected List error to propagate")
 	}
 }
@@ -257,7 +256,7 @@ func TestReconcileSequenceObservation_EmptyRegions(t *testing.T) {
 	ctx := context.Background()
 	nom := baseNominatim("empty-regions")
 	r := &NominatimReconciler{Client: fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(nom).Build()}
-	if err := r.reconcileSequenceObservation(ctx, nom); err != nil {
+	if err := r.reconcileSequenceObservation(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -281,7 +280,7 @@ func TestReconcileSequenceObservation_SkipsAlreadyObserved(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, op).WithObjects(nom, op).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
-	if err := r.reconcileSequenceObservation(ctx, nom); err != nil {
+	if err := r.reconcileSequenceObservation(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatal(err)
 	}
 	job := &batchv1.Job{}
@@ -490,7 +489,7 @@ func TestReconcileSequenceObservation_SkipsNonProbeTypes(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, op).WithObjects(nom, op).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
-	if err := r.reconcileSequenceObservation(ctx, nom); err != nil {
+	if err := r.reconcileSequenceObservation(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatal(err)
 	}
 	job := &batchv1.Job{}

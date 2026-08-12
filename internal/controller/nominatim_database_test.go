@@ -80,6 +80,16 @@ func testScheme(t *testing.T) *runtime.Scheme {
 	return s
 }
 
+// parentOps lists NominatimOperations for nom — test helper matching Reconcile's one-list-per-pass.
+func parentOps(t *testing.T, r *NominatimReconciler, ctx context.Context, nom *nominatimv1alpha1.Nominatim) []nominatimv1alpha1.NominatimOperation {
+	t.Helper()
+	ops, err := r.listOperationsForParent(ctx, nom)
+	if err != nil {
+		t.Fatalf("listOperationsForParent: %v", err)
+	}
+	return ops
+}
+
 func baseNominatim(name string) *nominatimv1alpha1.Nominatim {
 	return &nominatimv1alpha1.Nominatim{
 		ObjectMeta: metav1.ObjectMeta{

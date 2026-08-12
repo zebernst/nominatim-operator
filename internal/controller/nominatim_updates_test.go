@@ -56,7 +56,7 @@ func TestReconcileUpdates_DisabledNoOp(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	res, err := r.reconcileUpdates(context.Background(), nom)
+	res, err := r.reconcileUpdates(context.Background(), nom, parentOps(t, r, context.Background(), nom))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestReconcileUpdates_DueCreatesUpdateAndCursor(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	res, err := r.reconcileUpdates(ctx, nom)
+	res, err := r.reconcileUpdates(ctx, nom, parentOps(t, r, ctx, nom))
 	if err != nil {
 		t.Fatalf("reconcileUpdates: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestReconcileUpdates_DueCreatesUpdateAndCursor(t *testing.T) {
 
 	// Second pass must not create another op for the same fire.
 	before := nom.Status.LastUpdateScheduleTime.DeepCopy()
-	if _, err := r.reconcileUpdates(ctx, nom); err != nil {
+	if _, err := r.reconcileUpdates(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("second reconcile: %v", err)
 	}
 	ops = &nominatimv1alpha1.NominatimOperationList{}
@@ -149,7 +149,7 @@ func TestReconcileUpdates_SkipsOnWriteHeavyConflict(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, boot).WithObjects(nom, boot).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	res, err := r.reconcileUpdates(ctx, nom)
+	res, err := r.reconcileUpdates(ctx, nom, parentOps(t, r, ctx, nom))
 	if err != nil {
 		t.Fatalf("reconcileUpdates: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestReconcileUpdates_SkipsOnCreationRacePeer(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, boot).WithObjects(nom, boot).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	res, err := r.reconcileUpdates(ctx, nom)
+	res, err := r.reconcileUpdates(ctx, nom, parentOps(t, r, ctx, nom))
 	if err != nil {
 		t.Fatalf("reconcileUpdates: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestReconcileUpdates_NoCronJobCreated(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if _, err := r.reconcileUpdates(context.Background(), nom); err != nil {
+	if _, err := r.reconcileUpdates(context.Background(), nom, parentOps(t, r, context.Background(), nom)); err != nil {
 		t.Fatal(err)
 	}
 	ops := &nominatimv1alpha1.NominatimOperationList{}

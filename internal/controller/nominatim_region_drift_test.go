@@ -41,7 +41,7 @@ func TestReconcileRegionDrift_AddDataCreatesAddRegions(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("reconcileRegionDrift: %v", err)
 	}
 
@@ -73,7 +73,7 @@ func TestReconcileRegionDrift_AddDataMultiMissingCreatesSingleRegionOp(t *testin
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("reconcileRegionDrift: %v", err)
 	}
 
@@ -108,7 +108,7 @@ func TestReconcileRegionDrift_AddDataSerialMultiMissingCreatesNextOpAfterSucceed
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
 	// First reconcile creates the op for "b" only.
-	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("reconcileRegionDrift (1st): %v", err)
 	}
 	ops := &nominatimv1alpha1.NominatimOperationList{}
@@ -140,7 +140,7 @@ func TestReconcileRegionDrift_AddDataSerialMultiMissingCreatesNextOpAfterSucceed
 	}
 	observeRegionsFromSucceededOps(nom, listed.Items)
 
-	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("reconcileRegionDrift (2nd): %v", err)
 	}
 	if err := c.List(ctx, ops); err != nil {
@@ -172,7 +172,7 @@ func TestReconcileRegionDrift_ReimportPolicyCreatesReimport(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("reconcileRegionDrift: %v", err)
 	}
 
@@ -203,7 +203,7 @@ func TestReconcileRegionDrift_RemovalDoesNotCreateOpOrShrinkStatus(t *testing.T)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("reconcileRegionDrift: %v", err)
 	}
 	ops := &nominatimv1alpha1.NominatimOperationList{}
@@ -239,7 +239,7 @@ func TestReconcileRegionDrift_NoParallelAddRegions(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, active).WithObjects(nom, active).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatal(err)
 	}
 	ops := &nominatimv1alpha1.NominatimOperationList{}
@@ -281,7 +281,7 @@ func TestReconcileRegionDrift_SkipsWhenEmptyStatus(t *testing.T) {
 	// status.regions empty → bootstrap owns this; drift must no-op
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
-	if err := r.reconcileRegionDrift(context.Background(), nom); err != nil {
+	if err := r.reconcileRegionDrift(context.Background(), nom, parentOps(t, r, context.Background(), nom)); err != nil {
 		t.Fatal(err)
 	}
 	ops := &nominatimv1alpha1.NominatimOperationList{}
@@ -308,7 +308,7 @@ func TestReconcileRegionDrift_SkipsWhenBootstrapActive(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, boot).WithObjects(nom, boot).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
-	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatal(err)
 	}
 	ops := &nominatimv1alpha1.NominatimOperationList{}

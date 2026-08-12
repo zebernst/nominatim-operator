@@ -125,17 +125,17 @@ func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+	if err := r.reconcileRegionDrift(ctx, nom, ops); err != nil {
 		log.Error(err, "failed to reconcile Nominatim region drift")
 		return ctrl.Result{}, err
 	}
 
-	if err := r.reconcileSequenceObservation(ctx, nom); err != nil {
+	if err := r.reconcileSequenceObservation(ctx, nom, ops); err != nil {
 		log.Error(err, "failed to reconcile Nominatim sequence observation")
 		return ctrl.Result{}, err
 	}
 
-	updateResult, err := r.reconcileUpdates(ctx, nom)
+	updateResult, err := r.reconcileUpdates(ctx, nom, ops)
 	if err != nil {
 		log.Error(err, "failed to reconcile Nominatim scheduled updates")
 		return ctrl.Result{}, err

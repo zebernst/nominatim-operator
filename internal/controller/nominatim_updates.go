@@ -33,7 +33,8 @@ import (
 // reconcileUpdates creates scheduled Update NominatimOperations from spec.updates
 // (no batch/v1 CronJob). It persists status.lastUpdateScheduleTime as the schedule
 // cursor and returns RequeueAfter until the next cron fire.
-func (r *NominatimReconciler) reconcileUpdates(ctx context.Context, nom *nominatimv1alpha1.Nominatim) (ctrl.Result, error) {
+// ops is the Reconcile-scoped parent Operation list (one list per pass).
+func (r *NominatimReconciler) reconcileUpdates(ctx context.Context, nom *nominatimv1alpha1.Nominatim, ops []nominatimv1alpha1.NominatimOperation) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	if nom.Spec.Updates == nil || !nom.Spec.Updates.Enabled || nom.Spec.Updates.Schedule == "" {
@@ -64,11 +65,6 @@ func (r *NominatimReconciler) reconcileUpdates(ctx context.Context, nom *nominat
 
 	if missed == nil {
 		return requeue, nil
-	}
-
-	ops, err := r.listOperationsForParent(ctx, nom)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("list operations for updates reconcile: %w", err)
 	}
 
 	// Probe against a synthetic Update — same evaluateWritePlane module as claim.
