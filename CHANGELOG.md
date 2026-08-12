@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+* **ci/test:** skip Manager + reconcile smoke under `E2E_IMPORT=1` (covered by the e2e job); check `go mod tidy` via `git diff --exit-code` instead of tidy-in-place; nil-guard envtest `AfterSuite`; add `timeout-minutes` on lint/test/worker-shell (nominatim-5et.31).
+
 ### Features
 
 * **controller/worker:** `spec.auxData` toggles Wikipedia importance, secondary importance, and US postcode downloads during Bootstrap staging; `status.auxData` reports observed files via the sequence probe (nominatim-5et.11).

@@ -17,6 +17,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -37,6 +38,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -46,17 +48,24 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Test
+      - name: Check go modules are tidy
         run: |
           go mod tidy
-          make test
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Test
+        run: make test
 
       - name: Coverage gate
-        run: ./hack/check-coverage.sh cover.out
+        run: ./hack/check-coverage.sh build/cover.out
 
   worker-shell:
     name: Worker shell
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -103,16 +112,18 @@ jobs:
       - name: Create kind cluster
         run: kind create cluster --name kind --wait 120s
 
+      - name: Download modules
+        run: go mod download
+
       - name: E2E (build, install operator, Nominatim reconcile smoke)
-        run: |
-          go mod tidy
-          make test-e2e
+        run: make test-e2e
 
   e2e-import:
     name: E2E Import
     runs-on: ubuntu-latest
-    # Bootstrap + Reimport both run a full monaco+andorra import; the go test timeout (110m in
+    # Bootstrap + Rebuild both run a full monaco+andorra import; the go test timeout (110m in
     # test-e2e-import) is deliberately lower so Ginkgo reports before the job is killed.
+    # Smoke Contexts are skipped under E2E_IMPORT=1 (covered by the e2e job).
     timeout-minutes: 120
     steps:
       - name: Checkout
@@ -143,7 +154,8 @@ jobs:
       - name: Create kind cluster
         run: kind create cluster --name kind --wait 120s
 
-      - name: E2E Import (CNPG + monaco+andorra Bootstrap + country probes + Reimport DB reset)
-        run: |
-          go mod tidy
-          make test-e2e-import
+      - name: Download modules
+        run: go mod download
+
+      - name: E2E Import (CNPG + monaco+andorra Bootstrap + country probes + Rebuild DB reset)
+        run: make test-e2e-import
