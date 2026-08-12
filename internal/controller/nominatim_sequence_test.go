@@ -211,6 +211,17 @@ func TestEnsureSequenceProbes_DoesNotApplyReport(t *testing.T) {
 	}
 }
 
+func TestReconcileSequenceObservation_ListErrorPropagates(t *testing.T) {
+	scheme := testScheme(t)
+	nom := nominatimWithConnectionSecret("seq-list-err")
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: regionPhaseImported}}
+	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
+	r := &NominatimReconciler{Client: &failingListClient{Client: base}, Scheme: scheme}
+	if err := r.reconcileSequenceObservation(context.Background(), nom); err == nil {
+		t.Fatal("expected List error to propagate")
+	}
+}
+
 func TestBuildSequenceProbeJob_UsesWorkerImage(t *testing.T) {
 	scheme := testScheme(t)
 	nom := baseNominatim("img")

@@ -23,6 +23,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func TestWritePlaneTerminalConflict_Error(t *testing.T) {
+	t.Parallel()
+	err := &writePlaneTerminalConflict{
+		peer: &nominatimv1alpha1.NominatimOperation{ObjectMeta: metav1.ObjectMeta{Name: "held-op"}},
+	}
+	if got := err.Error(); got != `write plane held by "held-op"` {
+		t.Fatalf("Error()=%q", got)
+	}
+}
+
 func TestPeerHoldsWritePlane(t *testing.T) {
 	running := &nominatimv1alpha1.NominatimOperation{
 		Status: nominatimv1alpha1.NominatimOperationStatus{
