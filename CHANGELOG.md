@@ -4,47 +4,27 @@
 
 ### Fixed
 
-* **ci/test:** skip Manager + reconcile smoke under `E2E_IMPORT=1` (covered by the e2e job); check `go mod tidy` via `git diff --exit-code` instead of tidy-in-place; nil-guard envtest `AfterSuite`; add `timeout-minutes` on lint/test/worker-shell (nominatim-5et.31).
-* **controller:** seed Gateway API HTTPRoute `rules[].matches` (and related parentRef/backendRef defaults) and preserve existing matches across reconciles so CreateOrUpdate stays idempotent (nominatim-5et.32).
+* **ci/test:** skip Manager + reconcile smoke under `E2E_IMPORT=1`; check `go mod tidy` via `git diff --exit-code`; nil-guard envtest `AfterSuite`; add `timeout-minutes` on lint/test/worker-shell jobs.
+* **controller:** seed Gateway API HTTPRoute `rules[].matches` (and related parentRef/backendRef defaults) and preserve existing matches across reconciles so CreateOrUpdate stays idempotent.
 
 ### Features
 
-* **images:** add `ghcr.io/zebernst/nominatim-ui` — packages upstream [osm-search/nominatim-ui](https://github.com/osm-search/nominatim-ui/releases) into unprivileged nginx; release workflow + `make docker-build-ui`; operator defaults `spec.ui` to this image, supports `spec.ui.enabled` (default true; false or omit `spec.ui` for API/DB-only), and sets `NOMINATIM_API_ENDPOINT` from `spec.api.route.hostnames` when present (nominatim-5et.17).
-* **controller/worker:** `spec.auxData` toggles Wikipedia importance, secondary importance, and US postcode downloads during Bootstrap staging; `status.auxData` reports observed files via the sequence probe (nominatim-5et.11).
-* **controller/worker:** implement `NominatimOperation` types `Migrate` (`nominatim admin --migrate`) and `Freeze` (`nominatim freeze`) per upstream 4.5 Migration / Import docs; both are write-heavy so Update/CatchUp cannot run beside them. All CRD Operation types are now implemented (nominatim-5et.13 / 5et.18).
-* **controller/worker:** implement `NominatimOperation` type `Refresh` — worker `refresh.sh` runs `nominatim refresh` (default `--postcodes --word-counts --functions --importance`, overridable via `NOMINATIM_REFRESH_TASKS`) (nominatim-5et.12).
+* **images:** add `ghcr.io/zebernst/nominatim-ui` — packages upstream [osm-search/nominatim-ui](https://github.com/osm-search/nominatim-ui/releases) into unprivileged nginx; operator defaults `spec.ui` to this image, supports `spec.ui.enabled`, and sets `NOMINATIM_API_ENDPOINT` from `spec.api.route.hostnames` when present.
+* **controller/worker:** `spec.auxData` toggles Wikipedia importance, secondary importance, and US postcode downloads during Bootstrap; `status.auxData` reports observed files via the sequence probe.
+* **controller/worker:** implement `NominatimOperation` types `Migrate` and `Freeze` (write-heavy; cannot run beside Update/CatchUp). All CRD Operation types are now implemented.
+* **controller/worker:** implement `NominatimOperation` type `Refresh` (`nominatim refresh`, overridable via `NOMINATIM_REFRESH_TASKS`).
 
 ### Changed
 
-* **api:** rename Operation type and `regionChangePolicy` value `Reimport` → `Rebuild`; `OperationImpact` value `BootstrapReimport` → `BootstrapRebuild`; worker confirm env `NOMINATIM_REBUILD_CONFIRM` (ADR-0002).
-* **controller:** collapse CNPG Operation side-effects onto `CNPGEffects` — pause/profile live next to `applyPreJob`/`applyTerminal`; unattached `status.database.mode` no-ops in the shared helpers; Nominatim reconcile no longer owns pause/profile wrappers (nominatim-kfy.2).
-* **controller:** observe `status.regions` from Succeeded Operations in one `observeRegionsFromSucceededOps` path; Bootstrap/drift reconcile only ensure creates (nominatim-kfy.3).
-* **worker:** split `prepare_db` vs `prepare_import` so Migrate/Freeze/Update/Refresh do not link staging PBF/aux extracts (nominatim-kfy.4).
-* **build:** keep tests out of production assets — `.dockerignore` / `.helmignore` exclude `*_test.go`, bats, and `test/` trees; worker image `COPY *.sh` only.
-* **controller:** split sequence probe ensure (`ensureSequenceProbes`) from status observe (`applySequenceReportConfigMap`); probe Jobs unchanged (nominatim-kfy.6).
-* **test:** drop parent-ref Get/Status `*ErrorPropagates` lattice and duplicate API/UI HTTPRoute error tests; keep one error lock per remaining seam. AGENTS.md / metaswarm coverage claim matches the 90% `.coverage-thresholds.json` floor (nominatim-kfy.7).
-* **worker:** CatchUp loops on Update exit contract (`0` idle / `10` applied) instead of a staging flag file; Update/AddRegions share `index_if_changed` (nominatim-kfy.8).
-* **controller:** delete write-plane helper wrappers; claim/schedule/tests use `evaluateWritePlane` only (nominatim-kfy.9).
-* **controller:** one `listOperationsForParent` per Nominatim reconcile — drift, sequence, and updates take the Reconcile-scoped peer list (nominatim-kfy.10).
-* **controller:** drop test-only `reconcileBootstrap`; ensure path is `ensureBootstrapOperation` (nominatim-kfy.11).
-* **controller:** colocate region observation helpers in `nominatim_region_observe.go`; move pause/profile unit tests next to Operation CNPG effects (nominatim-kfy.12).
-* **api:** drop unused `status.regions[].phase` and `.message` — presence in `status.regions` is the imported SoT; Operations own lifecycle (nominatim-kfy.5).
-* **controller:** unify write-plane peer evaluation in `evaluateWritePlane` — Operation claim (`Hold` / `RaceWait` / `Ok`) and Nominatim schedule probes (`ScheduleBusy`) share one module; deleted shallow `findConflictingOperation` (nominatim-kfy.1).
-* **controller:** harden Operation write-plane mutex — atomic claim via parent `status.activeOperationRefs` (retry-on-conflict); creation-race peers requeue instead of dual terminal `Conflict`; terminal `Conflict` only when a peer is `Running` or has armed a Job.
-* **api:** default HTTP startup/readiness/liveness probes on `/status`; typed `spec.nominatim.api` runtime knobs (pool, query/request timeouts, CORS, default language); `spec.api.gunicornWorkers` with entrypoint cgroup-CPU fallback (nominatim-5et.14).
-* **test:** kind e2e smoke arms Refresh/Migrate/Freeze Jobs (replacing NotImplemented coverage) and asserts write-heavy Conflict when a peer holds the write plane.
-* **docs:** document control / serving / data planes, sequence observation, and RWO project-flatnode vs multi-replica API in the root README, `images/README.md`, and samples (nominatim-5et.35.4).
-* **build:** rename image build files to `*.Dockerfile` (`operator.Dockerfile`, `api.Dockerfile`, `worker.Dockerfile`) so editors apply Dockerfile syntax highlighting.
-* **api:** read-only serving plane — API Deployment uses an emptyDir workdir only (no project/flatnode PVC mounts); entrypoint takes config from process env, checks `placex`, and starts gunicorn without writing `.env` / `import-finished` or running `nominatim refresh --functions` (nominatim-5et.35.1).
-* **ci:** enforce `internal/controller` statement coverage against `.coverage-thresholds.json` (ratcheted to 90.0%; current ~90.6%). `make test` and pre-push run `hack/check-coverage.sh`; CI Test job fails below the floor (nominatim-5et.25).
-* **status:** document `status.regions` as Bootstrap-done / imported-set source of truth; worker `require_bootstrap_ready` heals missing `import-finished` when the schema is ready (PVC markers are local bookmarks only; nominatim-5et.35.2).
-* **status:** operator-owned sequence probe Job reads project `update/*/sequence.state` into a ConfigMap and merges `status.regions[].sequenceState` (workers do not call the Kubernetes API; nominatim-5et.35.3).
-* **test:** bats + shellcheck CI for worker `common.sh` helpers (`detect_continue_at`, `parse_regions`, `seed_project_env`); portable `sed -i.bak` in `seed_project_env` (nominatim-5et.26).
-* **test:** envtest starts the manager and asserts the API Deployment appears via watches without calling `Reconcile()` directly (nominatim-5et.29).
-* **test:** CI import e2e asserts the API Deployment scales to zero while Rebuild is active and restores afterward (`suspendDuringOperations` / Rebuild-always-quiesce; nominatim-5et.27).
-* **test:** CI import e2e (`make test-e2e-import`) bootstraps `europe/monaco` + `europe/andorra` via multi `--osm-file` (`test/e2e/testdata/nominatim-monaco-andorra.yaml`), asserts both names on `status.regions`, and probes each country with `countrycodes=` so a regions[0]-only import cannot pass. The monaco-only fixture remains for `hack/validate-kind.sh` day-2 AddRegions. See `images/README.md` for the Bootstrap vs AddRegions contract.
-* **worker:** `add-regions.sh` now imports every region in `NOMINATIM_REGIONS` (the operator's `Spec.Regions` contract) not already in `imported-regions.txt`, indexing once if any region changed. Removed the `NOMINATIM_IMPORT_MAX_REGIONS` / `NOMINATIM_IMPORT_ONLY_REGION` single-region deferral; the operator (not the worker) now owns AddRegions chunking. Deploy the operator and worker images together — see `images/README.md` for the Spec/`NOMINATIM_REGIONS` contract.
-* **worker:** `wait_for_postgres` in `scripts/common.sh` now defaults to 15 attempts at a 2s sleep (~30s, down from ~180s), honoring `NOMINATIM_PG_WAIT_ATTEMPTS` to override the attempt count. The operator's CNPG readiness gate (`cnpgClusterReadyForJobs`) is the primary check before a Job is created; this shortened loop is last-mile only. See `images/README.md` for the readiness split and the mode-aware Bootstrap-done gate (PBF-only vs regions mode).
+* **docs:** rewrite operator docs for humans — Getting started, Concepts, Configuration, Database & backup, Operations; add `.github/CONTRIBUTING.md`; slim README and `images/README.md`. Keep `docs/CONTEXT.md` for agents.
+* **api:** rename Operation type and `regionChangePolicy` value `Reimport` → `Rebuild`; related impact/env renames (`NOMINATIM_REBUILD_CONFIRM`).
+* **controller:** consolidate CNPG Operation side-effects, region observation, sequence probe ensure/observe, and write-plane peer evaluation; serialize write Operations via `status.activeOperationRefs`.
+* **api:** drop unused `status.regions[].phase` / `.message` — presence in `status.regions` is the imported source of truth.
+* **api:** read-only API serving plane (emptyDir workdir only); default probes on `/status`; typed `spec.nominatim.api` knobs; `spec.api.gunicornWorkers` with cgroup-CPU fallback.
+* **worker:** CatchUp uses Update exit codes; AddRegions imports every region in `NOMINATIM_REGIONS` not already bookmarked; shorter `wait_for_postgres` last-mile wait (operator CNPG gate is primary).
+* **build:** keep tests out of production image contexts; rename Dockerfiles for editor highlighting where applicable.
+* **ci:** enforce `internal/controller` coverage against `.coverage-thresholds.json` (90% floor).
+* **test:** bats/shellcheck for worker helpers; envtest manager watch smoke; import e2e for multi-region Bootstrap and Rebuild API scale-down.
 
 ## [0.1.1](https://github.com/zebernst/nominatim-operator/compare/0.1.0...0.1.1) (2026-07-27)
 

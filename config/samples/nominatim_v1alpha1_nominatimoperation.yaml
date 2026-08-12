@@ -6,14 +6,14 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: nominatimoperation-sample
 spec:
-  # Imperative finite workflow — do NOT manage via Flux/GitOps Kustomizations.
+  # Finite workflow Job — do NOT manage via Flux/GitOps. Prefer letting the
+  # NominatimInstance controller create Operations; use kubectl only for one-offs.
+  # See docs/operations.md and docs/concepts.md.
   type: Update
   nominatimInstanceRef:
     name: nominatim-sample
-  # Optional: regions for AddRegions / Rebuild
-  # regions:
+  # regions:  # AddRegions / Rebuild
   #   - north-america/us-west
-  # Optional: override Nominatim.spec.staging for this operation's PVC
-  # staging:
+  # staging:  # optional PVC override for this Operation
   #   size: 50Gi
   #   storageClassName: fast

@@ -1,56 +1,25 @@
 # Kind validation lab
 
-Canonical Monaco NominatimInstance fixture (shared with the kind validation lab):
+Shared Monaco fixture: [`../e2e/testdata/nominatim-monaco.yaml`](../e2e/testdata/nominatim-monaco.yaml).
 
-[`../e2e/testdata/nominatim-monaco.yaml`](../e2e/testdata/nominatim-monaco.yaml)
-
-CI import e2e uses a separate multi-region fixture
-([`nominatim-monaco-andorra.yaml`](../e2e/testdata/nominatim-monaco-andorra.yaml)) so Bootstrap
-exercises multiple `--osm-file` flags. The lab keeps monaco-only Bootstrap and grows coverage
-via day-2 **AddRegions** (`RUN_ADD_REGIONS=1`).
+CI import e2e uses [`nominatim-monaco-andorra.yaml`](../e2e/testdata/nominatim-monaco-andorra.yaml) so Bootstrap exercises multiple `--osm-file` flags. This lab keeps monaco-only Bootstrap and grows coverage with day-2 **AddRegions** (`RUN_ADD_REGIONS=1`).
 
 ## Quick start
 
 ```bash
-# From repo root — creates/reuses kind, installs CNPG, builds/loads images,
-# deploys the operator, imports Monaco, probes search, then AddRegions + Rebuild.
+# From repo root — kind + CNPG + images + operator + Monaco import + optional AddRegions/Rebuild
 make validate-kind
 ```
 
-Or run the script directly:
+Or: `./hack/validate-kind.sh`
 
-```bash
-./hack/validate-kind.sh
-```
+Environment overrides: `OPERATOR_IMG`, `API_IMG`, `WORKER_IMG`, `KIND_CLUSTER`, `RUN_ADD_REGIONS=0`, `RUN_REBUILD=0`.
 
-Environment overrides: `OPERATOR_IMG`, `API_IMG`, `WORKER_IMG`, `KIND_CLUSTER`,
-`RUN_ADD_REGIONS=0`, `RUN_REBUILD=0`.
+## Rebuild note
 
-## Rebuild database reset
+Rebuild starts from an empty application database so CloudNativePG can reinstall PostGIS/hstore. The controller drops the owned `Database` CR, recreates it, and arms the worker Job only after the replacement is a new object (`metadata.uid` changed) with `status.applied=true`. The API is scaled down for the whole Rebuild so open connections cannot block `DROP DATABASE`.
 
-Rebuild must start from an empty application database so CloudNativePG reinstalls
-PostGIS/hstore as superuser. The controller therefore drops the owned `Database` CR,
-recreates it, and only arms the worker Job once the replacement is a different object
-(new `metadata.uid`) reporting `status.applied=true`.
-
-Before that drop, the Operation registers itself on `status.activeOperationRefs` and
-quiesces the API Deployment (Rebuild always suspends, even when
-`suspendDuringOperations: Never`) so open connections cannot block `DROP DATABASE`.
-While `nominatim.zebernst.dev/rebuild-db-reset=pending`, the NominatimInstance reconciler
-skips recreating the owned Database so it does not fight the delete.
-
-That ordering is asserted in three places:
-
-| Where | What it covers |
-| --- | --- |
-| `internal/controller/nominatimoperation_rebuild_test.go` | Every branch of the UID handshake (missing / same-UID / pending / applied / API errors) against a fake client |
-| `make test-e2e-import` (CI job **E2E Import**) | Real CNPG on kind: Database UID changes and reports `applied=true` before the Rebuild Job exists; API scales to 0 for the duration of Rebuild and restores afterward |
-| `make validate-kind` | Same invariant in the interactive lab, after AddRegions |
-
-The e2e and lab checks poll, so they can miss a very short-lived violation; they fail
-immediately when they do observe a Job next to the pre-Rebuild UID, and the Operation's
-`nominatim.zebernst.dev/rebuild-db-reset` / `-prev-uid` annotations are the deterministic
-record that the handshake ran.
+Covered by unit tests (`nominatimoperation_rebuild_test.go`), `make test-e2e-import`, and this lab. See [docs/operations.md](../../docs/operations.md).
 
 ## Tear down
 

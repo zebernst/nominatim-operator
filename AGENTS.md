@@ -2,26 +2,7 @@
 
 This project uses **bd** (beads) for issue tracking. Run `bd prime` for full workflow context.
 
-> **Architecture in one line:** Issues live in a local Dolt database
-> (`.beads/dolt/`); cross-machine sync uses `bd dolt push/pull` (a
-> git-compatible protocol), stored under `refs/dolt/data` on your git
-> remote — separate from `refs/heads/*` where your code lives.
-> `.beads/issues.jsonl` is a passive export, not the wire protocol.
->
-> See [SYNC_CONCEPTS.md](https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md)
-> for the one-screen overview and anti-patterns (don't treat JSONL as the
-> source of truth; don't `bd import` during normal operation; don't
-> reach for third-party Dolt hosting before trying the default).
-
-## Quick Reference
-
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work atomically
-bd close <id>         # Complete work
-bd dolt push          # Push beads data to remote
-```
+Domain vocabulary: [`docs/CONTEXT.md`](docs/CONTEXT.md). Human operator docs: [`docs/`](docs/) (getting-started, concepts, configuration, database, operations). Contributors: [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md).
 
 ## Non-Interactive Shell Commands
 
@@ -31,12 +12,9 @@ Shell commands like `cp`, `mv`, and `rm` may be aliased to include `-i` (interac
 
 **Use these forms instead:**
 ```bash
-# Force overwrite without prompting
 cp -f source dest           # NOT: cp source dest
 mv -f source dest           # NOT: mv source dest
 rm -f file                  # NOT: rm file
-
-# For recursive operations
 rm -rf directory            # NOT: rm -r directory
 cp -rf source dest          # NOT: cp -r source dest
 ```
@@ -51,13 +29,9 @@ cp -rf source dest          # NOT: cp -r source dest
 
 Pre-push quality checks live in `.githooks/pre-push` (fmt, vet, lint, coverage).
 
-Enable in a clone (one-time):
-
 ```bash
 git config core.hooksPath .githooks
 ```
-
-Alternatively, copy to `.git/hooks/pre-push` and `chmod +x` that file.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:970c3bf2 -->
 ## Beads Issue Tracker
@@ -70,7 +44,7 @@ This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full 
 bd ready              # Find available work
 bd show <id>          # View issue details
 bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
+bd close <id>           # Complete work
 ```
 
 ### Rules
@@ -141,18 +115,16 @@ bd prime                # Refresh Beads context
 
 ## Build & Test
 
-- Test command: `make test`
-- Coverage command: `go test $(go list ./... | grep -v /e2e) -coverprofile=build/cover.out` (or `make test`, which writes `build/cover.out`)
-- Lint command: `make lint`
-- Format command: `make fmt`
-- Type check: `make vet`
-- Clean artifacts: `make clean` (removes `build/`)
+- Test: `make test`
+- Coverage: `make test` (writes `build/cover.out`; floor in `.coverage-thresholds.json`)
+- Lint: `make lint`
+- Format: `make fmt`
+- Vet: `make vet`
+- Clean: `make clean` (removes `build/`)
 
-## Architecture Overview
+Human contributor guide: [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md).
 
-Kubernetes operator (controller-runtime) that manages Nominatim geocoding deployments via custom resources.
-
-## Conventions & Patterns
+## Conventions
 
 - Go idioms, `go vet` clean, exported types documented
 - golangci-lint (`.golangci.yml`) + `go fmt`
@@ -160,49 +132,16 @@ Kubernetes operator (controller-runtime) that manages Nominatim geocoding deploy
 
 ## metaswarm
 
-This project uses the [metaswarm](https://github.com/dsifry/metaswarm) Cursor plugin for multi-agent orchestration with quality gates (TDD, coverage thresholds, spec-driven development).
+This project uses the [metaswarm](https://github.com/dsifry/metaswarm) Cursor plugin for multi-agent orchestration.
 
-### Workflow
+- Most tasks: `metaswarm-start-task` (or `/start-task`)
+- Complex multi-file work: describe a Definition of Done, then ask for the full metaswarm orchestration workflow
 
-- **Most tasks**: `metaswarm-start-task` (or `/start-task`) — primes context, guides scoping, picks the right level of process
-- **Complex features** (multi-file, spec-driven): Describe what you want built with a Definition of Done, then say: `Use the full metaswarm orchestration workflow.`
+Do not add `CLAUDE.md` — `AGENTS.md` is the single agent instruction file.
 
-### Available Skills / Commands
+### Quality gates (agents)
 
-On Cursor, prefer plugin commands (`metaswarm-start-task`, …) or `.cursor/commands/` shims. Skills may also be invoked by name.
-
-| Invoke | Purpose |
-|---|---|
-| `metaswarm-start-task` / `$start` | Begin tracked work on a task |
-| `metaswarm-setup` / `$setup` | Interactive guided setup |
-| `metaswarm-prime` / `/prime` | Load relevant knowledge before starting |
-| `metaswarm-review-design` / `$design-review-gate` | Trigger design review gate |
-| `metaswarm-pr-shepherd` / `$pr-shepherd` | Monitor a PR through to merge |
-| `metaswarm-self-reflect` / `/self-reflect` | Extract learnings after a PR merge |
-| `metaswarm-brainstorm` / `$brainstorming-extension` | Refine an idea with design review gate |
-| `$handling-pr-comments` | Handle PR review comments |
-| `$create-issue` | Create a well-structured GitHub Issue |
-| `$plan-review-gate` | Adversarial plan review |
-
-Project shims live in `.cursor/commands/` (ignored by git). Do not add `CLAUDE.md` for this project — `AGENTS.md` is the single agent instruction file.
-Domain vocabulary: [`docs/CONTEXT.md`](docs/CONTEXT.md).
-
-### Quality Gates
-
-- **Design Review Gate** — review after design is drafted
-- **Plan Review Gate** — adversarial reviewers — ALL must PASS before presenting
-- **Coverage Gate** — `.coverage-thresholds.json` defines thresholds. BLOCKING gate before PR creation
-
-### Testing & Quality
-
-- **TDD is mandatory** — Write tests first, watch them fail, then implement
-- **Coverage floor 90%** for `internal/controller` — Enforced via `.coverage-thresholds.json` (e2e / generated / thin wiring exempt)
-- **Coverage source of truth** — `.coverage-thresholds.json`
-
-### Workflow Enforcement (MANDATORY)
-
-- **After brainstorming** → MUST run design review gate before planning or implementation
-- **After any plan is created** → MUST run plan review gate before presenting to user
-- **Coverage** → `.coverage-thresholds.json` is the single source of truth
-- **Agent discipline** → NEVER use `--no-verify`, NEVER `git push --force` without approval, NEVER self-certify, ALWAYS follow TDD, STAY within file scope
-- **Context recovery** → Approved plans persist to `.beads/`. After compaction, run `bd prime --work-type recovery`.
+- Design review after brainstorming; plan review before presenting plans
+- Coverage: `.coverage-thresholds.json` is authoritative (blocking before PR)
+- TDD for code changes; never `--no-verify`; no force-push without approval
+- Approved plans may persist under `.beads/`; after compaction run `bd prime --work-type recovery`

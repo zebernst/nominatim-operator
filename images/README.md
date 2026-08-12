@@ -2,38 +2,18 @@
 
 Own images for Nominatim on Kubernetes — **not** based on `mediagis/nominatim`.
 
-| Image | Dockerfile | Registry | Plane |
-|-------|------------|----------|-------|
-| Operator (kubebuilder manager) | `images/operator/Dockerfile` | `ghcr.io/zebernst/nominatim-operator` | Control |
-| API (gunicorn + nominatim-api) | `images/api/Dockerfile` | `ghcr.io/zebernst/nominatim-api` | Serving |
-| Worker (nominatim CLI + Operation phases) | `images/worker/Dockerfile` | `ghcr.io/zebernst/nominatim-worker` | Data / write |
-| UI (static nominatim-ui) | `images/ui/Dockerfile` | `ghcr.io/zebernst/nominatim-ui` | Serving |
+Operator architecture and day-2 behavior: [docs/concepts.md](../docs/concepts.md), [docs/operations.md](../docs/operations.md).
 
-Root operator architecture (planes, status SoT, replica/volume notes): see the repository [README](../README.md).
+| Image | Dockerfile | Registry |
+|-------|------------|----------|
+| Operator | `images/operator/Dockerfile` | `ghcr.io/zebernst/nominatim-operator` |
+| API | `images/api/Dockerfile` | `ghcr.io/zebernst/nominatim-api` |
+| Worker | `images/worker/Dockerfile` | `ghcr.io/zebernst/nominatim-worker` |
+| UI | `images/ui/Dockerfile` | `ghcr.io/zebernst/nominatim-ui` |
 
-## Planes and volumes
+## Packaging
 
-| Plane | Image / process | Mounts | Talks to Kubernetes API? |
-|-------|-----------------|--------|---------------------------|
-| **Control** | operator | none of the instance project/flatnode | yes (reconcile) |
-| **Serving** | API (+ optional UI) | emptyDir workdir only | no |
-| **Data / write** | worker Operation Jobs | project (+ optional flatnode), staging | no |
-| **Observation** | short-lived sequence probe Job (worker image, operator-owned) | project **read-only** | ConfigMaps only (dedicated SA) |
-
-| Volume | Access mode (typical) | Serving API | Worker Jobs | Sequence probe |
-|--------|----------------------|-------------|-------------|----------------|
-| project PVC | RWO | no | read-write | read-only |
-| flatnode PVC | RWO | no | read-write when `spec.flatnode` set | no |
-| staging PVC | RWO (per Operation) | no | yes | no |
-| API workdir | emptyDir | yes | no | no |
-
-**Multi-replica API** (`spec.api.replicas > 1`) is supported for serving because the API is stateless against Postgres. It does **not** require RWX project or flatnode volumes — those stay single-writer for Jobs. Shared RWO flatnode across API replicas is never the design and is not mounted on the serving plane.
-
-## Base / packaging
-
-API and worker use **Ubuntu 24.04** and install Nominatim from **PyPI** (`nominatim-db` / `nominatim-api`), matching the [upstream Ubuntu 24 install docs](https://nominatim.org/release-docs/latest/admin/Install-on-Ubuntu-24/). Worker also installs `osm2pgsql` from apt and `pyosmium` for Geofabrik diffs.
-
-Override version at build time:
+API and worker use **Ubuntu 24.04** and install Nominatim from **PyPI** (`nominatim-db` / `nominatim-api`), matching the [upstream Ubuntu 24 install docs](https://nominatim.org/release-docs/latest/admin/Install-on-Ubuntu-24/). Worker also installs `osm2pgsql` and `pyosmium`.
 
 ```bash
 docker build -f images/api/Dockerfile --build-arg NOMINATIM_VERSION=5.3.2 -t ghcr.io/zebernst/nominatim-api:dev .
@@ -43,134 +23,60 @@ docker build -f images/ui/Dockerfile --build-arg NOMINATIM_UI_VERSION=3.12.0 -t 
 ## Local builds
 
 ```bash
-# Operator
 docker build -t ghcr.io/zebernst/nominatim-operator:dev -f images/operator/Dockerfile .
-
-# API
 docker build -t ghcr.io/zebernst/nominatim-api:dev -f images/api/Dockerfile .
-
-# Worker
 docker build -t ghcr.io/zebernst/nominatim-worker:dev -f images/worker/Dockerfile .
-
-# UI (packages https://github.com/osm-search/nominatim-ui/releases into nginx)
 docker build -t ghcr.io/zebernst/nominatim-ui:dev -f images/ui/Dockerfile .
 # or: make docker-build-ui
 ```
 
-CI (`.github/workflows/release.yaml`) builds and pushes all four to GHCR on pushes to `main` and on version tags.
+CI (`.github/workflows/release.yaml`) builds and pushes all four to GHCR on `main` and on version tags.
 
-## UI configuration
+## UI
 
-The UI image is static HTML/JS from upstream. At container start, `images/ui/entrypoint.sh` writes `theme/config.theme.js` from `NOMINATIM_API_ENDPOINT` (browser-reachable Nominatim API base URL; trailing slash added). When unset, the endpoint defaults to `/` (same-origin reverse proxies). The operator sets this automatically from the first `spec.api.route.hostnames` entry when present (`https://<hostname>/`); override via `spec.ui.podSpec` env if needed.
+Static HTML/JS from [osm-search/nominatim-ui](https://github.com/osm-search/nominatim-ui/releases). At start, `images/ui/entrypoint.sh` writes `theme/config.theme.js` from `NOMINATIM_API_ENDPOINT` (browser-reachable API base URL; trailing slash added). When unset, defaults to `/` (same-origin proxy).
 
-Omit `spec.ui`, or set `spec.ui.enabled: false`, for API- and database-only serving — the operator deletes any owned UI Deployment/Service/HTTPRoute. `enabled` defaults to `true` when the `ui` block is present.
+The operator sets this from the first `spec.api.route.hostnames` entry when present (`https://<hostname>/`). Override via `spec.ui.podSpec` env if needed. Omit `spec.ui` or set `enabled: false` for API/database-only.
 
-## External Postgres
+## Database env (API and worker)
 
-API and worker **do not** run PostgreSQL. They expect an external database (typically CNPG) via:
+Neither image runs PostgreSQL. They expect:
 
 | Variable | Purpose |
 |----------|---------|
 | `NOMINATIM_DATABASE_DSN` | Nominatim connection string (required) |
 | `PGHOST` / `PGDATABASE` / `PGUSER` / `PGPASSWORD` | libpq / `pg_isready` / `psql` (required) |
 
-Do not bake password-bearing DSNs into the project PVC `.env`; prefer process env / Secrets.
+Prefer process env / Secrets — do not bake password-bearing DSNs into the project PVC `.env`.
 
-## Worker Operation phases
+## Worker Operation types
 
-The worker entrypoint dispatches on `OPERATION_TYPE` (or the first CLI arg):
+The worker entrypoint dispatches on `OPERATION_TYPE` (or the first CLI arg). Scripts under `images/worker/scripts/`:
 
-| Type | Script | Role |
-|------|--------|------|
-| `Bootstrap` | `scripts/bootstrap.sh` | Fresh or resumed `nominatim import` |
-| `AddRegions` | `scripts/add-regions.sh` | `nominatim add-data` for new Geofabrik regions |
-| `Rebuild` | `scripts/rebuild.sh` | Clear markers + Bootstrap (`NOMINATIM_REBUILD_CONFIRM=1`). Operator drops/recreates the owned CNPG Database CR first so extensions are reinstalled on an empty DB. |
-| `Update` | `scripts/update.sh` | Geofabrik diffs via `pyosmium-get-changes` |
-| `CatchUp` | `scripts/catch-up.sh` | Update loop until idle |
-| `Refresh` | `scripts/refresh.sh` | `nominatim refresh` admin tasks (default: `--postcodes --word-counts --functions --importance`; override with `NOMINATIM_REFRESH_TASKS`) |
-| `Migrate` | `scripts/migrate.sh` | `nominatim admin --migrate` after rolling the worker image to a newer `nominatim-db` (then roll API). Stop Update/CatchUp first — Migrate is write-heavy. Prefer `suspendDuringOperations: WriteHeavy` (or All) while migrating; upstream advises not serving during upgrades. |
-| `Freeze` | `scripts/freeze.sh` | `nominatim freeze` — drop tables kept only for OSM diffs (same as import `--no-updates`). Serving continues; Update/AddRegions/aux imports that need update structures will fail afterward. Do not Freeze before TIGER/aux data you still plan to load. |
+| Type | Script |
+|------|--------|
+| Bootstrap | `bootstrap.sh` |
+| AddRegions | `add-regions.sh` |
+| Rebuild | `rebuild.sh` |
+| Update | `update.sh` |
+| CatchUp | `catch-up.sh` |
+| Refresh | `refresh.sh` |
+| Migrate | `migrate.sh` |
+| Freeze | `freeze.sh` |
 
-These are thin phases invoked by `NominatimOperation` Jobs. Orchestration (mutex, scale API, pause backups, empty DB for Rebuild) stays in the operator — not in bash.
+When to use each type, concurrency, and status: [docs/operations.md](../docs/operations.md).
 
-**Write-plane mutex:** the operator serializes conflicting Operations via parent `status.activeOperationRefs` (retry-on-conflict CAS), not Kubernetes Leases. A peer that is already `Running` or has a `JobRef` causes terminal `Conflict`. Two fresh write-heavy peers in a creation race requeue (lexicographically smaller name wins) instead of both failing.
-
-`Refresh` is not write-heavy for the Operation mutex (it still conflicts with an active Bootstrap / AddRegions / Rebuild / Migrate / Freeze peer). Do not run it in parallel with Update / CatchUp / AddRegions — upstream Nominatim forbids parallel refresh with add-data / replication-style updates. Staging PVC is still created for Job shape consistency even though Refresh does not download extracts.
-
-`Migrate` and `Freeze` are write-heavy (mutex with Update/CatchUp and other write-heavy peers; default `pauseBackupsDuringOperations: WriteHeavy` applies).
-
-### Import-complete / ready-to-serve (Kubernetes source of truth)
-
-| Concern | Source of truth | Not SoT |
-|---------|-----------------|--------|
-| Which regions are imported | `status.regions` (synced from Succeeded Bootstrap / AddRegions / Rebuild) | `imported-regions.txt` on the project PVC |
-| Bootstrap done (regions mode) | `status.regions` non-empty **or** a peer Bootstrap Operation `Succeeded` | `import-finished` on the project PVC |
-| API/UI may exist | `servingWorkloadsAllowed`: no desired regions, or `status.regions` populated | PVC markers |
-| Day-2 Jobs (AddRegions / Update / CatchUp) | Operator `BootstrapIncomplete` gate via `bootstrapComplete` | Worker file checks alone |
-| Day-2 admin (`Refresh`) | Worker `require_bootstrap_ready` (no region gate; Refresh does not need `NOMINATIM_REGIONS`) | API boot path |
-| Schema / serve-only (`Migrate` / `Freeze`) | Worker `require_bootstrap_ready`; write-heavy mutex (stop updates first) | Image bumps for Migrate are outside the Job |
-
-Project PVC files remain **worker-local resume bookmarks** (Bootstrap still writes `import-finished`; Rebuild clears markers before re-bootstrap). Workers call `require_bootstrap_ready`, which heals a missing marker when the Nominatim schema is already ready and only fails when both the marker and schema are absent — last-resort, not cluster coordination.
-
-**PBF-only** parents (`Spec.Regions` empty) skip the operator Bootstrap gate; the worker schema/marker belt is then the only guard before AddRegions/Update.
-
-### Worker script tests
-
-Resume / region parsing helpers and phase-scoped `prepare_db` / `prepare_import` in `scripts/common.sh` have bats coverage under `scripts/test/`:
+### Worker shell tests
 
 ```bash
-# Requires bats-core + shellcheck on PATH (brew install bats-core shellcheck).
+# Requires bats-core + shellcheck (brew install bats-core shellcheck).
 make test-worker-shell
 make shellcheck-worker
 ```
 
-CI runs both in the **Worker shell** job. Stubs under `scripts/test/stubs/` fake `psql` / `pg_isready` so `detect_continue_at` can be exercised without Postgres.
+Stubs under `images/worker/scripts/test/stubs/` fake `psql` / `pg_isready` without Postgres.
 
-### Sequence state / update lag
-
-After a Succeeded Bootstrap / AddRegions / Rebuild / Update / CatchUp Operation, the NominatimInstance reconciler creates a short-lived **sequence probe** Job (operator-owned) that mounts the project PVC read-only, runs `scripts/report-sequence.sh`, and merge-patches ConfigMap `{name}-sequence`. The reconciler copies `report.json` into `status.regions[].sequenceState` (`sequenceNumber@timestamp`) and `aux-data.json` into `status.auxData` (Wikipedia importance / postcode file presence). Worker Operation scripts do **not** talk to the Kubernetes API.
-
-### Auxiliary data (Wikipedia importance, postcodes)
-
-`spec.auxData` toggles optional downloads from [nominatim.org/data](https://nominatim.org/data/) into the operation staging PVC during Bootstrap (and Refresh when enabled):
-
-| Field | Staging / project file | Upstream URL |
-|-------|------------------------|--------------|
-| `wikimediaImportance` | `wikimedia-importance.csv.gz` | `…/wikimedia-importance.csv.gz` |
-| `secondaryImportance` | `secondary_importance.sql.gz` | `…/wikimedia-secondary-importance.sql.gz` |
-| `usPostcodes` | `us_postcodes.csv.gz` | `…/us_postcodes.csv.gz` |
-
-The worker downloads into staging (resume-friendly), then **copies** files onto the project PVC so import and the sequence probe see durable files (not broken staging symlinks). `Refresh` appends `--wiki-data` / `--secondary-importance` when those files are present for post-import backfill.
-
-This is per-region **pyosmium / Geofabrik** cursor state — not Nominatim `NOMINATIM_REPLICATION_*` lag.
-
-### Bootstrap multi-region: one import, multiple `--osm-file`
-
-When `NOMINATIM_REGIONS` lists more than one Geofabrik path (e.g. `europe/monaco,europe/andorra`),
-`bootstrap.sh` downloads **every** extract and passes multiple `--osm-file` flags to a single
-`nominatim import` — matching [upstream Advanced Installations](https://nominatim.org/release-docs/latest/admin/Advanced-Installations/).
-Do **not** use `add-data` during Bootstrap; it is far slower than initial import. Day-2 growth
-of the coverage set is `AddRegions` only.
-
-The CI import e2e (`make test-e2e-import`) bootstraps monaco+andorra and probes both countries
-with `countrycodes=` so a regression that only imported `regions[0]` while marking every Spec
-region `Imported` fails the search assertions even if `status.regions` looks complete.
-
-### AddRegions Spec contract
-
-`NOMINATIM_REGIONS` (derived by the operator from `op.Spec.Regions`, falling back to `parent.Spec.Regions` when the Operation sets none) is the **exact** import set for an AddRegions Job: `add-regions.sh` imports every region listed there that is not already recorded in `imported-regions.txt` (local bookmark; cluster SoT is `status.regions`), then re-indexes once if anything changed. There is no per-run cap or "only this region" filter in the worker — chunking (e.g. one missing region per drift-driven Operation) is entirely the operator's responsibility. A manual AddRegions with multiple regions in its Spec imports all of them in one Job.
-
-`add-regions.sh` / `update.sh` call `require_bootstrap_ready` as a last-resort belt; the operator's Bootstrap-done gate is authoritative in regions mode (see above).
-
-### Bootstrap gate: PBF-only vs regions mode
-
-See **Import-complete / ready-to-serve** above. Regions-mode parents use `status.regions` / Succeeded Bootstrap; PBF-only parents rely on the worker belt.
-
-### Postgres readiness: CNPG gate is primary, Job wait is last-mile
-
-Before creating any `NominatimOperation` Job, the operator checks CNPG Cluster/Database readiness (`cnpgClusterReadyForJobs`) and requeues rather than creating a Job until the owned or referenced CNPG Cluster is `Ready` (and, for owned Databases, applied). This is the **primary** readiness gate — by the time a Job starts, Postgres is expected to already be accepting connections.
-
-`wait_for_postgres` in `scripts/common.sh` is a **last-mile** check only: it covers the brief gap between Job scheduling and Postgres accepting connections (e.g. pod startup ordering), not a substitute for the operator's gate. It defaults to 15 attempts at a 2s sleep (~30s total) and can be tuned via `NOMINATIM_PG_WAIT_ATTEMPTS` if a deployment's last-mile gap is larger than the default covers.
+### Manual worker / API runs
 
 ```bash
 docker run --rm \
@@ -181,32 +87,11 @@ docker run --rm \
   -v nominatim-project:/nominatim \
   -v nominatim-staging:/import-staging \
   ghcr.io/zebernst/nominatim-worker:dev
-```
 
-## API serving
-
-The API is a **read-only serving plane**: it talks to Postgres via Secrets / env
-(`NOMINATIM_DATABASE_DSN`, `PG*`, plus `spec.nominatim` → `NOMINATIM_*`). It does
-**not** mount the project or flatnode PVCs (those are for worker Jobs / osm2pgsql
-on the data plane). The Deployment mounts an ephemeral emptyDir at `/nominatim`
-only as gunicorn's working directory. Import-complete is gated by the operator
-(`status.regions`); the entrypoint refuses to start if `public.placex` is missing.
-
-Admin refresh / migrate / freeze run as `NominatimOperation` types when
-implemented — never as side effects of API container start. Scale API pods with
-`spec.api.replicas` freely relative to project/flatnode access modes (see
-**Planes and volumes** above).
-
-Default Deployment probes use **GET `/status`** (startup, readiness, and liveness).
-`spec.api.podSpec` may override them. `spec.api.gunicornWorkers` sets
-`GUNICORN_WORKERS`; when unset the entrypoint prefers cgroup CPU quota over
-`nproc` (nominatim-5et.14). Runtime knobs under `spec.nominatim.api` map to
-`NOMINATIM_API_POOL_SIZE`, `NOMINATIM_QUERY_TIMEOUT`, `NOMINATIM_REQUEST_TIMEOUT`,
-`NOMINATIM_DEFAULT_LANGUAGE`, and `NOMINATIM_CORS_NOACCESSCONTROL`.
-
-```bash
 docker run --rm -p 8080:8080 \
   -e NOMINATIM_DATABASE_DSN=postgresql://… \
   -e PGHOST=… -e PGDATABASE=nominatim -e PGUSER=… -e PGPASSWORD=… \
   ghcr.io/zebernst/nominatim-api:dev
 ```
+
+The API is read-only serving: env/Secrets only, no project/flatnode mounts, refuses to start if `public.placex` is missing. Default probes: `GET /status`. `spec.api.gunicornWorkers` sets `GUNICORN_WORKERS`; when unset the entrypoint prefers cgroup CPU quota over `nproc`.
