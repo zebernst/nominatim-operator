@@ -589,9 +589,13 @@ func (r *NominatimInstanceReconciler) reconcileHTTPRoute(ctx context.Context, no
 			pr := map[string]interface{}{"name": ref.Name}
 			if ref.Group != nil {
 				pr["group"] = *ref.Group
+			} else {
+				pr["group"] = "gateway.networking.k8s.io"
 			}
 			if ref.Kind != nil {
 				pr["kind"] = *ref.Kind
+			} else {
+				pr["kind"] = "Gateway"
 			}
 			if ref.Namespace != nil {
 				pr["namespace"] = *ref.Namespace
@@ -619,13 +623,35 @@ func (r *NominatimInstanceReconciler) reconcileHTTPRoute(ctx context.Context, no
 
 		rules := []interface{}{
 			map[string]interface{}{
+				// Seed the Gateway API default match (PathPrefix "/") and backendRef
+				// defaults so CreateOrUpdate stays idempotent against server-defaulted
+				// fields. RouteSpec does not model matches; omitting them would strip
+				// defaults on every reconcile.
+				"matches": []interface{}{
+					map[string]interface{}{
+						"path": map[string]interface{}{
+							"type":  "PathPrefix",
+							"value": "/",
+						},
+					},
+				},
 				"backendRefs": []interface{}{
 					map[string]interface{}{
-						"name": serviceName,
-						"port": int64(workloadServicePort),
+						"group":  "",
+						"kind":   "Service",
+						"name":   serviceName,
+						"port":   int64(workloadServicePort),
+						"weight": int64(1),
 					},
 				},
 			},
+		}
+		if existingRules, found, err := unstructured.NestedSlice(httpRoute.Object, "spec", "rules"); err == nil && found && len(existingRules) > 0 {
+			if existingRule, ok := existingRules[0].(map[string]interface{}); ok {
+				if existingMatches, ok := existingRule["matches"]; ok {
+					rules[0].(map[string]interface{})["matches"] = existingMatches
+				}
+			}
 		}
 		return unstructured.SetNestedSlice(httpRoute.Object, rules, "spec", "rules")
 	})
