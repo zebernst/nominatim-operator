@@ -67,11 +67,29 @@ type VolumeSource struct {
 	VolumeClaimTemplate *VolumeClaimTemplate `json:"volumeClaimTemplate,omitempty"`
 }
 
+// EmbeddedObjectMeta is the subset of metav1.ObjectMeta allowed on embedded
+// templates (PVC templates, etc.). Do not embed metav1.ObjectMeta here: it
+// always JSON-marshals creationTimestamp:null and other server fields that the
+// CRD schema rejects (KubeAPIWarningLogger unknown field …metadata.creationTimestamp).
+type EmbeddedObjectMeta struct {
+	// Name of the generated object. May be operator-derived when empty.
+	// +optional
+	Name string `json:"name,omitempty"`
+
+	// Labels to set on the generated object.
+	// +optional
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// Annotations to set on the generated object.
+	// +optional
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
 // VolumeClaimTemplate is a minimal PVC template (storage size + optional storage class + access modes).
 type VolumeClaimTemplate struct {
 	// Metadata for the generated PVC (name/labels/annotations). Name may be operator-derived when empty.
 	// +optional
-	Metadata metav1.ObjectMeta `json:"metadata,omitempty"`
+	Metadata EmbeddedObjectMeta `json:"metadata,omitempty"`
 
 	// Spec of the PersistentVolumeClaim.
 	Spec corev1.PersistentVolumeClaimSpec `json:"spec"`

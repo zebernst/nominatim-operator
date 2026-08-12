@@ -104,73 +104,59 @@ rbac:
       type: ClusterRole
       labels:
         control-plane: controller-manager
+      # Keep in sync with config/rbac/role.yaml (kubebuilder manager-role).
       rules:
-        - apiGroups:
-            - nominatim.zebernst.dev
-          resources:
-            - nominatiminstances
-            - nominatimoperations
-          verbs:
-            - create
-            - delete
-            - get
-            - list
-            - patch
-            - update
-            - watch
-        - apiGroups:
-            - nominatim.zebernst.dev
-          resources:
-            - nominatiminstances/finalizers
-            - nominatimoperations/finalizers
-          verbs:
-            - update
-        - apiGroups:
-            - nominatim.zebernst.dev
-          resources:
-            - nominatiminstances/status
-            - nominatimoperations/status
-          verbs:
-            - get
-            - patch
-            - update
+        - apiGroups: [""]
+          resources: [configmaps, serviceaccounts]
+          verbs: [create, get, list, patch, update, watch]
+        - apiGroups: [""]
+          resources: [persistentvolumeclaims, services]
+          verbs: [create, delete, get, list, patch, update, watch]
+        - apiGroups: [""]
+          resources: [secrets]
+          verbs: [get, list, watch]
+        - apiGroups: [apps]
+          resources: [deployments]
+          verbs: [create, delete, get, list, patch, update, watch]
+        - apiGroups: [batch]
+          resources: [jobs]
+          verbs: [create, delete, get, list, patch, update, watch]
+        - apiGroups: [gateway.networking.k8s.io]
+          resources: [httproutes]
+          verbs: [create, delete, get, list, patch, update, watch]
+        - apiGroups: [nominatim.zebernst.dev]
+          resources: [nominatiminstances, nominatimoperations]
+          verbs: [create, delete, get, list, patch, update, watch]
+        - apiGroups: [nominatim.zebernst.dev]
+          resources: [nominatiminstances/finalizers, nominatimoperations/finalizers]
+          verbs: [update]
+        - apiGroups: [nominatim.zebernst.dev]
+          resources: [nominatiminstances/status, nominatimoperations/status]
+          verbs: [get, patch, update]
+        - apiGroups: [postgresql.cnpg.io]
+          resources: [clusters]
+          verbs: [create, get, list, patch, update, watch]
+        - apiGroups: [postgresql.cnpg.io]
+          resources: [databases]
+          verbs: [create, delete, get, list, patch, update, watch]
+        - apiGroups: [rbac.authorization.k8s.io]
+          resources: [rolebindings, roles]
+          verbs: [create, get, list, patch, update, watch]
     leader-election:
       enabled: {{ .Values.leaderElection.enabled }}
       type: Role
       labels:
         control-plane: controller-manager
       rules:
-        - apiGroups:
-            - ""
-          resources:
-            - configmaps
-          verbs:
-            - get
-            - list
-            - watch
-            - create
-            - update
-            - patch
-            - delete
-        - apiGroups:
-            - coordination.k8s.io
-          resources:
-            - leases
-          verbs:
-            - get
-            - list
-            - watch
-            - create
-            - update
-            - patch
-            - delete
-        - apiGroups:
-            - ""
-          resources:
-            - events
-          verbs:
-            - create
-            - patch
+        - apiGroups: [""]
+          resources: [configmaps]
+          verbs: [get, list, watch, create, update, patch, delete]
+        - apiGroups: [coordination.k8s.io]
+          resources: [leases]
+          verbs: [get, list, watch, create, update, patch, delete]
+        - apiGroups: [""]
+          resources: [events]
+          verbs: [create, patch]
   bindings:
     manager:
       enabled: true
