@@ -357,7 +357,7 @@ func TestReconcileUI_NoopWhenUnset(t *testing.T) {
 func TestReconcileUI_CreatesDeploymentServiceRoute(t *testing.T) {
 	scheme := testScheme(t)
 	nom := baseNominatim("ui-set")
-	group := "gateway.networking.k8s.io"
+	group := gatewayAPIGroup
 	nom.Spec.UI = &nominatimv1alpha1.UISpec{
 		Route: &nominatimv1alpha1.RouteSpec{
 			ParentRefs: []nominatimv1alpha1.ParentReference{{Name: "gw", Group: &group}},
