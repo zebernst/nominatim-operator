@@ -479,7 +479,7 @@ func TestServingWorkloadsAllowed(t *testing.T) {
 		{
 			name:   "bootstrap synced regions",
 			spec:   []string{"europe/monaco"},
-			status: []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: "Imported"}},
+			status: []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}},
 			want:   true,
 		},
 	}
@@ -529,7 +529,7 @@ func TestReconcileAPI_CreatesAfterBootstrapRegionsSynced(t *testing.T) {
 	scheme := testScheme(t)
 	nom := nominatimWithConnectionSecret("api-post-bootstrap")
 	nom.Spec.Regions = []string{"europe/monaco"}
-	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: "Imported"}}
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}}
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}

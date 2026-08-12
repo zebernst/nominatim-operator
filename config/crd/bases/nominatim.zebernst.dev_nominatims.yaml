@@ -1551,22 +1551,18 @@ spec:
                   (synced from Succeeded Bootstrap/AddRegions/Reimport). Project PVC files such as
                   imported-regions.txt / import-finished are worker-local resume bookmarks only.
                 items:
-                  description: RegionStatus is the observed state of an imported region.
+                  description: |-
+                    RegionStatus is the observed state of an imported region.
+                    Presence in status.regions is the cluster source of truth that the region is imported;
+                    there is no per-region lifecycle phase (Operations carry Pending/Running/Succeeded/Failed).
                   properties:
                     lastUpdatedTime:
-                      description: LastUpdatedTime is when this region status was
-                        last refreshed.
+                      description: LastUpdatedTime is when this region entry was last
+                        written (observe or sequence probe).
                       format: date-time
-                      type: string
-                    message:
-                      description: Message is human-readable detail.
                       type: string
                     name:
                       description: Name is the Geofabrik-style region path.
-                      type: string
-                    phase:
-                      description: Phase is a short status string (e.g. Imported,
-                        Updating, Error).
                       type: string
                     sequenceState:
                       description: |-

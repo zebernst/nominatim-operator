@@ -29,7 +29,6 @@ import (
 
 const (
 	bootstrapNameSuffix = "-bootstrap"
-	regionPhaseImported = "Imported"
 )
 
 // BootstrapOperationName is the deterministic name for the auto-created Bootstrap

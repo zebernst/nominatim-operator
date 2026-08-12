@@ -21,6 +21,7 @@
 * **controller:** one `listOperationsForParent` per Nominatim reconcile — drift, sequence, and updates take the Reconcile-scoped peer list (nominatim-kfy.10).
 * **controller:** drop test-only `reconcileBootstrap`; ensure path is `ensureBootstrapOperation` (nominatim-kfy.11).
 * **controller:** colocate region observation helpers in `nominatim_region_observe.go`; move pause/profile unit tests next to Operation CNPG effects (nominatim-kfy.12).
+* **api:** drop unused `status.regions[].phase` and `.message` — presence in `status.regions` is the imported SoT; Operations own lifecycle (nominatim-kfy.5).
 * **controller:** unify write-plane peer evaluation in `evaluateWritePlane` — Operation claim (`Hold` / `RaceWait` / `Ok`) and Nominatim schedule probes (`ScheduleBusy`) share one module; deleted shallow `findConflictingOperation` (nominatim-kfy.1).
 * **controller:** harden Operation write-plane mutex — atomic claim via parent `status.activeOperationRefs` (retry-on-conflict); creation-race peers requeue instead of dual terminal `Conflict`; terminal `Conflict` only when a peer is `Running` or has armed a Job.
 * **api:** default HTTP startup/readiness/liveness probes on `/status`; typed `spec.nominatim.api` runtime knobs (pool, query/request timeouts, CORS, default language); `spec.api.gunicornWorkers` with entrypoint cgroup-CPU fallback (nominatim-5et.14).

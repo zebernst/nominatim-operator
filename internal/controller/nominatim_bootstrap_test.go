@@ -63,7 +63,7 @@ func TestEnsureBootstrapOperation_NoopWhenNoRegionsDesired(t *testing.T) {
 func TestEnsureBootstrapOperation_NoopWhenStatusRegionsAlreadyPopulated(t *testing.T) {
 	scheme := testScheme(t)
 	nom := nominatimWithRegions("bootstrap-already-imported", "europe/monaco")
-	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: "Imported"}}
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
@@ -228,9 +228,6 @@ func TestEnsureBootstrapOperation_NoCreateAfterObservePopulatedRegions(t *testin
 	for i, want := range []string{"europe/monaco", "africa/morocco"} {
 		if nom.Status.Regions[i].Name != want {
 			t.Fatalf("status.regions[%d].Name=%q want %q", i, nom.Status.Regions[i].Name, want)
-		}
-		if nom.Status.Regions[i].Phase != "Imported" {
-			t.Fatalf("status.regions[%d].Phase=%q want Imported", i, nom.Status.Regions[i].Phase)
 		}
 		if nom.Status.Regions[i].LastUpdatedTime == nil {
 			t.Fatalf("status.regions[%d].LastUpdatedTime is nil", i)

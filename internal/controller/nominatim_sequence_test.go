@@ -50,8 +50,8 @@ func TestApplySequenceReportMap(t *testing.T) {
 	nom := &nominatimv1alpha1.Nominatim{
 		Status: nominatimv1alpha1.NominatimStatus{
 			Regions: []nominatimv1alpha1.RegionStatus{
-				{Name: "europe/monaco", Phase: regionPhaseImported},
-				{Name: "europe/andorra", Phase: regionPhaseImported},
+				{Name: "europe/monaco"},
+				{Name: "europe/andorra"},
 			},
 		},
 	}
@@ -102,7 +102,7 @@ func TestReconcileSequenceObservation_CreatesProbeAndAppliesConfigMap(t *testing
 	scheme := testScheme(t)
 	ctx := context.Background()
 	nom := nominatimWithConnectionSecret("seq-obs")
-	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: regionPhaseImported}}
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}}
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "seq-obs-update", Namespace: nom.Namespace},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
@@ -176,7 +176,7 @@ func TestEnsureSequenceProbes_DoesNotApplyReport(t *testing.T) {
 	scheme := testScheme(t)
 	ctx := context.Background()
 	nom := nominatimWithConnectionSecret("seq-ensure-only")
-	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: regionPhaseImported}}
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}}
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "seq-ensure-only-update", Namespace: nom.Namespace},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
@@ -265,7 +265,7 @@ func TestReconcileSequenceObservation_SkipsAlreadyObserved(t *testing.T) {
 	scheme := testScheme(t)
 	ctx := context.Background()
 	nom := nominatimWithConnectionSecret("skip-obs")
-	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: regionPhaseImported}}
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}}
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        "skip-obs-update",
@@ -371,7 +371,7 @@ func TestApplySequenceReportMap_SkipsUnchangedAndUsesObservedAt(t *testing.T) {
 	nom := &nominatimv1alpha1.Nominatim{
 		Status: nominatimv1alpha1.NominatimStatus{
 			Regions: []nominatimv1alpha1.RegionStatus{
-				{Name: "europe/monaco", Phase: regionPhaseImported, SequenceState: "same@t"},
+				{Name: "europe/monaco", SequenceState: "same@t"},
 			},
 		},
 	}
@@ -478,7 +478,7 @@ func TestReconcileSequenceObservation_SkipsNonProbeTypes(t *testing.T) {
 	scheme := testScheme(t)
 	ctx := context.Background()
 	nom := nominatimWithConnectionSecret("skip-type")
-	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: regionPhaseImported}}
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}}
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "skip-type-refresh", Namespace: nom.Namespace},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{

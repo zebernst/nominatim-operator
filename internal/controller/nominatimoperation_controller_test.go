@@ -59,7 +59,7 @@ var _ = Describe("NominatimOperation Controller", func() {
 		parent.Spec.Regions = []string{"europe/monaco"}
 		Expect(k8sClient.Create(ctx, parent)).To(Succeed())
 		parent.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: "pg-secret"}
-		parent.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: regionPhaseImported}}
+		parent.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}}
 		Expect(k8sClient.Status().Update(ctx, parent)).To(Succeed())
 		Expect(k8sClient.Create(ctx, &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Name: "pg-secret", Namespace: "default"},

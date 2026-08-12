@@ -64,7 +64,6 @@ func syncRegionsFromBootstrap(nom *nominatimv1alpha1.Nominatim, peers []nominati
 		for _, region := range regions {
 			statuses = append(statuses, nominatimv1alpha1.RegionStatus{
 				Name:            region,
-				Phase:           regionPhaseImported,
 				LastUpdatedTime: &now,
 			})
 		}
@@ -105,7 +104,6 @@ func mergeRegionsIntoStatus(nom *nominatimv1alpha1.Nominatim, regions []string) 
 		}
 		nom.Status.Regions = append(nom.Status.Regions, nominatimv1alpha1.RegionStatus{
 			Name:            region,
-			Phase:           regionPhaseImported,
 			LastUpdatedTime: &now,
 		})
 		have[region] = struct{}{}
@@ -118,7 +116,6 @@ func replaceRegionsStatus(nom *nominatimv1alpha1.Nominatim, regions []string) {
 	for _, region := range regions {
 		statuses = append(statuses, nominatimv1alpha1.RegionStatus{
 			Name:            region,
-			Phase:           regionPhaseImported,
 			LastUpdatedTime: &now,
 		})
 	}

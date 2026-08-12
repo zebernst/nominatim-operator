@@ -35,7 +35,7 @@ func TestReconcileRegionDrift_AddDataCreatesAddRegions(t *testing.T) {
 	nom := baseNominatim("drift-add")
 	nom.Spec.Regions = []string{"north-america/us-midwest", "asia/kazakhstan"}
 	nom.Spec.RegionChangePolicy = nominatimv1alpha1.RegionChangeAddData
-	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "north-america/us-midwest", Phase: regionPhaseImported}}
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "north-america/us-midwest"}}
 	nom.Status.Database.ConnectionSecretName = testConnSecret
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
@@ -67,7 +67,7 @@ func TestReconcileRegionDrift_AddDataMultiMissingCreatesSingleRegionOp(t *testin
 	nom := baseNominatim("drift-multi")
 	nom.Spec.Regions = []string{"a", "b", "c"}
 	nom.Spec.RegionChangePolicy = nominatimv1alpha1.RegionChangeAddData
-	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "a", Phase: regionPhaseImported}}
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "a"}}
 	nom.Status.Database.ConnectionSecretName = testConnSecret
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
@@ -99,7 +99,7 @@ func TestReconcileRegionDrift_AddDataSerialMultiMissingCreatesNextOpAfterSucceed
 	nom := baseNominatim("drift-serial-multi")
 	nom.Spec.Regions = []string{"a", "b", "c"}
 	nom.Spec.RegionChangePolicy = nominatimv1alpha1.RegionChangeAddData
-	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "a", Phase: regionPhaseImported}}
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "a"}}
 	nom.Status.Database.ConnectionSecretName = testConnSecret
 
 	c := fake.NewClientBuilder().WithScheme(scheme).
@@ -164,8 +164,8 @@ func TestReconcileRegionDrift_ReimportPolicyCreatesReimport(t *testing.T) {
 	nom.Spec.Regions = []string{"south-america/brazil"}
 	nom.Spec.RegionChangePolicy = nominatimv1alpha1.RegionChangeReimport
 	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{
-		{Name: "north-america/us-midwest", Phase: regionPhaseImported},
-		{Name: "asia/kazakhstan", Phase: regionPhaseImported},
+		{Name: "north-america/us-midwest"},
+		{Name: "asia/kazakhstan"},
 	}
 	nom.Status.Database.ConnectionSecretName = testConnSecret
 
@@ -194,8 +194,8 @@ func TestReconcileRegionDrift_RemovalDoesNotCreateOpOrShrinkStatus(t *testing.T)
 	nom := baseNominatim("drift-rm")
 	nom.Spec.Regions = []string{"north-america/us-midwest"} // removed asia/kazakhstan from spec
 	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{
-		{Name: "north-america/us-midwest", Phase: regionPhaseImported},
-		{Name: "asia/kazakhstan", Phase: regionPhaseImported},
+		{Name: "north-america/us-midwest"},
+		{Name: "asia/kazakhstan"},
 	}
 	nom.Status.Database.ConnectionSecretName = testConnSecret
 
