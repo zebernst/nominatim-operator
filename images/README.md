@@ -81,6 +81,8 @@ The worker entrypoint dispatches on `OPERATION_TYPE` (or the first CLI arg):
 
 These are thin phases invoked by `NominatimOperation` Jobs. Orchestration (mutex, scale API, pause backups, empty DB for Reimport) stays in the operator — not in bash.
 
+**Write-plane mutex:** the operator serializes conflicting Operations via parent `status.activeOperationRefs` (retry-on-conflict CAS), not Kubernetes Leases. A peer that is already `Running` or has a `JobRef` causes terminal `Conflict`. Two fresh write-heavy peers in a creation race requeue (lexicographically smaller name wins) instead of both failing.
+
 `Refresh` is not write-heavy for the Operation mutex (it still conflicts with an active Bootstrap / AddRegions / Reimport / Migrate / Freeze peer). Do not run it in parallel with Update / CatchUp / AddRegions — upstream Nominatim forbids parallel refresh with add-data / replication-style updates. Staging PVC is still created for Job shape consistency even though Refresh does not download extracts.
 
 `Migrate` and `Freeze` are write-heavy (mutex with Update/CatchUp and other write-heavy peers; default `pauseBackupsDuringOperations: WriteHeavy` applies).
