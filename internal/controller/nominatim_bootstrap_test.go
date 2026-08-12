@@ -33,6 +33,12 @@ import (
 	nominatimv1alpha1 "github.com/zebernst/nominatim-operator/api/v1alpha1"
 )
 
+// Shared Geofabrik region paths used across bootstrap tests (goconst).
+const (
+	testRegionMonaco  = "europe/monaco"
+	testRegionMorocco = "africa/morocco"
+)
+
 func nominatimWithRegions(name string, regions ...string) *nominatimv1alpha1.Nominatim {
 	nom := nominatimWithConnectionSecret(name)
 	nom.Spec.Regions = regions
@@ -62,8 +68,8 @@ func TestEnsureBootstrapOperation_NoopWhenNoRegionsDesired(t *testing.T) {
 
 func TestEnsureBootstrapOperation_NoopWhenStatusRegionsAlreadyPopulated(t *testing.T) {
 	scheme := testScheme(t)
-	nom := nominatimWithRegions("bootstrap-already-imported", "europe/monaco")
-	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}}
+	nom := nominatimWithRegions("bootstrap-already-imported", testRegionMonaco)
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: testRegionMonaco}}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
@@ -82,7 +88,7 @@ func TestEnsureBootstrapOperation_NoopWhenStatusRegionsAlreadyPopulated(t *testi
 
 func TestEnsureBootstrapOperation_CreatesWhenEmpty(t *testing.T) {
 	scheme := testScheme(t)
-	nom := nominatimWithRegions("bootstrap-empty", "europe/monaco", "africa/morocco")
+	nom := nominatimWithRegions("bootstrap-empty", testRegionMonaco, testRegionMorocco)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
@@ -100,7 +106,7 @@ func TestEnsureBootstrapOperation_CreatesWhenEmpty(t *testing.T) {
 	if op.Spec.NominatimRef.Name != nom.Name {
 		t.Fatalf("nominatimRef=%q want %q", op.Spec.NominatimRef.Name, nom.Name)
 	}
-	if len(op.Spec.Regions) != 2 || op.Spec.Regions[0] != "europe/monaco" || op.Spec.Regions[1] != "africa/morocco" {
+	if len(op.Spec.Regions) != 2 || op.Spec.Regions[0] != testRegionMonaco || op.Spec.Regions[1] != testRegionMorocco {
 		t.Fatalf("regions=%v want copy of spec.regions", op.Spec.Regions)
 	}
 	if !metav1.IsControlledBy(op, nom) {
@@ -116,7 +122,7 @@ func TestEnsureBootstrapOperation_NoopWhenBootstrapAlreadyActive(t *testing.T) {
 	} {
 		t.Run(string(phase), func(t *testing.T) {
 			scheme := testScheme(t)
-			nom := nominatimWithRegions("bootstrap-active-"+sanitizePhase(phase), "europe/monaco")
+			nom := nominatimWithRegions("bootstrap-active-"+sanitizePhase(phase), testRegionMonaco)
 			existing := &nominatimv1alpha1.NominatimOperation{
 				ObjectMeta: metav1.ObjectMeta{Name: BootstrapOperationName(nom), Namespace: "default"},
 				Spec: nominatimv1alpha1.NominatimOperationSpec{
@@ -145,7 +151,7 @@ func TestEnsureBootstrapOperation_NoopWhenBootstrapAlreadyActive(t *testing.T) {
 
 func TestEnsureBootstrapOperation_NoopWhenBootstrapAlreadyTerminal(t *testing.T) {
 	scheme := testScheme(t)
-	nom := nominatimWithRegions("bootstrap-terminal", "europe/monaco")
+	nom := nominatimWithRegions("bootstrap-terminal", testRegionMonaco)
 	existing := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: BootstrapOperationName(nom), Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
@@ -173,7 +179,7 @@ func TestEnsureBootstrapOperation_NoopWhenBootstrapAlreadyTerminal(t *testing.T)
 func TestEnsureBootstrapOperation_ErrorsWhenConnectionSecretNameEmpty(t *testing.T) {
 	scheme := testScheme(t)
 	nom := nominatimWithConnectionSecret("bootstrap-nosecret")
-	nom.Spec.Regions = []string{"europe/monaco"}
+	nom.Spec.Regions = []string{testRegionMonaco}
 	// Deliberately leave nom.Status.Database.ConnectionSecretName empty.
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
@@ -185,7 +191,7 @@ func TestEnsureBootstrapOperation_ErrorsWhenConnectionSecretNameEmpty(t *testing
 
 func TestEnsureBootstrapOperation_IgnoresOperationsForOtherParents(t *testing.T) {
 	scheme := testScheme(t)
-	nom := nominatimWithRegions("bootstrap-other-parent", "europe/monaco")
+	nom := nominatimWithRegions("bootstrap-other-parent", testRegionMonaco)
 	other := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "other-nom-bootstrap", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
@@ -209,13 +215,13 @@ func TestEnsureBootstrapOperation_IgnoresOperationsForOtherParents(t *testing.T)
 
 func TestEnsureBootstrapOperation_NoCreateAfterObservePopulatedRegions(t *testing.T) {
 	scheme := testScheme(t)
-	nom := nominatimWithRegions("bootstrap-succeeded", "europe/monaco", "africa/morocco")
+	nom := nominatimWithRegions("bootstrap-succeeded", testRegionMonaco, testRegionMorocco)
 	succeeded := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: BootstrapOperationName(nom), Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
 			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
 			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
-			Regions:      []string{"europe/monaco", "africa/morocco"},
+			Regions:      []string{testRegionMonaco, testRegionMorocco},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}
@@ -225,7 +231,7 @@ func TestEnsureBootstrapOperation_NoCreateAfterObservePopulatedRegions(t *testin
 	if len(nom.Status.Regions) != 2 {
 		t.Fatalf("status.regions=%v want 2 entries", nom.Status.Regions)
 	}
-	for i, want := range []string{"europe/monaco", "africa/morocco"} {
+	for i, want := range []string{testRegionMonaco, testRegionMorocco} {
 		if nom.Status.Regions[i].Name != want {
 			t.Fatalf("status.regions[%d].Name=%q want %q", i, nom.Status.Regions[i].Name, want)
 		}
@@ -253,13 +259,13 @@ func TestEnsureBootstrapOperation_DoesNotSyncRegions(t *testing.T) {
 	// Observe is a separate module (observeRegionsFromSucceededOps). Bootstrap
 	// reconcile only ensures the Operation exists.
 	scheme := testScheme(t)
-	nom := nominatimWithRegions("bootstrap-ensure-only", "europe/monaco")
+	nom := nominatimWithRegions("bootstrap-ensure-only", testRegionMonaco)
 	succeeded := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: BootstrapOperationName(nom), Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
 			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
 			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
-			Regions:      []string{"europe/monaco"},
+			Regions:      []string{testRegionMonaco},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}
@@ -289,7 +295,7 @@ func schemeWithOperationOnly(t *testing.T) *runtime.Scheme {
 
 func TestEnsureBootstrapOperation_SetControllerReferenceError(t *testing.T) {
 	scheme := schemeWithOperationOnly(t)
-	nom := nominatimWithRegions("bootstrap-owner-error", "europe/monaco")
+	nom := nominatimWithRegions("bootstrap-owner-error", testRegionMonaco)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
@@ -300,7 +306,7 @@ func TestEnsureBootstrapOperation_SetControllerReferenceError(t *testing.T) {
 
 func TestEnsureBootstrapOperation_CreateErrorPropagates(t *testing.T) {
 	scheme := testScheme(t)
-	nom := nominatimWithRegions("bootstrap-create-error", "europe/monaco")
+	nom := nominatimWithRegions("bootstrap-create-error", testRegionMonaco)
 	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	fc := &failingClient{Client: base, failCreate: []failSpec{{kind: "NominatimOperation"}}}
 	r := &NominatimReconciler{Client: fc, Scheme: scheme}
@@ -314,7 +320,7 @@ func TestReconcile_PropagatesBootstrapError(t *testing.T) {
 	scheme := testScheme(t)
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "default"}}
 	nom := baseNominatim("reconcile-bootstrap-error")
-	nom.Spec.Regions = []string{"europe/monaco"}
+	nom.Spec.Regions = []string{testRegionMonaco}
 	nom.Spec.Database = nominatimv1alpha1.DatabaseSpec{
 		ConnectionSecretRef: &nominatimv1alpha1.LocalObjectReference{Name: "s"},
 	}
