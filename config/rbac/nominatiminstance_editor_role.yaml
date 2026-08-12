@@ -11,12 +11,12 @@ metadata:
   labels:
     app.kubernetes.io/name: nominatim-operator
     app.kubernetes.io/managed-by: kustomize
-  name: nominatim-editor-role
+  name: nominatiminstance-editor-role
 rules:
 - apiGroups:
   - nominatim.zebernst.dev
   resources:
-  - nominatims
+  - nominatiminstances
   verbs:
   - create
   - delete
@@ -28,6 +28,6 @@ rules:
 - apiGroups:
   - nominatim.zebernst.dev
   resources:
-  - nominatims/status
+  - nominatiminstances/status
   verbs:
   - get

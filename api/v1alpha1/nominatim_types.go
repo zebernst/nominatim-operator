@@ -155,7 +155,7 @@ type DatabaseClusterRef struct {
 	ConnectionSecretRef *LocalObjectReference `json:"connectionSecretRef,omitempty"`
 }
 
-// DatabaseClusterCreate creates a postgresql.cnpg.io/v1 Cluster owned by this Nominatim.
+// DatabaseClusterCreate creates a postgresql.cnpg.io/v1 Cluster owned by this NominatimInstance.
 //
 // This is an instance-tune surface (instances, storage, resources, affinity,
 // topologySpreadConstraints) — not a full CNPG ClusterSpec. Operator-owned fields
@@ -199,11 +199,11 @@ type PostgresProfiles struct {
 	Runtime map[string]string `json:"runtime,omitempty"`
 }
 
-// DatabaseSpec attaches or creates Postgres for this Nominatim instance.
+// DatabaseSpec attaches or creates Postgres for this NominatimInstance.
 // Exactly one of Cluster, ClusterRef, or ConnectionSecretRef must be set.
 // +kubebuilder:validation:XValidation:rule="(has(self.cluster) ? 1 : 0) + (has(self.clusterRef) ? 1 : 0) + (has(self.connectionSecretRef) ? 1 : 0) == 1",message="database requires exactly one of cluster, clusterRef, or connectionSecretRef"
 type DatabaseSpec struct {
-	// Cluster creates a CNPG Cluster owned by this Nominatim.
+	// Cluster creates a CNPG Cluster owned by this NominatimInstance.
 	// +optional
 	Cluster *DatabaseClusterCreate `json:"cluster,omitempty"`
 
@@ -234,7 +234,7 @@ type UpdatesSpec struct {
 	// +optional
 	Enabled bool `json:"enabled,omitempty"`
 
-	// Schedule is a cron expression evaluated by the Nominatim controller.
+	// Schedule is a cron expression evaluated by the NominatimInstance controller.
 	// +optional
 	Schedule string `json:"schedule,omitempty"`
 }
@@ -453,8 +453,8 @@ type ObservedNominatimConfig struct {
 	Tokenizer string `json:"tokenizer,omitempty"`
 }
 
-// NominatimSpec defines the desired state of Nominatim (GitOps surface).
-type NominatimSpec struct {
+// NominatimInstanceSpec defines the desired state of a NominatimInstance (GitOps surface).
+type NominatimInstanceSpec struct {
 	// Project is the Nominatim project directory settings (required volume).
 	// +kubebuilder:validation:Required
 	Project ProjectSpec `json:"project"`
@@ -526,7 +526,7 @@ type RegionStatus struct {
 	LastUpdatedTime *metav1.Time `json:"lastUpdatedTime,omitempty"`
 }
 
-// DatabaseMode identifies how Nominatim is attached to Postgres.
+// DatabaseMode identifies how a NominatimInstance is attached to Postgres.
 const (
 	// DatabaseModeClusterManaged means the operator owns a CNPG Cluster (spec.database.cluster).
 	DatabaseModeClusterManaged = "ClusterManaged"
@@ -555,8 +555,8 @@ type DatabaseStatus struct {
 	Degraded bool `json:"degraded,omitempty"`
 }
 
-// NominatimStatus defines the observed state of Nominatim.
-type NominatimStatus struct {
+// NominatimInstanceStatus defines the observed state of a NominatimInstance.
+type NominatimInstanceStatus struct {
 	// Conditions represent the latest available observations of the instance.
 	// +listType=map
 	// +listMapKey=type
@@ -602,24 +602,25 @@ type NominatimStatus struct {
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// Nominatim is the Schema for the nominatims API (GitOps desired state for one install).
-type Nominatim struct {
+// NominatimInstance is the Schema for the nominatiminstances API
+// (GitOps desired state for one managed install of Nominatim).
+type NominatimInstance struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   NominatimSpec   `json:"spec,omitempty"`
-	Status NominatimStatus `json:"status,omitempty"`
+	Spec   NominatimInstanceSpec   `json:"spec,omitempty"`
+	Status NominatimInstanceStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// NominatimList contains a list of Nominatim.
-type NominatimList struct {
+// NominatimInstanceList contains a list of NominatimInstance.
+type NominatimInstanceList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []Nominatim `json:"items"`
+	Items           []NominatimInstance `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&Nominatim{}, &NominatimList{})
+	SchemeBuilder.Register(&NominatimInstance{}, &NominatimInstanceList{})
 }

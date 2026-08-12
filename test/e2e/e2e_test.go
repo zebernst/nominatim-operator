@@ -264,22 +264,22 @@ var _ = Describe("Manager", Ordered, func() {
 		// +kubebuilder:scaffold:e2e-webhooks-checks
 	})
 
-	Context("Nominatim reconcile smoke", func() {
+	Context("NominatimInstance reconcile smoke", func() {
 		const (
 			appNamespace = "nominatim-e2e"
 			nomName      = "smoke"
 		)
 
 		BeforeAll(func() {
-			By("applying Nominatim smoke fixtures (secret, PVC, CR with connectionSecretRef)")
+			By("applying NominatimInstance smoke fixtures (secret, PVC, CR with connectionSecretRef)")
 			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-smoke.yaml")
 			cmd := exec.Command("kubectl", "apply", "-f", fixture)
 			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to apply Nominatim smoke fixtures")
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply NominatimInstance smoke fixtures")
 		})
 
 		AfterAll(func() {
-			By("deleting Nominatim smoke fixtures")
+			By("deleting NominatimInstance smoke fixtures")
 			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-smoke.yaml")
 			cmd := exec.Command("kubectl", "delete", "-f", fixture, "--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
@@ -287,18 +287,18 @@ var _ = Describe("Manager", Ordered, func() {
 			_, _ = utils.Run(cmd)
 		})
 
-		It("installs Nominatim CRDs", func() {
-			cmd := exec.Command("kubectl", "get", "crd", "nominatims.nominatim.zebernst.dev")
+		It("installs NominatimInstance CRDs", func() {
+			cmd := exec.Command("kubectl", "get", "crd", "nominatiminstances.nominatim.zebernst.dev")
 			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Nominatim CRD should be installed")
+			Expect(err).NotTo(HaveOccurred(), "NominatimInstance CRD should be installed")
 			cmd = exec.Command("kubectl", "get", "crd", "nominatimoperations.nominatim.zebernst.dev")
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "NominatimOperation CRD should be installed")
 		})
 
-		It("reconciles API Deployment and Service for the smoke Nominatim", func() {
-			By("waiting for the Nominatim controller to become ready")
-			verifyNominatimController := func(g Gomega) {
+		It("reconciles API Deployment and Service for the smoke NominatimInstance", func() {
+			By("waiting for the NominatimInstance controller to become ready")
+			verifyNominatimInstanceController := func(g Gomega) {
 				cmd := exec.Command("kubectl", "logs",
 					"-l", "control-plane=controller-manager",
 					"-n", namespace,
@@ -306,18 +306,18 @@ var _ = Describe("Manager", Ordered, func() {
 				)
 				out, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(out).To(ContainSubstring(`"controller": "nominatim"`), "Nominatim controller should start")
-				g.Expect(out).To(ContainSubstring(`Starting workers`), "Nominatim controller workers should start")
+				g.Expect(out).To(ContainSubstring(`"controller": "nominatiminstance"`), "NominatimInstance controller should start")
+				g.Expect(out).To(ContainSubstring(`Starting workers`), "NominatimInstance controller workers should start")
 				g.Expect(out).NotTo(ContainSubstring(`no matches for kind "HTTPRoute"`))
 			}
-			Eventually(verifyNominatimController).Should(Succeed())
+			Eventually(verifyNominatimInstanceController).Should(Succeed())
 
 			By("waiting for the Nominatim API Deployment")
 			verifyAPIDeployment := func(g Gomega) {
 				cmd := exec.Command("kubectl", "get", "nominatim", nomName,
 					"-n", appNamespace, "-o", "yaml")
 				nomYAML, _ := utils.Run(cmd)
-				_, _ = fmt.Fprintf(GinkgoWriter, "Nominatim CR:\n%s\n", nomYAML)
+				_, _ = fmt.Fprintf(GinkgoWriter, "NominatimInstance CR:\n%s\n", nomYAML)
 
 				cmd = exec.Command("kubectl", "get", "deploy", nomName+"-api",
 					"-n", appNamespace, "-o", "jsonpath={.metadata.name}")
@@ -362,7 +362,7 @@ var _ = Describe("Manager", Ordered, func() {
 			Eventually(verifyDatabaseStatus).Should(Succeed())
 		})
 
-		It("keeps the controller-manager Running after Nominatim reconcile", func() {
+		It("keeps the controller-manager Running after NominatimInstance reconcile", func() {
 			cmd := exec.Command("kubectl", "get", "pods",
 				"-l", "control-plane=controller-manager",
 				"-n", namespace,
@@ -494,7 +494,7 @@ var _ = Describe("Manager", Ordered, func() {
 				Skip("set E2E_IMPORT=1 to run Monaco+Andorra import e2e (CNPG + api/worker images)")
 			}
 
-			By("applying Monaco+Andorra Nominatim fixture (database.cluster + regions)")
+			By("applying Monaco+Andorra NominatimInstance fixture (database.cluster + regions)")
 			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-monaco-andorra.yaml")
 			cmd := exec.Command("kubectl", "apply", "-f", fixture)
 			_, err := utils.Run(cmd)
@@ -905,7 +905,7 @@ func dumpValidationDiagnostics(ns string) {
 		{"pods", []string{"get", "pods", "-o", "wide"}},
 		{"deployments", []string{"get", "deploy", "-o", "wide"}},
 		{"endpointslices", []string{"get", "endpointslices"}},
-		{"nominatims", []string{"get", "nominatims", "-o", "yaml"}},
+		{"nominatiminstances", []string{"get", "nominatiminstances", "-o", "yaml"}},
 		{"operations", []string{"get", "nominatimoperations"}},
 		{"jobs", []string{"get", "jobs"}},
 		{"events", []string{"get", "events", "--sort-by=.lastTimestamp"}},

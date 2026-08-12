@@ -193,7 +193,7 @@ PY
 add_regions() {
   [[ "${RUN_ADD_REGIONS}" == "1" ]] || { log "skipping AddRegions"; return 0; }
   log "patching regions to include europe/andorra"
-  kubectl -n "${VALIDATION_NS}" patch nominatim "${NOM_NAME}" --type=merge -p \
+  kubectl -n "${VALIDATION_NS}" patch nominatiminstance "${NOM_NAME}" --type=merge -p \
     '{"spec":{"regions":["europe/monaco","europe/andorra"]}}'
 
   local deadline=$((SECONDS + 2400))

@@ -14,7 +14,7 @@ resources:
   controller: true
   domain: zebernst.dev
   group: nominatim
-  kind: Nominatim
+  kind: NominatimInstance
   path: github.com/zebernst/nominatim-operator/api/v1alpha1
   version: v1alpha1
 - api:

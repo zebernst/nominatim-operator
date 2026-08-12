@@ -52,7 +52,7 @@ const (
 // reconcileSequenceObservation ensures probe Jobs after Succeeded write Operations,
 // then copies report.json into status.regions[].sequenceState. Workers never call
 // the Kubernetes API. ops is the Reconcile-scoped parent Operation list.
-func (r *NominatimReconciler) reconcileSequenceObservation(ctx context.Context, nom *nominatimv1alpha1.Nominatim, ops []nominatimv1alpha1.NominatimOperation) error {
+func (r *NominatimInstanceReconciler) reconcileSequenceObservation(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance, ops []nominatimv1alpha1.NominatimOperation) error {
 	if len(nom.Status.Regions) == 0 {
 		return nil
 	}
@@ -64,7 +64,7 @@ func (r *NominatimReconciler) reconcileSequenceObservation(ctx context.Context, 
 
 // ensureSequenceProbes creates probe RBAC, the report ConfigMap, and per-Operation
 // Jobs. It does not write status.regions (that is applySequenceReportConfigMap).
-func (r *NominatimReconciler) ensureSequenceProbes(ctx context.Context, nom *nominatimv1alpha1.Nominatim, ops []nominatimv1alpha1.NominatimOperation) error {
+func (r *NominatimInstanceReconciler) ensureSequenceProbes(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance, ops []nominatimv1alpha1.NominatimOperation) error {
 	if err := r.ensureSequenceProbeRBAC(ctx, nom); err != nil {
 		return err
 	}
@@ -103,11 +103,11 @@ func sequenceProbeOperation(op *nominatimv1alpha1.NominatimOperation) bool {
 	}
 }
 
-func sequenceProbeSAName(nom *nominatimv1alpha1.Nominatim) string {
+func sequenceProbeSAName(nom *nominatimv1alpha1.NominatimInstance) string {
 	return nom.Name + sequenceProbeSASuffix
 }
 
-func sequenceReportConfigMapName(nom *nominatimv1alpha1.Nominatim) string {
+func sequenceReportConfigMapName(nom *nominatimv1alpha1.NominatimInstance) string {
 	return nom.Name + "-sequence"
 }
 
@@ -119,7 +119,7 @@ func sequenceProbeJobName(op *nominatimv1alpha1.NominatimOperation) string {
 	return base[:63]
 }
 
-func (r *NominatimReconciler) ensureSequenceProbeRBAC(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
+func (r *NominatimInstanceReconciler) ensureSequenceProbeRBAC(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) error {
 	saName := sequenceProbeSAName(nom)
 	key := types.NamespacedName{Name: saName, Namespace: nom.Namespace}
 
@@ -199,7 +199,7 @@ func (r *NominatimReconciler) ensureSequenceProbeRBAC(ctx context.Context, nom *
 	return nil
 }
 
-func (r *NominatimReconciler) ensureSequenceReportConfigMap(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
+func (r *NominatimInstanceReconciler) ensureSequenceReportConfigMap(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) error {
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
 		Name:      sequenceReportConfigMapName(nom),
 		Namespace: nom.Namespace,
@@ -225,9 +225,9 @@ func (r *NominatimReconciler) ensureSequenceReportConfigMap(ctx context.Context,
 	return nil
 }
 
-func (r *NominatimReconciler) ensureSequenceProbeJob(
+func (r *NominatimInstanceReconciler) ensureSequenceProbeJob(
 	ctx context.Context,
-	nom *nominatimv1alpha1.Nominatim,
+	nom *nominatimv1alpha1.NominatimInstance,
 	op *nominatimv1alpha1.NominatimOperation,
 ) error {
 	log := logf.FromContext(ctx)
@@ -259,7 +259,7 @@ func (r *NominatimReconciler) ensureSequenceProbeJob(
 	return nil
 }
 
-func (r *NominatimReconciler) markSequenceObserved(ctx context.Context, op *nominatimv1alpha1.NominatimOperation) error {
+func (r *NominatimInstanceReconciler) markSequenceObserved(ctx context.Context, op *nominatimv1alpha1.NominatimOperation) error {
 	latest := &nominatimv1alpha1.NominatimOperation{}
 	if err := r.Get(ctx, types.NamespacedName{Name: op.Name, Namespace: op.Namespace}, latest); err != nil {
 		return client.IgnoreNotFound(err)
@@ -275,8 +275,8 @@ func (r *NominatimReconciler) markSequenceObserved(ctx context.Context, op *nomi
 	return r.Patch(ctx, patch, client.MergeFrom(latest))
 }
 
-func (r *NominatimReconciler) buildSequenceProbeJob(
-	nom *nominatimv1alpha1.Nominatim,
+func (r *NominatimInstanceReconciler) buildSequenceProbeJob(
+	nom *nominatimv1alpha1.NominatimInstance,
 	op *nominatimv1alpha1.NominatimOperation,
 ) (*batchv1.Job, error) {
 	projectClaim := volumeClaimName(nom.Spec.Project.Volume, ProjectPVCName(nom))
@@ -351,7 +351,7 @@ func (r *NominatimReconciler) buildSequenceProbeJob(
 	return job, nil
 }
 
-func (r *NominatimReconciler) applySequenceReportConfigMap(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
+func (r *NominatimInstanceReconciler) applySequenceReportConfigMap(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) error {
 	cm := &corev1.ConfigMap{}
 	err := r.Get(ctx, types.NamespacedName{Name: sequenceReportConfigMapName(nom), Namespace: nom.Namespace}, cm)
 	if apierrors.IsNotFound(err) {
@@ -388,7 +388,7 @@ func parseSequenceReport(raw string) (map[string]string, error) {
 }
 
 // applySequenceReportMap merges report into nom.Status.Regions SequenceState fields.
-func applySequenceReportMap(nom *nominatimv1alpha1.Nominatim, report map[string]string, observedAt *metav1.Time) {
+func applySequenceReportMap(nom *nominatimv1alpha1.NominatimInstance, report map[string]string, observedAt *metav1.Time) {
 	if len(report) == 0 || len(nom.Status.Regions) == 0 {
 		return
 	}

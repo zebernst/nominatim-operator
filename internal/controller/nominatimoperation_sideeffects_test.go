@@ -670,7 +670,7 @@ func TestSyncParentActiveOperationRef_AddRemoveAndAlreadyDesiredIsNoop(t *testin
 		t.Fatalf("expected no-op re-adding present ref, got %v", err)
 	}
 
-	got := &nominatimv1alpha1.Nominatim{}
+	got := &nominatimv1alpha1.NominatimInstance{}
 	if err := c.Get(context.Background(), types.NamespacedName{Name: parent.Name, Namespace: "default"}, got); err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -682,7 +682,7 @@ func TestSyncParentActiveOperationRef_AddRemoveAndAlreadyDesiredIsNoop(t *testin
 	if err := r.syncParentActiveOperationRef(context.Background(), op, false); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
-	got2 := &nominatimv1alpha1.Nominatim{}
+	got2 := &nominatimv1alpha1.NominatimInstance{}
 	if err := c.Get(context.Background(), types.NamespacedName{Name: parent.Name, Namespace: "default"}, got2); err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -712,7 +712,7 @@ func TestSyncParentSideEffects_NonTerminalStopsAfterRefSync(t *testing.T) {
 	if err := r.syncParentSideEffects(context.Background(), op); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := &nominatimv1alpha1.Nominatim{}
+	got := &nominatimv1alpha1.NominatimInstance{}
 	if err := c.Get(context.Background(), types.NamespacedName{Name: parent.Name, Namespace: "default"}, got); err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -776,7 +776,7 @@ func TestOperationReconcile_WriteHeavyBootstrap_PauseImportThenTerminalResumeRun
 		t.Fatalf("expected import profile applied, got calls=%d params=%v", effects.profileCalls, effects.lastParams)
 	}
 
-	gotParent := &nominatimv1alpha1.Nominatim{}
+	gotParent := &nominatimv1alpha1.NominatimInstance{}
 	if err := c.Get(ctx, types.NamespacedName{Name: parent.Name, Namespace: "default"}, gotParent); err != nil {
 		t.Fatalf("get parent: %v", err)
 	}
@@ -785,7 +785,7 @@ func TestOperationReconcile_WriteHeavyBootstrap_PauseImportThenTerminalResumeRun
 	}
 
 	// shouldSuspendAPI reflects the freshly-written ref while the Operation is active.
-	nomR := &NominatimReconciler{Client: c, Scheme: scheme}
+	nomR := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	suspend, err := nomR.shouldSuspendAPI(ctx, gotParent, nominatimv1alpha1.OperationImpactWriteHeavy)
 	if err != nil {
 		t.Fatalf("shouldSuspendAPI: %v", err)
@@ -904,7 +904,7 @@ func TestOperationReconcile_NeverImpact_NoCNPGCallsButRefStillTracked(t *testing
 		t.Fatalf("Never policy must not call CNPG effects, got pause=%d profile=%d", effects.pauseCalls, effects.profileCalls)
 	}
 
-	gotParent := &nominatimv1alpha1.Nominatim{}
+	gotParent := &nominatimv1alpha1.NominatimInstance{}
 	if err := c.Get(ctx, types.NamespacedName{Name: parent.Name, Namespace: "default"}, gotParent); err != nil {
 		t.Fatalf("get parent: %v", err)
 	}
@@ -954,7 +954,7 @@ func TestOperationReconcile_ParentNotYetAttached_NoCNPGCallsNoError(t *testing.T
 		ClusterRef:                   &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
 		PauseBackupsDuringOperations: nominatimv1alpha1.OperationImpactWriteHeavy,
 	}
-	// parent.Status.Database left zero-value: the Nominatim controller hasn't reconciled yet.
+	// parent.Status.Database left zero-value: the NominatimInstance controller hasn't reconciled yet.
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "boot-unattached", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
@@ -1028,7 +1028,7 @@ func TestOperationReconcile_MainPathSyncParentSideEffectsErrorPropagates(t *test
 		},
 	}
 	base := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent, op).WithObjects(parent, fakeConnectionSecret("pg-app"), newCNPGCluster("pg"), op).Build()
-	c := stubKindStatusClient{Client: base, failFor: &nominatimv1alpha1.Nominatim{}}
+	c := stubKindStatusClient{Client: base, failFor: &nominatimv1alpha1.NominatimInstance{}}
 	r := &NominatimOperationReconciler{Client: c, Scheme: scheme, CNPGEffects: &recordingCNPGEffects{}}
 
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: op.Name, Namespace: "default"}}
@@ -1116,7 +1116,7 @@ func TestOperationReconcile_ConflictFailure_SyncsParentSideEffectsWithoutError(t
 		t.Fatalf("expected Failed phase, got %q", got.Status.Phase)
 	}
 
-	gotParent := &nominatimv1alpha1.Nominatim{}
+	gotParent := &nominatimv1alpha1.NominatimInstance{}
 	if err := c.Get(ctx, types.NamespacedName{Name: parent.Name, Namespace: "default"}, gotParent); err != nil {
 		t.Fatalf("get parent: %v", err)
 	}
@@ -1238,7 +1238,7 @@ func TestOperationReconcile_DeleteMidFlight_ClearsRefAndResumes(t *testing.T) {
 		t.Fatalf("reconcile delete: %v", err)
 	}
 
-	gotParent := &nominatimv1alpha1.Nominatim{}
+	gotParent := &nominatimv1alpha1.NominatimInstance{}
 	if err := c.Get(ctx, types.NamespacedName{Name: parent.Name, Namespace: "default"}, gotParent); err != nil {
 		t.Fatalf("get parent: %v", err)
 	}

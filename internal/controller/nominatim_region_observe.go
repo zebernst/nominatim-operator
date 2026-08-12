@@ -25,7 +25,7 @@ import (
 // observeRegionsFromSucceededOps is the single status.regions writer from Succeeded
 // Operations: Bootstrap fills an empty set, AddRegions merges, Reimport replaces.
 // Bootstrap/drift reconcile only ensure Operation creates.
-func observeRegionsFromSucceededOps(nom *nominatimv1alpha1.Nominatim, peers []nominatimv1alpha1.NominatimOperation) {
+func observeRegionsFromSucceededOps(nom *nominatimv1alpha1.NominatimInstance, peers []nominatimv1alpha1.NominatimOperation) {
 	syncRegionsFromBootstrap(nom, peers)
 	syncRegionsFromDriftOps(nom, peers)
 }
@@ -37,7 +37,7 @@ func observeRegionsFromSucceededOps(nom *nominatimv1alpha1.Nominatim, peers []no
 // A Succeeded Bootstrap Job is required to have imported every region listed on the
 // Operation via nominatim import with multiple --osm-file flags. Marking the full
 // region list here is therefore accurate — not a blind copy of an unfinished import.
-func syncRegionsFromBootstrap(nom *nominatimv1alpha1.Nominatim, peers []nominatimv1alpha1.NominatimOperation) {
+func syncRegionsFromBootstrap(nom *nominatimv1alpha1.NominatimInstance, peers []nominatimv1alpha1.NominatimOperation) {
 	if len(nom.Status.Regions) > 0 {
 		return
 	}
@@ -77,7 +77,7 @@ func syncRegionsFromBootstrap(nom *nominatimv1alpha1.Nominatim, peers []nominati
 // Operation targeting this parent has Succeeded. Removals are never applied here —
 // shrinking the observed set requires a Succeeded Reimport whose Spec.Regions is
 // the new desired set (full rebuild), not a surgical delete.
-func syncRegionsFromDriftOps(nom *nominatimv1alpha1.Nominatim, peers []nominatimv1alpha1.NominatimOperation) {
+func syncRegionsFromDriftOps(nom *nominatimv1alpha1.NominatimInstance, peers []nominatimv1alpha1.NominatimOperation) {
 	for i := range peers {
 		op := &peers[i]
 		if op.Status.Phase != nominatimv1alpha1.NominatimOperationPhaseSucceeded {
@@ -92,7 +92,7 @@ func syncRegionsFromDriftOps(nom *nominatimv1alpha1.Nominatim, peers []nominatim
 	}
 }
 
-func mergeRegionsIntoStatus(nom *nominatimv1alpha1.Nominatim, regions []string) {
+func mergeRegionsIntoStatus(nom *nominatimv1alpha1.NominatimInstance, regions []string) {
 	have := make(map[string]struct{}, len(nom.Status.Regions))
 	for _, rs := range nom.Status.Regions {
 		have[rs.Name] = struct{}{}
@@ -110,7 +110,7 @@ func mergeRegionsIntoStatus(nom *nominatimv1alpha1.Nominatim, regions []string) 
 	}
 }
 
-func replaceRegionsStatus(nom *nominatimv1alpha1.Nominatim, regions []string) {
+func replaceRegionsStatus(nom *nominatimv1alpha1.NominatimInstance, regions []string) {
 	now := metav1.Now()
 	statuses := make([]nominatimv1alpha1.RegionStatus, 0, len(regions))
 	for _, region := range regions {

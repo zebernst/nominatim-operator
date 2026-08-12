@@ -20,7 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// NominatimOperationType is the kind of finite workflow to run against a Nominatim instance.
+// NominatimOperationType is the kind of finite workflow to run against a NominatimInstance.
 // +kubebuilder:validation:Enum=Bootstrap;AddRegions;Reimport;Update;CatchUp;Refresh;Migrate;Freeze
 type NominatimOperationType string
 
@@ -64,14 +64,14 @@ const (
 //
 // NominatimOperation is an imperative, finite workflow — NOT a GitOps desired-state surface.
 // Do not manage NominatimOperation objects via Flux Kustomizations or similar continuous apply;
-// create them with kubectl (or let the Nominatim controller create them) and let them complete.
+// create them with kubectl (or let the NominatimInstance controller create them) and let them complete.
 type NominatimOperationSpec struct {
 	// Type selects the workflow to run.
 	// +kubebuilder:validation:Required
 	Type NominatimOperationType `json:"type"`
 
-	// NominatimRef names the Nominatim instance in the same namespace.
-	// The operation controller will set an ownerReference to that Nominatim when reconciling
+	// NominatimRef names the NominatimInstance in the same namespace.
+	// The operation controller will set an ownerReference to that NominatimInstance when reconciling
 	// (callers need not set metadata.ownerReferences).
 	// +kubebuilder:validation:Required
 	NominatimRef LocalObjectReference `json:"nominatimRef"`
@@ -81,12 +81,12 @@ type NominatimOperationSpec struct {
 	// +optional
 	Regions []string `json:"regions,omitempty"`
 
-	// Staging overrides Nominatim.spec.staging for this operation's download PVC
-	// (size and/or storageClass). When unset, the parent Nominatim staging defaults apply.
+	// Staging overrides NominatimInstance.spec.staging for this operation's download PVC
+	// (size and/or storageClass). When unset, the parent NominatimInstance staging defaults apply.
 	// +optional
 	Staging *StagingSpec `json:"staging,omitempty"`
 
-	// Image overrides Nominatim.spec.worker.image for this Operation Job only.
+	// Image overrides NominatimInstance.spec.worker.image for this Operation Job only.
 	// +optional
 	Image *ImageSpec `json:"image,omitempty"`
 }
@@ -131,13 +131,13 @@ type NominatimOperationStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// NominatimOperation is a finite, controller- or kubectl-created workflow against a Nominatim
+// NominatimOperation is a finite, controller- or kubectl-created workflow against a NominatimInstance
 // instance (bootstrap, region changes, updates, etc.). It wraps batch Jobs and optional
 // operation-scoped staging PVCs.
 //
 // NominatimOperation is NOT intended for Flux/GitOps continuous reconciliation. Treat it like
 // a Job: create it to kick work, observe status until Succeeded/Failed, then leave or delete.
-// Desired long-lived state belongs on the Nominatim CR; consequential ops use NominatimOperation.
+// Desired long-lived state belongs on the NominatimInstance CR; consequential ops use NominatimOperation.
 type NominatimOperation struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

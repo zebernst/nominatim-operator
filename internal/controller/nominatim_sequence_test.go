@@ -47,8 +47,8 @@ func TestParseSequenceReport(t *testing.T) {
 
 func TestApplySequenceReportMap(t *testing.T) {
 	t.Parallel()
-	nom := &nominatimv1alpha1.Nominatim{
-		Status: nominatimv1alpha1.NominatimStatus{
+	nom := &nominatimv1alpha1.NominatimInstance{
+		Status: nominatimv1alpha1.NominatimInstanceStatus{
 			Regions: []nominatimv1alpha1.RegionStatus{
 				{Name: "europe/monaco"},
 				{Name: "europe/andorra"},
@@ -112,7 +112,7 @@ func TestReconcileSequenceObservation_CreatesProbeAndAppliesConfigMap(t *testing
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, op).WithObjects(nom, op).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileSequenceObservation(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("reconcileSequenceObservation: %v", err)
@@ -190,7 +190,7 @@ func TestEnsureSequenceProbes_DoesNotApplyReport(t *testing.T) {
 		Data:       map[string]string{sequenceReportCMKey: `{"europe/monaco":"9@now"}`},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, op).WithObjects(nom, op, cm).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.ensureSequenceProbes(ctx, nom, []nominatimv1alpha1.NominatimOperation{*op}); err != nil {
 		t.Fatalf("ensureSequenceProbes: %v", err)
@@ -215,7 +215,7 @@ func TestListOperationsForParent_ErrorPropagates(t *testing.T) {
 	scheme := testScheme(t)
 	nom := nominatimWithConnectionSecret("ops-list-err")
 	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: &failingListClient{Client: base}, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: &failingListClient{Client: base}, Scheme: scheme}
 	if _, err := r.listOperationsForParent(context.Background(), nom); err == nil {
 		t.Fatal("expected List error to propagate")
 	}
@@ -230,7 +230,7 @@ func TestBuildSequenceProbeJob_UsesWorkerImage(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "img-boot", Namespace: nom.Namespace},
 	}
-	r := &NominatimReconciler{Scheme: scheme}
+	r := &NominatimInstanceReconciler{Scheme: scheme}
 	job, err := r.buildSequenceProbeJob(nom, op)
 	if err != nil {
 		t.Fatal(err)
@@ -255,7 +255,7 @@ func TestReconcileSequenceObservation_EmptyRegions(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	nom := baseNominatim("empty-regions")
-	r := &NominatimReconciler{Client: fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(nom).Build()}
+	r := &NominatimInstanceReconciler{Client: fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(nom).Build()}
 	if err := r.reconcileSequenceObservation(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestReconcileSequenceObservation_SkipsAlreadyObserved(t *testing.T) {
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, op).WithObjects(nom, op).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	if err := r.reconcileSequenceObservation(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ func TestEnsureSequenceProbeJob_FailedJobMarksObserved(t *testing.T) {
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, op).WithObjects(nom, op).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	job, err := r.buildSequenceProbeJob(nom, op)
 	if err != nil {
 		t.Fatal(err)
@@ -329,7 +329,7 @@ func TestApplySequenceReportConfigMap_EmptyAndMissing(t *testing.T) {
 	ctx := context.Background()
 	scheme := testScheme(t)
 	nom := baseNominatim("cm-edge")
-	r := &NominatimReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()}
+	r := &NominatimInstanceReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()}
 	if err := r.applySequenceReportConfigMap(ctx, nom); err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func TestApplySequenceReportConfigMap_EmptyAndMissing(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: sequenceReportConfigMapName(nom), Namespace: nom.Namespace},
 		Data:       map[string]string{sequenceReportCMKey: "   "},
 	}
-	r = &NominatimReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, cm).Build()}
+	r = &NominatimInstanceReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, cm).Build()}
 	if err := r.applySequenceReportConfigMap(ctx, nom); err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +345,7 @@ func TestApplySequenceReportConfigMap_EmptyAndMissing(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: sequenceReportConfigMapName(nom), Namespace: nom.Namespace},
 		Data:       map[string]string{sequenceReportCMKey: "not-json"},
 	}
-	r = &NominatimReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, badCM).Build()}
+	r = &NominatimInstanceReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, badCM).Build()}
 	if err := r.applySequenceReportConfigMap(ctx, nom); err == nil {
 		t.Fatal("expected parse error")
 	}
@@ -356,7 +356,7 @@ func TestApplySequenceReportConfigMap_EmptyAndMissing(t *testing.T) {
 		},
 	}
 	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}}
-	r = &NominatimReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, auxCM).Build()}
+	r = &NominatimInstanceReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, auxCM).Build()}
 	if err := r.applySequenceReportConfigMap(ctx, nom); err != nil {
 		t.Fatal(err)
 	}
@@ -368,8 +368,8 @@ func TestApplySequenceReportConfigMap_EmptyAndMissing(t *testing.T) {
 func TestApplySequenceReportMap_SkipsUnchangedAndUsesObservedAt(t *testing.T) {
 	t.Parallel()
 	observed := metav1.Now()
-	nom := &nominatimv1alpha1.Nominatim{
-		Status: nominatimv1alpha1.NominatimStatus{
+	nom := &nominatimv1alpha1.NominatimInstance{
+		Status: nominatimv1alpha1.NominatimInstanceStatus{
 			Regions: []nominatimv1alpha1.RegionStatus{
 				{Name: "europe/monaco", SequenceState: "same@t"},
 			},
@@ -404,7 +404,7 @@ func TestEnsureSequenceProbeRBAC_UpdatesExisting(t *testing.T) {
 		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "wrong"},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, sa, role, rb).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	if err := r.ensureSequenceProbeRBAC(ctx, nom); err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +437,7 @@ func TestEnsureSequenceProbeJob_InProgressNoMark(t *testing.T) {
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, op).WithObjects(nom, op).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	job, err := r.buildSequenceProbeJob(nom, op)
 	if err != nil {
 		t.Fatal(err)
@@ -468,7 +468,7 @@ func TestMarkSequenceObserved_Idempotent(t *testing.T) {
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(op).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	if err := r.markSequenceObserved(ctx, op); err != nil {
 		t.Fatal(err)
 	}
@@ -488,7 +488,7 @@ func TestReconcileSequenceObservation_SkipsNonProbeTypes(t *testing.T) {
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, op).WithObjects(nom, op).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	if err := r.reconcileSequenceObservation(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatal(err)
 	}
@@ -500,14 +500,14 @@ func TestReconcileSequenceObservation_SkipsNonProbeTypes(t *testing.T) {
 
 func TestApplySequenceReportMap_EmptyInputs(t *testing.T) {
 	t.Parallel()
-	nom := &nominatimv1alpha1.Nominatim{
-		Status: nominatimv1alpha1.NominatimStatus{
+	nom := &nominatimv1alpha1.NominatimInstance{
+		Status: nominatimv1alpha1.NominatimInstanceStatus{
 			Regions: []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}},
 		},
 	}
 	applySequenceReportMap(nom, nil, nil)
 	applySequenceReportMap(nom, map[string]string{}, nil)
-	empty := &nominatimv1alpha1.Nominatim{}
+	empty := &nominatimv1alpha1.NominatimInstance{}
 	applySequenceReportMap(empty, map[string]string{"europe/monaco": "1@t"}, nil)
 }
 
@@ -516,7 +516,7 @@ func TestEnsureSequenceReportConfigMap_CreatesAndUpdates(t *testing.T) {
 	ctx := context.Background()
 	nom := baseNominatim("seq-cm")
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	if err := r.ensureSequenceReportConfigMap(ctx, nom); err != nil {
 		t.Fatal(err)
 	}
@@ -554,7 +554,7 @@ func TestSequenceProbeOperation_AllWriteTypes(t *testing.T) {
 func TestMarkSequenceObserved_NotFound(t *testing.T) {
 	scheme := testScheme(t)
 	ctx := context.Background()
-	r := &NominatimReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).Build(), Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).Build(), Scheme: scheme}
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "gone", Namespace: "default"},
 	}
@@ -576,7 +576,7 @@ func TestBuildSequenceProbeJob_WorkerPullPolicy(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "pull-pol-op", Namespace: nom.Namespace},
 	}
-	r := &NominatimReconciler{Scheme: scheme}
+	r := &NominatimInstanceReconciler{Scheme: scheme}
 	job, err := r.buildSequenceProbeJob(nom, op)
 	if err != nil {
 		t.Fatal(err)

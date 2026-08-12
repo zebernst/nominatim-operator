@@ -34,7 +34,7 @@ import (
 // (no batch/v1 CronJob). It persists status.lastUpdateScheduleTime as the schedule
 // cursor and returns RequeueAfter until the next cron fire.
 // ops is the Reconcile-scoped parent Operation list (one list per pass).
-func (r *NominatimReconciler) reconcileUpdates(ctx context.Context, nom *nominatimv1alpha1.Nominatim, ops []nominatimv1alpha1.NominatimOperation) (ctrl.Result, error) {
+func (r *NominatimInstanceReconciler) reconcileUpdates(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance, ops []nominatimv1alpha1.NominatimOperation) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	if nom.Spec.Updates == nil || !nom.Spec.Updates.Enabled || nom.Spec.Updates.Schedule == "" {
@@ -123,7 +123,7 @@ func (r *NominatimReconciler) reconcileUpdates(ctx context.Context, nom *nominat
 	return requeue, nil
 }
 
-func scheduleCursor(nom *nominatimv1alpha1.Nominatim) time.Time {
+func scheduleCursor(nom *nominatimv1alpha1.NominatimInstance) time.Time {
 	if nom.Status.LastUpdateScheduleTime != nil {
 		return nom.Status.LastUpdateScheduleTime.Time
 	}
@@ -148,11 +148,11 @@ func mostRecentScheduleTime(sched cron.Schedule, last, now time.Time) *time.Time
 	return mostRecent
 }
 
-func scheduledUpdateOperationName(nom *nominatimv1alpha1.Nominatim, fire time.Time) string {
+func scheduledUpdateOperationName(nom *nominatimv1alpha1.NominatimInstance, fire time.Time) string {
 	return fmt.Sprintf("%s-update-%d", nom.Name, fire.UTC().Unix())
 }
 
-func regionsForUpdate(nom *nominatimv1alpha1.Nominatim) []string {
+func regionsForUpdate(nom *nominatimv1alpha1.NominatimInstance) []string {
 	if len(nom.Status.Regions) > 0 {
 		out := make([]string, 0, len(nom.Status.Regions))
 		for _, rs := range nom.Status.Regions {

@@ -16,7 +16,7 @@ limitations under the License.
 
 package v1alpha1
 
-// Condition types for Nominatim status.
+// Condition types for NominatimInstance status.
 const (
 	ConditionReady                    = "Ready"
 	ConditionProgressing              = "Progressing"
@@ -27,8 +27,8 @@ const (
 	ConditionImportConfigDrift = "ImportConfigDrift"
 )
 
-// NominatimFinalizer is added while the operator manages the instance.
-const NominatimFinalizer = "nominatim.zebernst.dev/finalizer"
+// NominatimInstanceFinalizer is added while the operator manages the instance.
+const NominatimInstanceFinalizer = "nominatim.zebernst.dev/finalizer"
 
 // NominatimOperationFinalizer ensures ActiveOperationRefs / CNPG pause-state are cleaned up
 // when a NominatimOperation is deleted mid-flight (before its Job reaches a terminal phase).

@@ -28,8 +28,8 @@ func TestEffectiveAuxDataEnv(t *testing.T) {
 	t.Parallel()
 
 	trueVal := true
-	nom := &nominatimv1alpha1.Nominatim{
-		Spec: nominatimv1alpha1.NominatimSpec{
+	nom := &nominatimv1alpha1.NominatimInstance{
+		Spec: nominatimv1alpha1.NominatimInstanceSpec{
 			AuxData: &nominatimv1alpha1.AuxDataSpec{
 				WikimediaImportance: &trueVal,
 				USPostcodes:         ptrBool(false),
@@ -47,7 +47,7 @@ func TestEffectiveAuxDataEnv(t *testing.T) {
 		t.Fatalf("usPostcodes=%q want false", env[envAuxUSPostcodes])
 	}
 
-	if got := effectiveAuxDataEnv(&nominatimv1alpha1.Nominatim{}); got != nil {
+	if got := effectiveAuxDataEnv(&nominatimv1alpha1.NominatimInstance{}); got != nil {
 		t.Fatalf("nil auxData should yield nil env, got %v", got)
 	}
 }
@@ -78,7 +78,7 @@ func TestParseAuxDataReport(t *testing.T) {
 func TestApplyAuxDataReport(t *testing.T) {
 	t.Parallel()
 
-	nom := &nominatimv1alpha1.Nominatim{}
+	nom := &nominatimv1alpha1.NominatimInstance{}
 	applyAuxDataReport(nom, &nominatimv1alpha1.AuxDataStatus{
 		WikimediaImportance: true,
 		SecondaryImportance: true,

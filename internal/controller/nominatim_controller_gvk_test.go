@@ -81,7 +81,7 @@ var _ = Describe("optional GVK registration", func() {
 	It("registers HTTPRoute and CNPG watches when the RESTMapper knows them", func() {
 		mgr, err := ctrl.NewManager(cfg, ctrl.Options{Scheme: k8sClient.Scheme()})
 		Expect(err).NotTo(HaveOccurred())
-		r := &NominatimReconciler{
+		r := &NominatimInstanceReconciler{
 			Client:         mgr.GetClient(),
 			Scheme:         mgr.GetScheme(),
 			ControllerName: "nominatim-optional-gvks",
@@ -92,7 +92,7 @@ var _ = Describe("optional GVK registration", func() {
 	It("propagates RESTMapper errors from optional GVK probes", func() {
 		mgr, err := ctrl.NewManager(cfg, ctrl.Options{Scheme: k8sClient.Scheme()})
 		Expect(err).NotTo(HaveOccurred())
-		r := &NominatimReconciler{
+		r := &NominatimInstanceReconciler{
 			Client:         mgr.GetClient(),
 			Scheme:         mgr.GetScheme(),
 			ControllerName: "nominatim-mapper-error",
@@ -103,7 +103,7 @@ var _ = Describe("optional GVK registration", func() {
 	It("propagates RESTMapper errors from the CNPG optional probe", func() {
 		mgr, err := ctrl.NewManager(cfg, ctrl.Options{Scheme: k8sClient.Scheme()})
 		Expect(err).NotTo(HaveOccurred())
-		r := &NominatimReconciler{
+		r := &NominatimInstanceReconciler{
 			Client:         mgr.GetClient(),
 			Scheme:         mgr.GetScheme(),
 			ControllerName: "nominatim-mapper-error-cnpg",

@@ -35,7 +35,7 @@ const (
 // matches this Operation's type (see operationImpactMatches: Never/BootstrapReimport/
 // WriteHeavy/All). It is a no-op when the policy doesn't cover this Operation type — e.g.
 // Update under the default WriteHeavy policy only pauses when the policy is All.
-func (r *NominatimOperationReconciler) applyPreJobCNPGEffects(ctx context.Context, op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim) error {
+func (r *NominatimOperationReconciler) applyPreJobCNPGEffects(ctx context.Context, op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.NominatimInstance) error {
 	if !operationImpactMatches(parent.Spec.Database.PauseBackupsDuringOperations, op.Spec.Type) {
 		return nil
 	}
@@ -50,7 +50,7 @@ func (r *NominatimOperationReconciler) applyPreJobCNPGEffects(ctx context.Contex
 // Operation on the same parent matches the pause policy. Without that sibling check, a
 // Conflict-failed peer would resume backups / revert the postgres profile while a Running
 // Bootstrap is still importing.
-func (r *NominatimOperationReconciler) applyTerminalCNPGEffects(ctx context.Context, op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim) error {
+func (r *NominatimOperationReconciler) applyTerminalCNPGEffects(ctx context.Context, op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.NominatimInstance) error {
 	impact := parent.Spec.Database.PauseBackupsDuringOperations
 	if !operationImpactMatches(impact, op.Spec.Type) {
 		return nil
@@ -74,7 +74,7 @@ func (r *NominatimOperationReconciler) applyTerminalCNPGEffects(ctx context.Cont
 // being deleted).
 func (r *NominatimOperationReconciler) hasOtherActiveMatchingImpactOps(
 	ctx context.Context,
-	parent *nominatimv1alpha1.Nominatim,
+	parent *nominatimv1alpha1.NominatimInstance,
 	impact nominatimv1alpha1.OperationImpact,
 	excludeName string,
 ) (bool, error) {
@@ -102,7 +102,7 @@ func (r *NominatimOperationReconciler) hasOtherActiveMatchingImpactOps(
 
 // setBackupPaused pauses or resumes continuous (Barman) backup on the attached CNPG Cluster.
 // No-op when the database is not yet attached, degraded, or connectionSecretRef-only.
-func setBackupPaused(ctx context.Context, c client.Client, effects CNPGEffects, nom *nominatimv1alpha1.Nominatim, paused bool) error {
+func setBackupPaused(ctx context.Context, c client.Client, effects CNPGEffects, nom *nominatimv1alpha1.NominatimInstance, paused bool) error {
 	if skipCNPGClusterEffects(nom) {
 		return nil
 	}
@@ -125,7 +125,7 @@ func setBackupPaused(ctx context.Context, c client.Client, effects CNPGEffects, 
 // Profile-managed keys are the union of import ∪ runtime. When switching profiles, keys that
 // belong to that union but are absent from the target profile are removed so import-only knobs
 // (e.g. work_mem) do not leak into "runtime" forever. Keys outside the union are left alone.
-func applyPostgresProfile(ctx context.Context, c client.Client, effects CNPGEffects, nom *nominatimv1alpha1.Nominatim, which string) error {
+func applyPostgresProfile(ctx context.Context, c client.Client, effects CNPGEffects, nom *nominatimv1alpha1.NominatimInstance, which string) error {
 	if skipCNPGClusterEffects(nom) {
 		return nil
 	}
@@ -160,7 +160,7 @@ func applyPostgresProfile(ctx context.Context, c client.Client, effects CNPGEffe
 
 // skipCNPGClusterEffects is true when there is no operator-managed Cluster to patch:
 // not yet attached, degraded, or connectionSecretRef-only.
-func skipCNPGClusterEffects(nom *nominatimv1alpha1.Nominatim) bool {
+func skipCNPGClusterEffects(nom *nominatimv1alpha1.NominatimInstance) bool {
 	mode := nom.Status.Database.Mode
 	return mode == "" || nom.Status.Database.Degraded || mode == nominatimv1alpha1.DatabaseModeConnectionSecret
 }

@@ -39,7 +39,7 @@ func TestReconcileRegionDrift_AddDataCreatesAddRegions(t *testing.T) {
 	nom.Status.Database.ConnectionSecretName = testConnSecret
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("reconcileRegionDrift: %v", err)
@@ -71,7 +71,7 @@ func TestReconcileRegionDrift_AddDataMultiMissingCreatesSingleRegionOp(t *testin
 	nom.Status.Database.ConnectionSecretName = testConnSecret
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("reconcileRegionDrift: %v", err)
@@ -105,7 +105,7 @@ func TestReconcileRegionDrift_AddDataSerialMultiMissingCreatesNextOpAfterSucceed
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(nom, &nominatimv1alpha1.NominatimOperation{}).
 		WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	// First reconcile creates the op for "b" only.
 	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
@@ -170,7 +170,7 @@ func TestReconcileRegionDrift_ReimportPolicyCreatesReimport(t *testing.T) {
 	nom.Status.Database.ConnectionSecretName = testConnSecret
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("reconcileRegionDrift: %v", err)
@@ -201,7 +201,7 @@ func TestReconcileRegionDrift_RemovalDoesNotCreateOpOrShrinkStatus(t *testing.T)
 
 	before := append([]nominatimv1alpha1.RegionStatus(nil), nom.Status.Regions...)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("reconcileRegionDrift: %v", err)
@@ -237,7 +237,7 @@ func TestReconcileRegionDrift_NoParallelAddRegions(t *testing.T) {
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseRunning},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, active).WithObjects(nom, active).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatal(err)
@@ -280,7 +280,7 @@ func TestReconcileRegionDrift_SkipsWhenEmptyStatus(t *testing.T) {
 	nom.Spec.Regions = []string{"north-america/us-midwest"}
 	// status.regions empty → bootstrap owns this; drift must no-op
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	if err := r.reconcileRegionDrift(context.Background(), nom, parentOps(t, r, context.Background(), nom)); err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +307,7 @@ func TestReconcileRegionDrift_SkipsWhenBootstrapActive(t *testing.T) {
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseRunning},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, boot).WithObjects(nom, boot).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatal(err)
 	}

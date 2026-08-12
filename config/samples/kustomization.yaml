@@ -1,5 +1,5 @@
 ## Append samples of your project ##
 resources:
-- nominatim_v1alpha1_nominatim.yaml
+- nominatim_v1alpha1_nominatiminstance.yaml
 - nominatim_v1alpha1_nominatimoperation.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

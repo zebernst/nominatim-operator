@@ -57,7 +57,7 @@ const (
 )
 
 // writePlaneEval is the single peer-evaluation result for Operation claim and
-// Nominatim schedule probes. Decision drives claim; ScheduleBusy drives schedule skip.
+// NominatimInstance schedule probes. Decision drives claim; ScheduleBusy drives schedule skip.
 type writePlaneEval struct {
 	Decision writePlaneDecision
 	// Peer is set for Hold (the holder). May also be set for RaceWait (the winner).
@@ -151,7 +151,7 @@ func (r *NominatimOperationReconciler) listPeersForNominatim(ctx context.Context
 	return out, nil
 }
 
-// claimWritePlane registers op on the parent Nominatim's status.activeOperationRefs
+// claimWritePlane registers op on the parent NominatimInstance's status.activeOperationRefs
 // using a retry-on-conflict loop so only one creation-race winner arms a Job.
 // Returns stop=true when Reconcile must return immediately (requeue or failed).
 func (r *NominatimOperationReconciler) claimWritePlane(ctx context.Context, op *nominatimv1alpha1.NominatimOperation) (ctrl.Result, bool, error) {
@@ -177,7 +177,7 @@ func (r *NominatimOperationReconciler) claimWritePlane(ctx context.Context, op *
 			return errWritePlaneBusy
 		}
 
-		parent := &nominatimv1alpha1.Nominatim{}
+		parent := &nominatimv1alpha1.NominatimInstance{}
 		if err := r.Get(ctx, parentKey, parent); err != nil {
 			return client.IgnoreNotFound(err)
 		}

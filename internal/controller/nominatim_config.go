@@ -30,7 +30,7 @@ import (
 // effectiveNominatimConfigEnv returns NOMINATIM_* env vars from spec.nominatim.
 // Import-time keys (IMPORT_STYLE, TOKENIZER) use sealed status.observedNominatim once
 // Bootstrap has populated status.regions; runtime keys always follow spec.
-func effectiveNominatimConfigEnv(nom *nominatimv1alpha1.Nominatim) []corev1.EnvVar {
+func effectiveNominatimConfigEnv(nom *nominatimv1alpha1.NominatimInstance) []corev1.EnvVar {
 	if nom == nil {
 		return nil
 	}
@@ -129,7 +129,7 @@ func effectiveAPIEnv(api *nominatimv1alpha1.APISpec) []corev1.EnvVar {
 	}}
 }
 
-func effectiveImportTimeSettings(nom *nominatimv1alpha1.Nominatim) (importStyle, tokenizer string) {
+func effectiveImportTimeSettings(nom *nominatimv1alpha1.NominatimInstance) (importStyle, tokenizer string) {
 	if len(nom.Status.Regions) > 0 && nom.Status.ObservedNominatim != nil {
 		return nom.Status.ObservedNominatim.ImportStyle, nom.Status.ObservedNominatim.Tokenizer
 	}
@@ -141,11 +141,11 @@ func effectiveImportTimeSettings(nom *nominatimv1alpha1.Nominatim) (importStyle,
 
 // sealObservedNominatimConfig copies current import-time spec into status when Bootstrap
 // first succeeds (status.regions becoming non-empty). No-op if already sealed unless force.
-func sealObservedNominatimConfig(nom *nominatimv1alpha1.Nominatim) {
+func sealObservedNominatimConfig(nom *nominatimv1alpha1.NominatimInstance) {
 	sealObservedNominatimConfigForce(nom, false)
 }
 
-func sealObservedNominatimConfigForce(nom *nominatimv1alpha1.Nominatim, force bool) {
+func sealObservedNominatimConfigForce(nom *nominatimv1alpha1.NominatimInstance, force bool) {
 	if !force && nom.Status.ObservedNominatim != nil {
 		return
 	}
@@ -159,7 +159,7 @@ func sealObservedNominatimConfigForce(nom *nominatimv1alpha1.Nominatim, force bo
 
 // syncImportConfigDriftCondition sets ImportConfigDrift when sealed import-time settings
 // differ from spec after Bootstrap. Clears the condition when aligned or not yet sealed.
-func syncImportConfigDriftCondition(nom *nominatimv1alpha1.Nominatim) {
+func syncImportConfigDriftCondition(nom *nominatimv1alpha1.NominatimInstance) {
 	if len(nom.Status.Regions) == 0 || nom.Status.ObservedNominatim == nil {
 		meta.RemoveStatusCondition(&nom.Status.Conditions, nominatimv1alpha1.ConditionImportConfigDrift)
 		return

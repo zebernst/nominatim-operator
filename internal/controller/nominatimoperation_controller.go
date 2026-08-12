@@ -51,7 +51,7 @@ type NominatimOperationReconciler struct {
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatimoperations,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatimoperations/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatimoperations/finalizers,verbs=update
-// +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatims,verbs=get;list;watch
+// +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatiminstances,verbs=get;list;watch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
@@ -84,12 +84,12 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 			fmt.Sprintf("operation type %q is reserved but not implemented yet (no Job will be created)", op.Spec.Type))
 	}
 
-	parent := &nominatimv1alpha1.Nominatim{}
+	parent := &nominatimv1alpha1.NominatimInstance{}
 	parentKey := types.NamespacedName{Name: op.Spec.NominatimRef.Name, Namespace: op.Namespace}
 	if err := r.Get(ctx, parentKey, parent); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, r.failOperation(ctx, op, reasonParentNotFound,
-				fmt.Sprintf("Nominatim %q not found in namespace %q", op.Spec.NominatimRef.Name, op.Namespace))
+				fmt.Sprintf("NominatimInstance %q not found in namespace %q", op.Spec.NominatimRef.Name, op.Namespace))
 		}
 		return ctrl.Result{}, err
 	}
@@ -162,7 +162,7 @@ func (r *NominatimOperationReconciler) reconcileTerminalOperation(ctx context.Co
 func (r *NominatimOperationReconciler) enforceRegionGates(
 	ctx context.Context,
 	op *nominatimv1alpha1.NominatimOperation,
-	parent *nominatimv1alpha1.Nominatim,
+	parent *nominatimv1alpha1.NominatimInstance,
 	peers []nominatimv1alpha1.NominatimOperation,
 ) (stop bool, err error) {
 	if !requiresRegionGate(op.Spec.Type) {
@@ -170,11 +170,11 @@ func (r *NominatimOperationReconciler) enforceRegionGates(
 	}
 	if len(effectiveRegions(op, parent)) == 0 {
 		return true, r.failOperation(ctx, op, reasonRegionsRequired,
-			fmt.Sprintf("no regions configured on Operation %q or Nominatim %q", op.Name, parent.Name))
+			fmt.Sprintf("no regions configured on Operation %q or NominatimInstance %q", op.Name, parent.Name))
 	}
 	if len(parent.Spec.Regions) > 0 && !bootstrapComplete(parent, peers) {
 		return true, r.failOperation(ctx, op, reasonBootstrapIncomplete,
-			fmt.Sprintf("Nominatim %q has not completed Bootstrap (status.regions empty and no Succeeded Bootstrap Operation)", parent.Name))
+			fmt.Sprintf("NominatimInstance %q has not completed Bootstrap (status.regions empty and no Succeeded Bootstrap Operation)", parent.Name))
 	}
 	return false, nil
 }
@@ -185,7 +185,7 @@ func (r *NominatimOperationReconciler) enforceRegionGates(
 func (r *NominatimOperationReconciler) waitForJobPrerequisites(
 	ctx context.Context,
 	op *nominatimv1alpha1.NominatimOperation,
-	parent *nominatimv1alpha1.Nominatim,
+	parent *nominatimv1alpha1.NominatimInstance,
 ) (result ctrl.Result, wait bool, err error) {
 	log := logf.FromContext(ctx)
 
@@ -244,7 +244,7 @@ func (r *NominatimOperationReconciler) reconcileOperationDelete(ctx context.Cont
 	}
 
 	if op.Spec.NominatimRef.Name != "" {
-		parent := &nominatimv1alpha1.Nominatim{}
+		parent := &nominatimv1alpha1.NominatimInstance{}
 		key := types.NamespacedName{Name: op.Spec.NominatimRef.Name, Namespace: op.Namespace}
 		if err := r.Get(ctx, key, parent); err != nil {
 			if !apierrors.IsNotFound(err) {
@@ -262,7 +262,7 @@ func (r *NominatimOperationReconciler) reconcileOperationDelete(ctx context.Cont
 	return ctrl.Result{}, nil
 }
 
-func (r *NominatimOperationReconciler) ensureOperationOwnerRef(ctx context.Context, op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim) error {
+func (r *NominatimOperationReconciler) ensureOperationOwnerRef(ctx context.Context, op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.NominatimInstance) error {
 	before := op.DeepCopy()
 	if err := controllerutil.SetControllerReference(parent, op, r.Scheme); err != nil {
 		return err
@@ -290,7 +290,7 @@ func (r *NominatimOperationReconciler) ensureStagingPVC(ctx context.Context, op 
 	return r.Create(ctx, desired)
 }
 
-func (r *NominatimOperationReconciler) ensureJob(ctx context.Context, op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim) error {
+func (r *NominatimOperationReconciler) ensureJob(ctx context.Context, op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.NominatimInstance) error {
 	desired, err := buildOperationJob(op, parent, stagingPVCName(op), workerImageForOperation(op, parent), workerPullPolicyForOperation(op, parent))
 	if err != nil {
 		return fmt.Errorf("build Operation Job: %w", err)
@@ -334,7 +334,7 @@ func jobHasDatabaseDSN(job *batchv1.Job) bool {
 // Connection-secret / degraded mode (no Cluster to wait on) is always ready.
 // Owned/attached Clusters must report Ready=True; owned Clusters also wait for the
 // declarative Database CR (extensions) to report status.applied=true.
-func (r *NominatimOperationReconciler) cnpgClusterReadyForJobs(ctx context.Context, parent *nominatimv1alpha1.Nominatim) (bool, error) {
+func (r *NominatimOperationReconciler) cnpgClusterReadyForJobs(ctx context.Context, parent *nominatimv1alpha1.NominatimInstance) (bool, error) {
 	if parent.Status.Database.Degraded || parent.Status.Database.Mode == nominatimv1alpha1.DatabaseModeConnectionSecret {
 		return true, nil
 	}
@@ -420,7 +420,7 @@ const (
 func (r *NominatimOperationReconciler) ensureReimportDatabaseReset(
 	ctx context.Context,
 	op *nominatimv1alpha1.NominatimOperation,
-	parent *nominatimv1alpha1.Nominatim,
+	parent *nominatimv1alpha1.NominatimInstance,
 ) (bool, error) {
 	if op.Spec.Type != nominatimv1alpha1.NominatimOperationReimport {
 		return true, nil
@@ -524,7 +524,7 @@ func (r *NominatimOperationReconciler) ensureReimportDatabaseReset(
 // treated as quiesced (pre-bootstrap / never created). When a Deployment still requests
 // replicas, this scales it to zero so DROP DATABASE is not blocked waiting on the parent
 // reconciler to observe activeOperationRefs.
-func (r *NominatimOperationReconciler) apiQuiescedForReimport(ctx context.Context, parent *nominatimv1alpha1.Nominatim) (bool, error) {
+func (r *NominatimOperationReconciler) apiQuiescedForReimport(ctx context.Context, parent *nominatimv1alpha1.NominatimInstance) (bool, error) {
 	deploy := &appsv1.Deployment{}
 	key := types.NamespacedName{Name: APIName(parent), Namespace: parent.Namespace}
 	err := r.Get(ctx, key, deploy)

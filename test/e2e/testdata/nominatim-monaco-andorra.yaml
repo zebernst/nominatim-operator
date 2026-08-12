@@ -24,7 +24,7 @@ spec:
       storage: 5Gi
 ---
 apiVersion: nominatim.zebernst.dev/v1alpha1
-kind: Nominatim
+kind: NominatimInstance
 metadata:
   name: monaco
   namespace: nominatim-validation

@@ -108,8 +108,8 @@ rbac:
         - apiGroups:
             - nominatim.zebernst.dev
           resources:
+            - nominatiminstances
             - nominatimoperations
-            - nominatims
           verbs:
             - create
             - delete
@@ -121,15 +121,15 @@ rbac:
         - apiGroups:
             - nominatim.zebernst.dev
           resources:
+            - nominatiminstances/finalizers
             - nominatimoperations/finalizers
-            - nominatims/finalizers
           verbs:
             - update
         - apiGroups:
             - nominatim.zebernst.dev
           resources:
+            - nominatiminstances/status
             - nominatimoperations/status
-            - nominatims/status
           verbs:
             - get
             - patch

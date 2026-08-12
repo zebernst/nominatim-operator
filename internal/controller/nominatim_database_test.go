@@ -81,7 +81,7 @@ func testScheme(t *testing.T) *runtime.Scheme {
 }
 
 // parentOps lists NominatimOperations for nom — test helper matching Reconcile's one-list-per-pass.
-func parentOps(t *testing.T, r *NominatimReconciler, ctx context.Context, nom *nominatimv1alpha1.Nominatim) []nominatimv1alpha1.NominatimOperation {
+func parentOps(t *testing.T, r *NominatimInstanceReconciler, ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) []nominatimv1alpha1.NominatimOperation {
 	t.Helper()
 	ops, err := r.listOperationsForParent(ctx, nom)
 	if err != nil {
@@ -90,14 +90,14 @@ func parentOps(t *testing.T, r *NominatimReconciler, ctx context.Context, nom *n
 	return ops
 }
 
-func baseNominatim(name string) *nominatimv1alpha1.Nominatim {
-	return &nominatimv1alpha1.Nominatim{
+func baseNominatim(name string) *nominatimv1alpha1.NominatimInstance {
+	return &nominatimv1alpha1.NominatimInstance{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 			UID:       types.UID("test-uid-" + name),
 		},
-		Spec: nominatimv1alpha1.NominatimSpec{
+		Spec: nominatimv1alpha1.NominatimInstanceSpec{
 			Project: nominatimv1alpha1.ProjectSpec{
 				Volume: nominatimv1alpha1.VolumeSource{ClaimName: "project"},
 			},
@@ -123,7 +123,7 @@ func TestReconcileDatabase_ConnectionSecretRef_Degraded(t *testing.T) {
 
 	effects := &recordingCNPGEffects{}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, secret).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileDatabase: %v", err)
@@ -162,7 +162,7 @@ func TestReconcileDatabase_ConnectionSecretRef_MissingSecret(t *testing.T) {
 		ConnectionSecretRef: &nominatimv1alpha1.LocalObjectReference{Name: "nope"},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileDatabase(context.Background(), nom); err == nil {
 		t.Fatal("expected error for missing secret")
@@ -187,7 +187,7 @@ func TestReconcileDatabase_ClusterRef_Attach(t *testing.T) {
 
 	effects := &recordingCNPGEffects{}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, cluster).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileDatabase: %v", err)
@@ -247,7 +247,7 @@ func TestReconcileDatabase_ClusterRef_CustomConnectionSecret(t *testing.T) {
 	}
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, cluster, secret).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileDatabase: %v", err)
@@ -282,7 +282,7 @@ func TestReconcileDatabase_ClusterRef_CustomConnectionSecretMissing(t *testing.T
 	}
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, cluster).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileDatabase(context.Background(), nom); err == nil {
 		t.Fatal("expected error for missing clusterRef.connectionSecretRef")
@@ -296,7 +296,7 @@ func TestReconcileDatabase_ClusterRef_Missing(t *testing.T) {
 		ClusterRef: &nominatimv1alpha1.DatabaseClusterRef{Name: "gone"},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileDatabase(context.Background(), nom); err == nil {
 		t.Fatal("expected error for missing cluster")
@@ -307,7 +307,7 @@ func TestReconcileDatabase_ClusterRef_Missing(t *testing.T) {
 // operator must pass a caller-supplied storage class through instead of inventing one.
 const testCNPGStorageClass = "fast-ssd"
 
-func ownedClusterNominatim(name string, instances int32) *nominatimv1alpha1.Nominatim {
+func ownedClusterNominatim(name string, instances int32) *nominatimv1alpha1.NominatimInstance {
 	storageClass := testCNPGStorageClass
 	nom := baseNominatim(name)
 	nom.Spec.Database = nominatimv1alpha1.DatabaseSpec{
@@ -338,7 +338,7 @@ type assertT interface {
 	Fatalf(format string, args ...any)
 }
 
-func assertOwnedClusterStatus(t assertT, nom *nominatimv1alpha1.Nominatim, wantName string) {
+func assertOwnedClusterStatus(t assertT, nom *nominatimv1alpha1.NominatimInstance, wantName string) {
 	t.Helper()
 	if nom.Status.Database.Mode != nominatimv1alpha1.DatabaseModeClusterManaged {
 		t.Fatalf("mode=%q", nom.Status.Database.Mode)
@@ -354,7 +354,7 @@ func assertOwnedClusterStatus(t assertT, nom *nominatimv1alpha1.Nominatim, wantN
 	}
 }
 
-func assertOwnedClusterStorageAndOwner(t assertT, got *unstructured.Unstructured, nom *nominatimv1alpha1.Nominatim) {
+func assertOwnedClusterStorageAndOwner(t assertT, got *unstructured.Unstructured, nom *nominatimv1alpha1.NominatimInstance) {
 	t.Helper()
 	inst, found, err := unstructured.NestedInt64(got.Object, "spec", "instances")
 	if err != nil || !found || inst != 2 {
@@ -410,7 +410,7 @@ func assertOwnedClusterBootstrapAndRoles(t assertT, got *unstructured.Unstructur
 	}
 }
 
-func assertOwnedClusterCreate(t assertT, c client.Client, nom *nominatimv1alpha1.Nominatim, wantName string) {
+func assertOwnedClusterCreate(t assertT, c client.Client, nom *nominatimv1alpha1.NominatimInstance, wantName string) {
 	t.Helper()
 	assertOwnedClusterStatus(t, nom, wantName)
 
@@ -423,7 +423,7 @@ func assertOwnedClusterCreate(t assertT, c client.Client, nom *nominatimv1alpha1
 	assertOwnedClusterBootstrapAndRoles(t, got)
 }
 
-func assertOwnedDatabaseCR(t assertT, c client.Client, nom *nominatimv1alpha1.Nominatim, wantName string) {
+func assertOwnedDatabaseCR(t assertT, c client.Client, nom *nominatimv1alpha1.NominatimInstance, wantName string) {
 	t.Helper()
 	dbCR := &unstructured.Unstructured{}
 	dbCR.SetGroupVersionKind(CNPGDatabaseGVK)
@@ -518,7 +518,7 @@ func TestReconcileDatabase_Cluster_NoHardcodedStorageClass(t *testing.T) {
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileDatabase: %v", err)
@@ -550,12 +550,12 @@ func TestMapCNPGClusterToNominatim_OwnerAndClusterRef(t *testing.T) {
 	cluster.SetNamespace("default")
 	cluster.SetOwnerReferences([]metav1.OwnerReference{{
 		APIVersion: nominatimv1alpha1.GroupVersion.String(),
-		Kind:       "Nominatim",
+		Kind:       "NominatimInstance",
 		Name:       "owner-nom",
 		UID:        nomOwned.UID,
 	}})
 
-	reqs := mapCNPGClusterToNominatim(c)(context.Background(), cluster)
+	reqs := mapCNPGClusterToNominatimInstance(c)(context.Background(), cluster)
 	names := map[string]bool{}
 	for _, r := range reqs {
 		names[r.Name] = true
@@ -569,7 +569,7 @@ func TestReconcileDatabase_NoMode(t *testing.T) {
 	scheme := testScheme(t)
 	nom := baseNominatim("nomode")
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	if err := r.reconcileDatabase(context.Background(), nom); err == nil {
 		t.Fatal("expected error when no database mode set")
 	}
@@ -605,7 +605,7 @@ func TestReconcileDatabase_Cluster_DefaultsNoStorage(t *testing.T) {
 		Cluster: &nominatimv1alpha1.DatabaseClusterCreate{},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -629,14 +629,14 @@ func TestReconcileDatabase_Cluster_EmptyStorageErrors(t *testing.T) {
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	if err := r.reconcileDatabase(context.Background(), nom); err == nil {
 		t.Fatal("expected storage error")
 	}
 }
 
 func TestMapCNPGClusterToNominatim_EdgeCases(t *testing.T) {
-	if reqs := mapCNPGClusterToNominatim(nil)(context.Background(), &corev1.Pod{}); len(reqs) != 0 {
+	if reqs := mapCNPGClusterToNominatimInstance(nil)(context.Background(), &corev1.Pod{}); len(reqs) != 0 {
 		t.Fatalf("non-unstructured: %v", reqs)
 	}
 	cluster := &unstructured.Unstructured{}
@@ -645,16 +645,16 @@ func TestMapCNPGClusterToNominatim_EdgeCases(t *testing.T) {
 	cluster.SetNamespace("default")
 	cluster.SetOwnerReferences([]metav1.OwnerReference{{
 		APIVersion: nominatimv1alpha1.GroupVersion.String(),
-		Kind:       "Nominatim",
+		Kind:       "NominatimInstance",
 		Name:       "from-owner",
 		UID:        "uid",
 	}})
-	reqs := mapCNPGClusterToNominatim(nil)(context.Background(), cluster)
+	reqs := mapCNPGClusterToNominatimInstance(nil)(context.Background(), cluster)
 	if len(reqs) != 1 || reqs[0].Name != "from-owner" {
 		t.Fatalf("nil client owner mapping: %v", reqs)
 	}
 
-	// Same Nominatim via ownerRef and clusterRef → dedupe in add().
+	// Same NominatimInstance via ownerRef and clusterRef → dedupe in add().
 	scheme := testScheme(t)
 	nom := baseNominatim("same")
 	nom.Spec.Database = nominatimv1alpha1.DatabaseSpec{
@@ -664,11 +664,11 @@ func TestMapCNPGClusterToNominatim_EdgeCases(t *testing.T) {
 	cluster.SetName("same-pg")
 	cluster.SetOwnerReferences([]metav1.OwnerReference{{
 		APIVersion: nominatimv1alpha1.GroupVersion.String(),
-		Kind:       "Nominatim",
+		Kind:       "NominatimInstance",
 		Name:       "same",
 		UID:        nom.UID,
 	}})
-	reqs = mapCNPGClusterToNominatim(c)(context.Background(), cluster)
+	reqs = mapCNPGClusterToNominatimInstance(c)(context.Background(), cluster)
 	if len(reqs) != 1 {
 		t.Fatalf("expected deduped request, got %v", reqs)
 	}
@@ -725,7 +725,7 @@ func TestReconcile_ErrorPaths(t *testing.T) {
 	}
 	base := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom, secret).Build()
 
-	r := &NominatimReconciler{Client: base, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: base, Scheme: scheme}
 	// NotFound
 	_, err := r.Reconcile(context.Background(), reconcile.Request{
 		NamespacedName: types.NamespacedName{Name: "missing", Namespace: "default"},
@@ -766,14 +766,14 @@ func TestReconcileDelete_NoFinalizerAndUpdateFail(t *testing.T) {
 	nom.Finalizers = nil
 	now := metav1.Now()
 	nom.DeletionTimestamp = &now
-	r := &NominatimReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).Build(), Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).Build(), Scheme: scheme}
 	res, err := r.reconcileDelete(context.Background(), nom)
 	if err != nil || !res.IsZero() {
 		t.Fatalf("no finalizer should be no-op: %v %#v", err, res)
 	}
 
 	nom2 := baseNominatim("delfail2")
-	controllerutil.AddFinalizer(nom2, nominatimv1alpha1.NominatimFinalizer)
+	controllerutil.AddFinalizer(nom2, nominatimv1alpha1.NominatimInstanceFinalizer)
 	nom2.DeletionTimestamp = &now
 	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom2).Build()
 	r.Client = stubClient{Client: base, failUpdate: true}
@@ -801,12 +801,12 @@ func TestReconcileDatabase_Cluster_BadSpecAndBadOwner(t *testing.T) {
 	}}
 	existing.SetGroupVersionKind(CNPGClusterGVK)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, existing).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 	if err := r.reconcileDatabase(context.Background(), nom); err == nil {
 		t.Fatal("expected SetNestedField failure")
 	}
 
-	// Scheme without Nominatim → SetControllerReference fails (cluster create path).
+	// Scheme without NominatimInstance → SetControllerReference fails (cluster create path).
 	emptyScheme := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(emptyScheme)
 	nom2 := baseNominatim("noowner")
@@ -814,7 +814,7 @@ func TestReconcileDatabase_Cluster_BadSpecAndBadOwner(t *testing.T) {
 		Cluster: &nominatimv1alpha1.DatabaseClusterCreate{},
 	}
 	c2 := fake.NewClientBuilder().WithScheme(emptyScheme).Build()
-	r2 := &NominatimReconciler{Client: c2, Scheme: emptyScheme}
+	r2 := &NominatimInstanceReconciler{Client: c2, Scheme: emptyScheme}
 	if err := r2.reconcileDatabase(context.Background(), nom2); err == nil {
 		t.Fatal("expected SetControllerReference failure")
 	}
@@ -828,7 +828,7 @@ func TestMapCNPGClusterToNominatim_ListError(t *testing.T) {
 	cluster.SetGroupVersionKind(CNPGClusterGVK)
 	cluster.SetName("pg")
 	cluster.SetNamespace("default")
-	reqs := mapCNPGClusterToNominatim(c)(context.Background(), cluster)
+	reqs := mapCNPGClusterToNominatimInstance(c)(context.Background(), cluster)
 	if len(reqs) != 0 {
 		t.Fatalf("list error should return owner-only reqs, got %v", reqs)
 	}

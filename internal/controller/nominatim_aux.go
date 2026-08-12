@@ -35,7 +35,7 @@ const (
 	envBoolFalse              = "false"
 )
 
-func effectiveAuxDataEnv(nom *nominatimv1alpha1.Nominatim) []corev1.EnvVar {
+func effectiveAuxDataEnv(nom *nominatimv1alpha1.NominatimInstance) []corev1.EnvVar {
 	if nom == nil || nom.Spec.AuxData == nil {
 		return nil
 	}
@@ -72,7 +72,7 @@ func parseAuxDataReport(raw string) (*nominatimv1alpha1.AuxDataStatus, error) {
 }
 
 // applyAuxDataReport merges observed aux dataset presence into status.
-func applyAuxDataReport(nom *nominatimv1alpha1.Nominatim, report *nominatimv1alpha1.AuxDataStatus) {
+func applyAuxDataReport(nom *nominatimv1alpha1.NominatimInstance, report *nominatimv1alpha1.AuxDataStatus) {
 	if report == nil {
 		return
 	}

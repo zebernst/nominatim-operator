@@ -9,23 +9,23 @@ library chart (v5, Kubernetes ≥ 1.32).
 | Dependency | Why |
 |------------|-----|
 | **Kubernetes ≥ 1.32** | Chart `kubeVersion`; aligns with common v5 |
-| **CloudNativePG (CNPG) CRDs** | Required for full Nominatim features (Postgres clusters owned by Nominatim installs) |
-| **Gateway API CRDs** | Required when exposing Nominatim via Gateway API HTTPRoutes |
+| **CloudNativePG (CNPG) CRDs** | Required for full Nominatim features (Postgres clusters owned by NominatimInstances) |
+| **Gateway API CRDs** | Required when exposing a NominatimInstance via Gateway API HTTPRoutes |
 | **Helm 4** | Chart dependency pulls from the bjw-s Helm repo |
 
-Install CNPG and Gateway API CRDs **before** creating `Nominatim` resources that
+Install CNPG and Gateway API CRDs **before** creating `NominatimInstance` resources that
 reference them. This chart does **not** install those third-party CRDs.
 
 ### NominatimOperation and Flux
 
 `NominatimOperation` resources are **controller-created finite workflows** (Jobs).
 They must **not** be applied as Flux desired-state (GitOps) objects. Manage only
-`Nominatim` CRs via Flux; let the operator create and garbage-collect operations.
+`NominatimInstance` CRs via Flux; let the operator create and garbage-collect operations.
 
 Instance architecture (control vs serving vs data/write planes, volumes, multi-replica
 API): see the repository [README](../../README.md) and [images/README.md](../../images/README.md).
 
-## CRDs (Nominatim / NominatimOperation)
+## CRDs (NominatimInstance / NominatimOperation)
 
 Operator CRDs ship in the Helm-native [`crds/`](./crds/) directory (copied from
 `config/crd/bases`). Helm installs them on first `helm install` only — it does

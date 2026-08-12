@@ -202,11 +202,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.NominatimReconciler{
+	if err = (&controller.NominatimInstanceReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Nominatim")
+		setupLog.Error(err, "unable to create controller", "controller", "NominatimInstance")
 		os.Exit(1)
 	}
 	if err = (&controller.NominatimOperationReconciler{

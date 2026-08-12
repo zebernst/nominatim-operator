@@ -48,7 +48,7 @@ const (
 	reimportTestUIDFresh = "uid-fresh"
 )
 
-func newOwnedCNPGDatabase(nom *nominatimv1alpha1.Nominatim, uid string, applied bool) *unstructured.Unstructured {
+func newOwnedCNPGDatabase(nom *nominatimv1alpha1.NominatimInstance, uid string, applied bool) *unstructured.Unstructured {
 	db := &unstructured.Unstructured{}
 	db.SetGroupVersionKind(CNPGDatabaseGVK)
 	db.SetName(OwnedCNPGDatabaseName(nom))
@@ -64,7 +64,7 @@ func newOwnedCNPGDatabase(nom *nominatimv1alpha1.Nominatim, uid string, applied 
 	return db
 }
 
-func readyOwnedCNPGCluster(nom *nominatimv1alpha1.Nominatim) *unstructured.Unstructured {
+func readyOwnedCNPGCluster(nom *nominatimv1alpha1.NominatimInstance) *unstructured.Unstructured {
 	cluster := newCNPGCluster(OwnedCNPGClusterName(nom))
 	_ = unstructured.SetNestedSlice(cluster.Object, []interface{}{
 		map[string]interface{}{"type": "Ready", "status": "True"},
@@ -72,9 +72,9 @@ func readyOwnedCNPGCluster(nom *nominatimv1alpha1.Nominatim) *unstructured.Unstr
 	return cluster
 }
 
-// reimportParent is a Nominatim that owns its CNPG Cluster, i.e. the only mode in which
+// reimportParent is a NominatimInstance that owns its CNPG Cluster, i.e. the only mode in which
 // Reimport drops and recreates the Database CR.
-func reimportParent(name string) *nominatimv1alpha1.Nominatim {
+func reimportParent(name string) *nominatimv1alpha1.NominatimInstance {
 	parent := baseNominatim(name)
 	instances := int32(1)
 	parent.Spec.Database = nominatimv1alpha1.DatabaseSpec{
@@ -88,7 +88,7 @@ func reimportParent(name string) *nominatimv1alpha1.Nominatim {
 	return parent
 }
 
-func reimportOp(name string, parent *nominatimv1alpha1.Nominatim, annotations map[string]string) *nominatimv1alpha1.NominatimOperation {
+func reimportOp(name string, parent *nominatimv1alpha1.NominatimInstance, annotations map[string]string) *nominatimv1alpha1.NominatimOperation {
 	return &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
@@ -112,7 +112,7 @@ func pendingResetAnnotations(prevUID string) map[string]string {
 	}
 }
 
-func cnpgAppSecret(parent *nominatimv1alpha1.Nominatim) *corev1.Secret {
+func cnpgAppSecret(parent *nominatimv1alpha1.NominatimInstance) *corev1.Secret {
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      parent.Status.Database.ConnectionSecretName,
@@ -122,7 +122,7 @@ func cnpgAppSecret(parent *nominatimv1alpha1.Nominatim) *corev1.Secret {
 	}
 }
 
-func getOwnedCNPGDatabase(t *testing.T, c client.Client, parent *nominatimv1alpha1.Nominatim) *unstructured.Unstructured {
+func getOwnedCNPGDatabase(t *testing.T, c client.Client, parent *nominatimv1alpha1.NominatimInstance) *unstructured.Unstructured {
 	t.Helper()
 	db := &unstructured.Unstructured{}
 	db.SetGroupVersionKind(CNPGDatabaseGVK)
@@ -762,20 +762,20 @@ func TestCNPGOwnedDatabaseApplied(t *testing.T) {
 }
 
 func TestCNPGClusterReadyForJobs(t *testing.T) {
-	appliedDB := func(parent *nominatimv1alpha1.Nominatim) *unstructured.Unstructured {
+	appliedDB := func(parent *nominatimv1alpha1.NominatimInstance) *unstructured.Unstructured {
 		return newOwnedCNPGDatabase(parent, "uid-1", true)
 	}
 
 	cases := []struct {
 		name    string
-		parent  func() *nominatimv1alpha1.Nominatim
-		objects func(parent *nominatimv1alpha1.Nominatim) []client.Object
+		parent  func() *nominatimv1alpha1.NominatimInstance
+		objects func(parent *nominatimv1alpha1.NominatimInstance) []client.Object
 		want    bool
 		wantErr bool
 	}{
 		{
 			name: "degraded skips the wait",
-			parent: func() *nominatimv1alpha1.Nominatim {
+			parent: func() *nominatimv1alpha1.NominatimInstance {
 				parent := reimportParent("ready-degraded")
 				parent.Status.Database.Degraded = true
 				return parent
@@ -784,27 +784,27 @@ func TestCNPGClusterReadyForJobs(t *testing.T) {
 		},
 		{
 			name:   "owned cluster ready and database applied",
-			parent: func() *nominatimv1alpha1.Nominatim { return reimportParent("ready-owned") },
-			objects: func(parent *nominatimv1alpha1.Nominatim) []client.Object {
+			parent: func() *nominatimv1alpha1.NominatimInstance { return reimportParent("ready-owned") },
+			objects: func(parent *nominatimv1alpha1.NominatimInstance) []client.Object {
 				return []client.Object{readyOwnedCNPGCluster(parent), appliedDB(parent)}
 			},
 			want: true,
 		},
 		{
 			name: "owned cluster name falls back to the conventional name",
-			parent: func() *nominatimv1alpha1.Nominatim {
+			parent: func() *nominatimv1alpha1.NominatimInstance {
 				parent := reimportParent("ready-fallback")
 				parent.Status.Database.ClusterName = ""
 				return parent
 			},
-			objects: func(parent *nominatimv1alpha1.Nominatim) []client.Object {
+			objects: func(parent *nominatimv1alpha1.NominatimInstance) []client.Object {
 				return []client.Object{readyOwnedCNPGCluster(parent), appliedDB(parent)}
 			},
 			want: true,
 		},
 		{
 			name: "attached cluster ref without a name waits",
-			parent: func() *nominatimv1alpha1.Nominatim {
+			parent: func() *nominatimv1alpha1.NominatimInstance {
 				parent := baseNominatim("ready-ref")
 				parent.Spec.Database = nominatimv1alpha1.DatabaseSpec{
 					ClusterRef: &nominatimv1alpha1.DatabaseClusterRef{Name: "external"},
@@ -814,17 +814,17 @@ func TestCNPGClusterReadyForJobs(t *testing.T) {
 		},
 		{
 			name:   "no cluster to wait on",
-			parent: func() *nominatimv1alpha1.Nominatim { return baseNominatim("ready-none") },
+			parent: func() *nominatimv1alpha1.NominatimInstance { return baseNominatim("ready-none") },
 			want:   true,
 		},
 		{
 			name:   "missing cluster waits",
-			parent: func() *nominatimv1alpha1.Nominatim { return reimportParent("ready-missing") },
+			parent: func() *nominatimv1alpha1.NominatimInstance { return reimportParent("ready-missing") },
 		},
 		{
 			name:   "cluster without conditions waits",
-			parent: func() *nominatimv1alpha1.Nominatim { return reimportParent("ready-nocond") },
-			objects: func(parent *nominatimv1alpha1.Nominatim) []client.Object {
+			parent: func() *nominatimv1alpha1.NominatimInstance { return reimportParent("ready-nocond") },
+			objects: func(parent *nominatimv1alpha1.NominatimInstance) []client.Object {
 				cluster := readyOwnedCNPGCluster(parent)
 				unstructured.RemoveNestedField(cluster.Object, "status", "conditions")
 				return []client.Object{cluster, appliedDB(parent)}
@@ -832,8 +832,8 @@ func TestCNPGClusterReadyForJobs(t *testing.T) {
 		},
 		{
 			name:   "cluster not ready waits",
-			parent: func() *nominatimv1alpha1.Nominatim { return reimportParent("ready-notready") },
-			objects: func(parent *nominatimv1alpha1.Nominatim) []client.Object {
+			parent: func() *nominatimv1alpha1.NominatimInstance { return reimportParent("ready-notready") },
+			objects: func(parent *nominatimv1alpha1.NominatimInstance) []client.Object {
 				cluster := readyOwnedCNPGCluster(parent)
 				_ = unstructured.SetNestedSlice(cluster.Object, []interface{}{
 					"not-a-condition",
@@ -844,7 +844,7 @@ func TestCNPGClusterReadyForJobs(t *testing.T) {
 		},
 		{
 			name: "attached cluster ready needs no Database CR",
-			parent: func() *nominatimv1alpha1.Nominatim {
+			parent: func() *nominatimv1alpha1.NominatimInstance {
 				parent := baseNominatim("ready-attached")
 				parent.Spec.Database = nominatimv1alpha1.DatabaseSpec{
 					ClusterRef: &nominatimv1alpha1.DatabaseClusterRef{Name: "external"},
@@ -852,7 +852,7 @@ func TestCNPGClusterReadyForJobs(t *testing.T) {
 				parent.Status.Database.ClusterName = "external"
 				return parent
 			},
-			objects: func(parent *nominatimv1alpha1.Nominatim) []client.Object {
+			objects: func(parent *nominatimv1alpha1.NominatimInstance) []client.Object {
 				return []client.Object{newCNPGCluster("external")}
 			},
 			want: true,
@@ -955,7 +955,7 @@ func TestReconcileReimport_RegistersActiveRefBeforeJob(t *testing.T) {
 		t.Fatalf("reconcile: %v", err)
 	}
 
-	got := &nominatimv1alpha1.Nominatim{}
+	got := &nominatimv1alpha1.NominatimInstance{}
 	if err := c.Get(context.Background(), types.NamespacedName{Name: parent.Name, Namespace: parent.Namespace}, got); err != nil {
 		t.Fatalf("get parent: %v", err)
 	}
@@ -1006,7 +1006,7 @@ func TestEnsureReimportDatabaseReset_WaitsForAPIQuiesced(t *testing.T) {
 	}
 }
 
-// The Nominatim reconciler must not CreateOrUpdate the owned Database while a Reimport is
+// The NominatimInstance reconciler must not CreateOrUpdate the owned Database while a Reimport is
 // mid drop/recreate, or it will fight the Operation's Delete under the pre-Reimport UID.
 func TestReconcileOwnedCNPGDatabase_SkipsWhileReimportResetPending(t *testing.T) {
 	scheme := testScheme(t)
@@ -1014,7 +1014,7 @@ func TestReconcileOwnedCNPGDatabase_SkipsWhileReimportResetPending(t *testing.T)
 	op := reimportOp("ri-skip-op", parent, pendingResetAnnotations(reimportTestUIDOld))
 	op.Status.Phase = nominatimv1alpha1.NominatimOperationPhasePending
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(parent, op).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileOwnedCNPGDatabase(context.Background(), parent, OwnedCNPGClusterName(parent)); err != nil {
 		t.Fatalf("reconcileOwnedCNPGDatabase: %v", err)

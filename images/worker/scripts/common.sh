@@ -474,7 +474,7 @@ assert_imported_list_complete() {
 }
 
 # require_bootstrap_ready is a last-resort worker belt. Cluster source of truth for
-# Bootstrap-done is Nominatim status.regions (and/or a Succeeded Bootstrap Operation);
+# Bootstrap-done is NominatimInstance status.regions (and/or a Succeeded Bootstrap Operation);
 # the operator refuses AddRegions/Update/CatchUp Jobs until that is true in regions mode.
 # Locally we prefer the import-finished bookmark, heal it when the schema is ready, and
 # only die when both the marker and placex/database_version are missing.

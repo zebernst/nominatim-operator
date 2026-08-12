@@ -31,7 +31,7 @@ spec:
       storage: 1Gi
 ---
 apiVersion: nominatim.zebernst.dev/v1alpha1
-kind: Nominatim
+kind: NominatimInstance
 metadata:
   name: smoke
   namespace: nominatim-e2e

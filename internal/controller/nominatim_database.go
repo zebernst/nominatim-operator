@@ -48,13 +48,13 @@ var CNPGDatabaseGVK = schema.GroupVersionKind{
 }
 
 // OwnedCNPGClusterName is the default name for a Cluster created from spec.database.cluster.
-func OwnedCNPGClusterName(nom *nominatimv1alpha1.Nominatim) string {
+func OwnedCNPGClusterName(nom *nominatimv1alpha1.NominatimInstance) string {
 	return nom.Name + "-pg"
 }
 
 // OwnedCNPGDatabaseName is the owned Database CR that declares Nominatim extensions on the
 // application database created by Cluster bootstrap.initdb.
-func OwnedCNPGDatabaseName(nom *nominatimv1alpha1.Nominatim) string {
+func OwnedCNPGDatabaseName(nom *nominatimv1alpha1.NominatimInstance) string {
 	return OwnedCNPGClusterName(nom) + "-nominatim"
 }
 
@@ -88,7 +88,7 @@ var cnpgNominatimExtensions = []string{
 }
 
 // reconcileDatabase branches on exactly one of cluster / clusterRef / connectionSecretRef.
-func (r *NominatimReconciler) reconcileDatabase(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
+func (r *NominatimInstanceReconciler) reconcileDatabase(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) error {
 	db := nom.Spec.Database
 	switch {
 	case db.ConnectionSecretRef != nil:
@@ -102,7 +102,7 @@ func (r *NominatimReconciler) reconcileDatabase(ctx context.Context, nom *nomina
 	}
 }
 
-func (r *NominatimReconciler) reconcileDatabaseConnectionSecret(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
+func (r *NominatimInstanceReconciler) reconcileDatabaseConnectionSecret(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) error {
 	name := nom.Spec.Database.ConnectionSecretRef.Name
 	secret := &corev1.Secret{}
 	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: nom.Namespace}, secret); err != nil {
@@ -116,7 +116,7 @@ func (r *NominatimReconciler) reconcileDatabaseConnectionSecret(ctx context.Cont
 	return nil
 }
 
-func (r *NominatimReconciler) reconcileDatabaseClusterRef(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
+func (r *NominatimInstanceReconciler) reconcileDatabaseClusterRef(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) error {
 	ref := nom.Spec.Database.ClusterRef
 	clusterName := ref.Name
 	cluster, err := r.getCNPGCluster(ctx, nom.Namespace, clusterName)
@@ -142,7 +142,7 @@ func (r *NominatimReconciler) reconcileDatabaseClusterRef(ctx context.Context, n
 	return nil
 }
 
-func (r *NominatimReconciler) reconcileDatabaseClusterCreate(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
+func (r *NominatimInstanceReconciler) reconcileDatabaseClusterCreate(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) error {
 	create := nom.Spec.Database.Cluster
 	clusterName := OwnedCNPGClusterName(nom)
 
@@ -293,7 +293,7 @@ func ensureCNPGManagedWebRole(cluster *unstructured.Unstructured) error {
 // extensions (hstore/postgis/…) on the initdb application database.
 // While a Reimport Operation is mid drop/recreate (reset=pending), skip CreateOrUpdate so
 // we do not fight the Operation's Delete or recreate under the pre-Reimport UID.
-func (r *NominatimReconciler) reconcileOwnedCNPGDatabase(ctx context.Context, nom *nominatimv1alpha1.Nominatim, clusterName string) error {
+func (r *NominatimInstanceReconciler) reconcileOwnedCNPGDatabase(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance, clusterName string) error {
 	pending, err := hasPendingReimportDatabaseReset(ctx, r.Client, nom)
 	if err != nil {
 		return err
@@ -306,7 +306,7 @@ func (r *NominatimReconciler) reconcileOwnedCNPGDatabase(ctx context.Context, no
 
 // hasPendingReimportDatabaseReset is true when an active Reimport Operation against nom
 // has recorded the drop/recreate handshake as pending (not yet done).
-func hasPendingReimportDatabaseReset(ctx context.Context, c client.Client, nom *nominatimv1alpha1.Nominatim) (bool, error) {
+func hasPendingReimportDatabaseReset(ctx context.Context, c client.Client, nom *nominatimv1alpha1.NominatimInstance) (bool, error) {
 	list := &nominatimv1alpha1.NominatimOperationList{}
 	if err := c.List(ctx, list, client.InNamespace(nom.Namespace)); err != nil {
 		return false, err
@@ -330,8 +330,8 @@ func hasPendingReimportDatabaseReset(ctx context.Context, c client.Client, nom *
 }
 
 // ensureOwnedCNPGDatabase CreateOrUpdates the owned CNPG Database CR for nom.
-// Used by the Nominatim reconciler and by Reimport database reset.
-func ensureOwnedCNPGDatabase(ctx context.Context, c client.Client, scheme *runtime.Scheme, nom *nominatimv1alpha1.Nominatim, clusterName string) error {
+// Used by the NominatimInstance reconciler and by Reimport database reset.
+func ensureOwnedCNPGDatabase(ctx context.Context, c client.Client, scheme *runtime.Scheme, nom *nominatimv1alpha1.NominatimInstance, clusterName string) error {
 	dbName := OwnedCNPGDatabaseName(nom)
 
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
@@ -385,7 +385,7 @@ func applyOwnedCNPGDatabaseSpec(db *unstructured.Unstructured, clusterName strin
 	return nil
 }
 
-// cnpgStorageFromVolumeClaimTemplate maps Nominatim storage passthrough into CNPG storage
+// cnpgStorageFromVolumeClaimTemplate maps NominatimInstance storage passthrough into CNPG storage
 // without inventing storageClass names.
 func cnpgStorageFromVolumeClaimTemplate(vct *nominatimv1alpha1.VolumeClaimTemplate) (map[string]interface{}, error) {
 	out := map[string]interface{}{}
@@ -401,11 +401,11 @@ func cnpgStorageFromVolumeClaimTemplate(vct *nominatimv1alpha1.VolumeClaimTempla
 	return out, nil
 }
 
-func (r *NominatimReconciler) getCNPGCluster(ctx context.Context, namespace, name string) (*unstructured.Unstructured, error) {
+func (r *NominatimInstanceReconciler) getCNPGCluster(ctx context.Context, namespace, name string) (*unstructured.Unstructured, error) {
 	return getCNPGCluster(ctx, r.Client, namespace, name)
 }
 
-// getCNPGCluster loads a CNPG Cluster for attach/create (Nominatim) and Operation side-effects.
+// getCNPGCluster loads a CNPG Cluster for attach/create (NominatimInstance) and Operation side-effects.
 func getCNPGCluster(ctx context.Context, c client.Client, namespace, name string) (*unstructured.Unstructured, error) {
 	cluster := &unstructured.Unstructured{}
 	cluster.SetGroupVersionKind(CNPGClusterGVK)

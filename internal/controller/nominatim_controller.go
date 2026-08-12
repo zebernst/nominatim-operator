@@ -41,27 +41,27 @@ import (
 	nominatimv1alpha1 "github.com/zebernst/nominatim-operator/api/v1alpha1"
 )
 
-// NominatimReconciler reconciles a Nominatim object
-type NominatimReconciler struct {
+// NominatimInstanceReconciler reconciles a NominatimInstance object
+type NominatimInstanceReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 	// ControllerName overrides the controller-runtime name (tests only).
 	ControllerName string
 }
 
-// +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatims,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatims/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatims/finalizers,verbs=update
+// +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatiminstances,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatiminstances/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatiminstances/finalizers,verbs=update
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatimoperations,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=databases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 // Reconcile runs database attach, serving-plane workloads, and status conditions.
-func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *NominatimInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
-	nom := &nominatimv1alpha1.Nominatim{}
+	nom := &nominatimv1alpha1.NominatimInstance{}
 	if err := r.Get(ctx, req.NamespacedName, nom); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -70,8 +70,8 @@ func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return r.reconcileDelete(ctx, nom)
 	}
 
-	if !controllerutil.ContainsFinalizer(nom, nominatimv1alpha1.NominatimFinalizer) {
-		controllerutil.AddFinalizer(nom, nominatimv1alpha1.NominatimFinalizer)
+	if !controllerutil.ContainsFinalizer(nom, nominatimv1alpha1.NominatimInstanceFinalizer) {
+		controllerutil.AddFinalizer(nom, nominatimv1alpha1.NominatimInstanceFinalizer)
 		if err := r.Update(ctx, nom); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -79,7 +79,7 @@ func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	if err := r.reconcileDatabase(ctx, nom); err != nil {
-		log.Error(err, "failed to reconcile Nominatim database")
+		log.Error(err, "failed to reconcile NominatimInstance database")
 		return ctrl.Result{}, err
 	}
 
@@ -88,7 +88,7 @@ func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Operation controller can race and build a worker Job with no NOMINATIM_DATABASE_DSN.
 	dbStatus := nom.Status.Database
 	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		latest := &nominatimv1alpha1.Nominatim{}
+		latest := &nominatimv1alpha1.NominatimInstance{}
 		if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
 			return err
 		}
@@ -102,7 +102,7 @@ func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		nom.SetResourceVersion(latest.GetResourceVersion())
 		return nil
 	}); err != nil {
-		log.Error(err, "failed to persist Nominatim database status")
+		log.Error(err, "failed to persist NominatimInstance database status")
 		return ctrl.Result{}, err
 	}
 
@@ -116,55 +116,55 @@ func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Ensure Bootstrap before serving workloads so status.regions (observed above)
 	// can unlock API/UI creation in the same reconcile pass.
 	if err := r.ensureBootstrapOperation(ctx, nom, ops); err != nil {
-		log.Error(err, "failed to reconcile Nominatim bootstrap")
+		log.Error(err, "failed to reconcile NominatimInstance bootstrap")
 		return ctrl.Result{}, err
 	}
 
 	if err := r.reconcileWorkloads(ctx, nom); err != nil {
-		log.Error(err, "failed to reconcile Nominatim workloads")
+		log.Error(err, "failed to reconcile NominatimInstance workloads")
 		return ctrl.Result{}, err
 	}
 
 	if err := r.reconcileRegionDrift(ctx, nom, ops); err != nil {
-		log.Error(err, "failed to reconcile Nominatim region drift")
+		log.Error(err, "failed to reconcile NominatimInstance region drift")
 		return ctrl.Result{}, err
 	}
 
 	if err := r.reconcileSequenceObservation(ctx, nom, ops); err != nil {
-		log.Error(err, "failed to reconcile Nominatim sequence observation")
+		log.Error(err, "failed to reconcile NominatimInstance sequence observation")
 		return ctrl.Result{}, err
 	}
 
 	updateResult, err := r.reconcileUpdates(ctx, nom, ops)
 	if err != nil {
-		log.Error(err, "failed to reconcile Nominatim scheduled updates")
+		log.Error(err, "failed to reconcile NominatimInstance scheduled updates")
 		return ctrl.Result{}, err
 	}
 
 	if err := r.syncStatus(ctx, nom); err != nil {
-		log.Error(err, "failed to update Nominatim status")
+		log.Error(err, "failed to update NominatimInstance status")
 		return ctrl.Result{}, err
 	}
 
 	return updateResult, nil
 }
 
-func (r *NominatimReconciler) reconcileDelete(ctx context.Context, nom *nominatimv1alpha1.Nominatim) (ctrl.Result, error) {
-	if !controllerutil.ContainsFinalizer(nom, nominatimv1alpha1.NominatimFinalizer) {
+func (r *NominatimInstanceReconciler) reconcileDelete(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(nom, nominatimv1alpha1.NominatimInstanceFinalizer) {
 		return ctrl.Result{}, nil
 	}
 	// Stub: block deletion while active operations are referenced; later tasks drain Jobs.
 	if len(nom.Status.ActiveOperationRefs) > 0 {
 		return ctrl.Result{}, fmt.Errorf("cannot remove finalizer while %d active operation(s) remain", len(nom.Status.ActiveOperationRefs))
 	}
-	controllerutil.RemoveFinalizer(nom, nominatimv1alpha1.NominatimFinalizer)
+	controllerutil.RemoveFinalizer(nom, nominatimv1alpha1.NominatimInstanceFinalizer)
 	if err := r.Update(ctx, nom); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
 }
 
-func (r *NominatimReconciler) syncStatus(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
+func (r *NominatimInstanceReconciler) syncStatus(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) error {
 	desired := append([]string(nil), nom.Spec.Regions...)
 	observed := make([]string, 0, len(nom.Status.Regions))
 	for _, rs := range nom.Status.Regions {
@@ -276,8 +276,8 @@ func difference(a, b []string) []string {
 	return out
 }
 
-// mapOperationToNominatim enqueues the parent Nominatim named by nominatimRef.
-func mapOperationToNominatim(_ context.Context, obj client.Object) []reconcile.Request {
+// mapOperationToNominatimInstance enqueues the parent NominatimInstance named by nominatimRef.
+func mapOperationToNominatimInstance(_ context.Context, obj client.Object) []reconcile.Request {
 	op, ok := obj.(*nominatimv1alpha1.NominatimOperation)
 	if !ok || op.Spec.NominatimRef.Name == "" {
 		return nil
@@ -290,8 +290,8 @@ func mapOperationToNominatim(_ context.Context, obj client.Object) []reconcile.R
 	}}
 }
 
-// mapCNPGClusterToNominatim enqueues owning Nominatim resources and same-namespace clusterRef users.
-func mapCNPGClusterToNominatim(c client.Client) handler.MapFunc {
+// mapCNPGClusterToNominatimInstance enqueues owning NominatimInstance resources and same-namespace clusterRef users.
+func mapCNPGClusterToNominatimInstance(c client.Client) handler.MapFunc {
 	return func(ctx context.Context, obj client.Object) []reconcile.Request {
 		u, ok := obj.(*unstructured.Unstructured)
 		if !ok {
@@ -307,14 +307,14 @@ func mapCNPGClusterToNominatim(c client.Client) handler.MapFunc {
 			reqs = append(reqs, reconcile.Request{NamespacedName: nn})
 		}
 		for _, ref := range u.GetOwnerReferences() {
-			if ref.Kind == "Nominatim" && ref.APIVersion == nominatimv1alpha1.GroupVersion.String() {
+			if ref.Kind == "NominatimInstance" && ref.APIVersion == nominatimv1alpha1.GroupVersion.String() {
 				add(types.NamespacedName{Name: ref.Name, Namespace: u.GetNamespace()})
 			}
 		}
 		if c == nil {
 			return reqs
 		}
-		list := &nominatimv1alpha1.NominatimList{}
+		list := &nominatimv1alpha1.NominatimInstanceList{}
 		if err := c.List(ctx, list, client.InNamespace(u.GetNamespace())); err != nil {
 			return reqs
 		}
@@ -331,17 +331,17 @@ func mapCNPGClusterToNominatim(c client.Client) handler.MapFunc {
 // SetupWithManager sets up the controller with the Manager.
 // Optional GVKs (Gateway API HTTPRoute, CNPG Cluster) are registered only when their
 // CRDs exist so the manager can start on clusters that omit those APIs (e.g. CI kind smoke).
-func (r *NominatimReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *NominatimInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return r.setupWithManager(mgr, mgr.GetRESTMapper())
 }
 
-func (r *NominatimReconciler) setupWithManager(mgr ctrl.Manager, mapper meta.RESTMapper) error {
-	name := "nominatim"
+func (r *NominatimInstanceReconciler) setupWithManager(mgr ctrl.Manager, mapper meta.RESTMapper) error {
+	name := "nominatiminstance"
 	if r.ControllerName != "" {
 		name = r.ControllerName
 	}
 	b := ctrl.NewControllerManagedBy(mgr).
-		For(&nominatimv1alpha1.Nominatim{}).
+		For(&nominatimv1alpha1.NominatimInstance{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.PersistentVolumeClaim{}).
@@ -349,7 +349,7 @@ func (r *NominatimReconciler) setupWithManager(mgr ctrl.Manager, mapper meta.RES
 		Owns(&corev1.ConfigMap{}).
 		Watches(
 			&nominatimv1alpha1.NominatimOperation{},
-			handler.EnqueueRequestsFromMapFunc(mapOperationToNominatim),
+			handler.EnqueueRequestsFromMapFunc(mapOperationToNominatimInstance),
 		).
 		Named(name)
 
@@ -368,7 +368,7 @@ func (r *NominatimReconciler) setupWithManager(mgr ctrl.Manager, mapper meta.RES
 		cnpgCluster.SetGroupVersionKind(CNPGClusterGVK)
 		b = b.Watches(
 			cnpgCluster,
-			handler.EnqueueRequestsFromMapFunc(mapCNPGClusterToNominatim(r.Client)),
+			handler.EnqueueRequestsFromMapFunc(mapCNPGClusterToNominatimInstance(r.Client)),
 		)
 	}
 
