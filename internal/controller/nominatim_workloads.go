@@ -464,23 +464,16 @@ func (r *NominatimInstanceReconciler) reconcileAPI(ctx context.Context, nom *nom
 	return nil
 }
 
-// reconcileUI reconciles the optional UI Deployment, Service, and HTTPRoute. It is a
-// no-op when spec.ui is unset. Like the API, UI objects are not created until
-// Bootstrap has populated status.regions when regions are desired.
+// reconcileUI reconciles the optional UI Deployment, Service, and HTTPRoute.
+// Omit spec.ui or set ui.enabled=false for API/DB-only (owned UI objects are deleted).
+// Like the API, UI objects are not created until Bootstrap has populated status.regions
+// when regions are desired.
 func (r *NominatimInstanceReconciler) reconcileUI(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) error {
-	uiSpec := nom.Spec.UI
-	if uiSpec == nil {
-		// Still clean up a stray UI if Bootstrap is in progress and UI was removed from spec.
-		if !servingWorkloadsAllowed(nom) {
-			return r.deleteServingComponent(ctx, nom, UIName(nom), ComponentUI)
-		}
-		return nil
-	}
-
-	if !servingWorkloadsAllowed(nom) {
+	if !uiServingDesired(nom) || !servingWorkloadsAllowed(nom) {
 		return r.deleteServingComponent(ctx, nom, UIName(nom), ComponentUI)
 	}
 
+	uiSpec := nom.Spec.UI
 	replicas := int32(1)
 	if uiSpec.Replicas != nil {
 		replicas = *uiSpec.Replicas
@@ -542,6 +535,19 @@ func (r *NominatimInstanceReconciler) reconcileUI(ctx context.Context, nom *nomi
 	}
 
 	return nil
+}
+
+// uiServingDesired reports whether the NominatimInstance should run UI workloads.
+// spec.ui omitted or enabled=false → API/DB-only; enabled unset defaults to true.
+func uiServingDesired(nom *nominatimv1alpha1.NominatimInstance) bool {
+	ui := nom.Spec.UI
+	if ui == nil {
+		return false
+	}
+	if ui.Enabled != nil {
+		return *ui.Enabled
+	}
+	return true
 }
 
 // deleteServingComponent removes an owned API/UI Deployment, Service, and HTTPRoute

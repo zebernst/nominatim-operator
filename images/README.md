@@ -63,6 +63,8 @@ CI (`.github/workflows/release.yaml`) builds and pushes all four to GHCR on push
 
 The UI image is static HTML/JS from upstream. At container start, `images/ui/entrypoint.sh` writes `theme/config.theme.js` from `NOMINATIM_API_ENDPOINT` (browser-reachable Nominatim API base URL; trailing slash added). When unset, the endpoint defaults to `/` (same-origin reverse proxies). The operator sets this automatically from the first `spec.api.route.hostnames` entry when present (`https://<hostname>/`); override via `spec.ui.podSpec` env if needed.
 
+Omit `spec.ui`, or set `spec.ui.enabled: false`, for API- and database-only serving — the operator deletes any owned UI Deployment/Service/HTTPRoute. `enabled` defaults to `true` when the `ui` block is present.
+
 ## External Postgres
 
 API and worker **do not** run PostgreSQL. They expect an external database (typically CNPG) via:

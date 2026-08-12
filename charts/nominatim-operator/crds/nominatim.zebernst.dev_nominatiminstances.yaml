@@ -1265,8 +1265,16 @@ spec:
                     type: string
                 type: object
               ui:
-                description: UI configures an optional UI workload.
+                description: UI configures an optional UI workload. Omit or set ui.enabled=false
+                  for API/DB-only.
                 properties:
+                  enabled:
+                    default: true
+                    description: |-
+                      Enabled turns on the UI Deployment, Service, and optional HTTPRoute.
+                      Defaults to true when spec.ui is set. Set to false to keep API/DB-only while
+                      retaining UI image/route config in the CR (operator deletes any owned UI objects).
+                    type: boolean
                   image:
                     description: |-
                       Image for the UI container. Defaults to ghcr.io/zebernst/nominatim-ui:latest.

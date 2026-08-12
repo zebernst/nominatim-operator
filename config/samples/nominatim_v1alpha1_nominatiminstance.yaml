@@ -58,6 +58,14 @@ spec:
     # podSpec:
     #   nodeSelector:
     #     disktype: ssd
+  # Optional debug UI (packages osm-search/nominatim-ui). Omit or set enabled: false for API/DB-only.
+  # ui:
+  #   enabled: true
+  #   route:
+  #     parentRefs:
+  #       - name: my-gateway
+  #     hostnames:
+  #       - nominatim-ui.example.com
   # worker:
   #   image:
   #     repository: ghcr.io/zebernst/nominatim-worker
