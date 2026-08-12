@@ -170,6 +170,47 @@ func TestReconcileSequenceObservation_CreatesProbeAndAppliesConfigMap(t *testing
 	}
 }
 
+func TestEnsureSequenceProbes_DoesNotApplyReport(t *testing.T) {
+	// Ensure creates probe RBAC/Job/ConfigMap. Observation of report.json into
+	// status.regions[].sequenceState is applySequenceReportConfigMap only.
+	scheme := testScheme(t)
+	ctx := context.Background()
+	nom := nominatimWithConnectionSecret("seq-ensure-only")
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: regionPhaseImported}}
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "seq-ensure-only-update", Namespace: nom.Namespace},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationUpdate,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+		},
+		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
+	}
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: sequenceReportConfigMapName(nom), Namespace: nom.Namespace},
+		Data:       map[string]string{sequenceReportCMKey: `{"europe/monaco":"9@now"}`},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, op).WithObjects(nom, op, cm).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+
+	if err := r.ensureSequenceProbes(ctx, nom, []nominatimv1alpha1.NominatimOperation{*op}); err != nil {
+		t.Fatalf("ensureSequenceProbes: %v", err)
+	}
+	if nom.Status.Regions[0].SequenceState != "" {
+		t.Fatalf("ensure must not write SequenceState, got %q", nom.Status.Regions[0].SequenceState)
+	}
+	job := &batchv1.Job{}
+	if err := c.Get(ctx, types.NamespacedName{Name: sequenceProbeJobName(op), Namespace: nom.Namespace}, job); err != nil {
+		t.Fatalf("expected probe Job: %v", err)
+	}
+
+	if err := r.applySequenceReportConfigMap(ctx, nom); err != nil {
+		t.Fatalf("applySequenceReportConfigMap: %v", err)
+	}
+	if nom.Status.Regions[0].SequenceState != "9@now" {
+		t.Fatalf("observe SequenceState=%q want 9@now", nom.Status.Regions[0].SequenceState)
+	}
+}
+
 func TestBuildSequenceProbeJob_UsesWorkerImage(t *testing.T) {
 	scheme := testScheme(t)
 	nom := baseNominatim("img")
@@ -239,7 +280,7 @@ func TestReconcileSequenceObservation_SkipsAlreadyObserved(t *testing.T) {
 	}
 }
 
-func TestObserveSequenceForOperation_FailedJobMarksObserved(t *testing.T) {
+func TestEnsureSequenceProbeJob_FailedJobMarksObserved(t *testing.T) {
 	scheme := testScheme(t)
 	ctx := context.Background()
 	nom := nominatimWithConnectionSecret("fail-probe")
@@ -261,7 +302,7 @@ func TestObserveSequenceForOperation_FailedJobMarksObserved(t *testing.T) {
 	if err := c.Create(ctx, job); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.observeSequenceForOperation(ctx, nom, op); err != nil {
+	if err := r.ensureSequenceProbeJob(ctx, nom, op); err != nil {
 		t.Fatal(err)
 	}
 	gotOp := &nominatimv1alpha1.NominatimOperation{}
@@ -373,7 +414,7 @@ func TestEnsureSequenceProbeRBAC_UpdatesExisting(t *testing.T) {
 	}
 }
 
-func TestObserveSequenceForOperation_InProgressNoMark(t *testing.T) {
+func TestEnsureSequenceProbeJob_InProgressNoMark(t *testing.T) {
 	scheme := testScheme(t)
 	ctx := context.Background()
 	nom := nominatimWithConnectionSecret("run-probe")
@@ -394,7 +435,7 @@ func TestObserveSequenceForOperation_InProgressNoMark(t *testing.T) {
 	if err := c.Create(ctx, job); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.observeSequenceForOperation(ctx, nom, op); err != nil {
+	if err := r.ensureSequenceProbeJob(ctx, nom, op); err != nil {
 		t.Fatal(err)
 	}
 	gotOp := &nominatimv1alpha1.NominatimOperation{}

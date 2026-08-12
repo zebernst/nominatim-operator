@@ -49,9 +49,9 @@ const (
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 
-// reconcileSequenceObservation runs operator-owned probe Jobs after Succeeded write
-// Operations so status.regions[].sequenceState reflects Geofabrik sequence.state on
-// the project PVC — without giving Nominatim worker scripts Kubernetes API access.
+// reconcileSequenceObservation ensures probe Jobs after Succeeded write Operations,
+// then copies report.json into status.regions[].sequenceState. Workers never call
+// the Kubernetes API.
 func (r *NominatimReconciler) reconcileSequenceObservation(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
 	if len(nom.Status.Regions) == 0 {
 		return nil
@@ -60,7 +60,15 @@ func (r *NominatimReconciler) reconcileSequenceObservation(ctx context.Context, 
 	if err != nil {
 		return fmt.Errorf("list operations for sequence observation: %w", err)
 	}
+	if err := r.ensureSequenceProbes(ctx, nom, ops); err != nil {
+		return err
+	}
+	return r.applySequenceReportConfigMap(ctx, nom)
+}
 
+// ensureSequenceProbes creates probe RBAC, the report ConfigMap, and per-Operation
+// Jobs. It does not write status.regions (that is applySequenceReportConfigMap).
+func (r *NominatimReconciler) ensureSequenceProbes(ctx context.Context, nom *nominatimv1alpha1.Nominatim, ops []nominatimv1alpha1.NominatimOperation) error {
 	if err := r.ensureSequenceProbeRBAC(ctx, nom); err != nil {
 		return err
 	}
@@ -76,12 +84,11 @@ func (r *NominatimReconciler) reconcileSequenceObservation(ctx context.Context, 
 		if op.Annotations[annotationSequenceObserved] == annotationValueTrue {
 			continue
 		}
-		if err := r.observeSequenceForOperation(ctx, nom, op); err != nil {
+		if err := r.ensureSequenceProbeJob(ctx, nom, op); err != nil {
 			return err
 		}
 	}
-
-	return r.applySequenceReportConfigMap(ctx, nom)
+	return nil
 }
 
 func sequenceProbeOperation(op *nominatimv1alpha1.NominatimOperation) bool {
@@ -222,7 +229,7 @@ func (r *NominatimReconciler) ensureSequenceReportConfigMap(ctx context.Context,
 	return nil
 }
 
-func (r *NominatimReconciler) observeSequenceForOperation(
+func (r *NominatimReconciler) ensureSequenceProbeJob(
 	ctx context.Context,
 	nom *nominatimv1alpha1.Nominatim,
 	op *nominatimv1alpha1.NominatimOperation,
