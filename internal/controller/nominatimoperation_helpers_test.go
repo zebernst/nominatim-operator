@@ -256,6 +256,35 @@ func TestBuildOperationJob(t *testing.T) {
 	g.Expect(envValue(job.Spec.Template.Spec.Containers[0].Env, "NOMINATIM_REGIONS")).To(Equal("africa/morocco"))
 }
 
+func TestBuildOperationJob_AuxDataEnv(t *testing.T) {
+	g := NewWithT(t)
+	wiki := true
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "boot-1", Namespace: "ns"},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
+			Regions:      []string{"europe/monaco"},
+		},
+	}
+	parent := &nominatimv1alpha1.Nominatim{
+		ObjectMeta: metav1.ObjectMeta{Name: "mynom", Namespace: "ns"},
+		Spec: nominatimv1alpha1.NominatimSpec{
+			Project: nominatimv1alpha1.ProjectSpec{
+				Volume: nominatimv1alpha1.VolumeSource{ClaimName: "project-pvc"},
+			},
+			AuxData: &nominatimv1alpha1.AuxDataSpec{
+				WikimediaImportance: &wiki,
+			},
+		},
+	}
+	job := mustBuildOperationJob(t, op, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
+	env := job.Spec.Template.Spec.Containers[0].Env
+	g.Expect(envValue(env, envAuxWikimediaImportance)).To(Equal("true"))
+	g.Expect(envValue(env, envAuxSecondaryImportance)).To(Equal("false"))
+	g.Expect(envValue(env, envAuxUSPostcodes)).To(Equal("false"))
+}
+
 func TestBuildOperationJob_ReimportSetsConfirmEnv(t *testing.T) {
 	g := NewWithT(t)
 	op := &nominatimv1alpha1.NominatimOperation{

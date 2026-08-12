@@ -298,6 +298,20 @@ func TestApplySequenceReportConfigMap_EmptyAndMissing(t *testing.T) {
 	if err := r.applySequenceReportConfigMap(ctx, nom); err == nil {
 		t.Fatal("expected parse error")
 	}
+	auxCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: sequenceReportConfigMapName(nom), Namespace: nom.Namespace},
+		Data: map[string]string{
+			sequenceAuxReportCMKey: `{"wikimediaImportance":true,"usPostcodes":true}`,
+		},
+	}
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}}
+	r = &NominatimReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, auxCM).Build()}
+	if err := r.applySequenceReportConfigMap(ctx, nom); err != nil {
+		t.Fatal(err)
+	}
+	if nom.Status.AuxData == nil || !nom.Status.AuxData.WikimediaImportance || !nom.Status.AuxData.USPostcodes {
+		t.Fatalf("aux status not applied: %+v", nom.Status.AuxData)
+	}
 }
 
 func TestApplySequenceReportMap_SkipsUnchangedAndUsesObservedAt(t *testing.T) {

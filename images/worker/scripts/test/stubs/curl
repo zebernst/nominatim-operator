@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Minimal curl stub for bats: writes a marker file to -o path.
+# shellcheck shell=bash
+set -euo pipefail
+
+out=""
+url=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o)
+      out="$2"
+      shift 2
+      ;;
+    -*)
+      shift
+      ;;
+    *)
+      url="$1"
+      shift
+      ;;
+  esac
+done
+
+if [ -z "${out}" ]; then
+  echo "curl-stub: missing -o" >&2
+  exit 1
+fi
+mkdir -p "$(dirname "${out}")"
+# Encode the URL basename so tests can assert which dataset was requested.
+base="$(basename "${url%%\?*}")"
+printf 'stub-aux:%s\n' "${base}" > "${out}"

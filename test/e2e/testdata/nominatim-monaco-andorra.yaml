@@ -39,6 +39,10 @@ spec:
     - europe/monaco
     - europe/andorra
   regionChangePolicy: AddData
+  # Small aux download (~400KiB) so Bootstrap + sequence probe exercise status.auxData
+  # without pulling the ~300MiB Wikipedia importance dump.
+  auxData:
+    usPostcodes: true
   project:
     volume:
       claimName: nominatim-project

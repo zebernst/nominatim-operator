@@ -17,6 +17,11 @@ spec:
   regions:
     - north-america/us
   regionChangePolicy: AddData
+  # Optional Wikipedia importance + external postcode aux downloads (Bootstrap staging).
+  # auxData:
+  #   wikimediaImportance: true
+  #   secondaryImportance: true
+  #   usPostcodes: true
   # Typed Nominatim settings (preferred over NOMINATIM_* in podSpec).
   # ImportStyle/Tokenizer seal after Bootstrap; change requires Reimport.
   # nominatim:

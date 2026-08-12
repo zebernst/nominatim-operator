@@ -358,14 +358,20 @@ func (r *NominatimReconciler) applySequenceReportConfigMap(ctx context.Context, 
 		return fmt.Errorf("get sequence report ConfigMap: %w", err)
 	}
 	raw := cm.Data[sequenceReportCMKey]
-	if strings.TrimSpace(raw) == "" {
-		return nil
+	if strings.TrimSpace(raw) != "" {
+		report, err := parseSequenceReport(raw)
+		if err != nil {
+			return fmt.Errorf("parse sequence report ConfigMap: %w", err)
+		}
+		applySequenceReportMap(nom, report, nil)
 	}
-	report, err := parseSequenceReport(raw)
-	if err != nil {
-		return fmt.Errorf("parse sequence report ConfigMap: %w", err)
+	if auxRaw := cm.Data[sequenceAuxReportCMKey]; strings.TrimSpace(auxRaw) != "" {
+		auxReport, err := parseAuxDataReport(auxRaw)
+		if err != nil {
+			return fmt.Errorf("parse aux data report ConfigMap: %w", err)
+		}
+		applyAuxDataReport(nom, auxReport)
 	}
-	applySequenceReportMap(nom, report, nil)
 	return nil
 }
 

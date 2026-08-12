@@ -17,12 +17,28 @@ prepare_worker
 require_bootstrap_ready
 
 # Default: postcodes, word-counts, functions, importance (not wiki-data / secondary-
-# importance — those need staged aux files from a separate import path).
+# importance — those need staged aux files; appended below when present).
 DEFAULT_TASKS="--postcodes --word-counts --functions --importance"
 read -r -a TASKS <<< "${NOMINATIM_REFRESH_TASKS:-${DEFAULT_TASKS}}"
 
 if [ "${#TASKS[@]}" -eq 0 ]; then
   die "NOMINATIM_REFRESH_TASKS is empty; pass at least one nominatim refresh flag"
+fi
+
+# Backfill wiki/secondary importance when aux files are on the project volume.
+task_contains() {
+  local needle="$1"
+  local t
+  for t in "${TASKS[@]}"; do
+    [ "${t}" = "${needle}" ] && return 0
+  done
+  return 1
+}
+if [ -f "${PROJECT_DIR}/wikimedia-importance.csv.gz" ] && [ -s "${PROJECT_DIR}/wikimedia-importance.csv.gz" ]; then
+  task_contains "--wiki-data" || TASKS+=(--wiki-data)
+fi
+if [ -f "${PROJECT_DIR}/secondary_importance.sql.gz" ] && [ -s "${PROJECT_DIR}/secondary_importance.sql.gz" ]; then
+  task_contains "--secondary-importance" || TASKS+=(--secondary-importance)
 fi
 
 log "Running nominatim refresh ${TASKS[*]}"

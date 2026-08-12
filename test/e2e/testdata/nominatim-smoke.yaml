@@ -43,6 +43,10 @@ spec:
   database:
     connectionSecretRef:
       name: nominatim-pg-app
+  # Smoke-only: exercise operator → Job env wiring without the large Wikipedia dump.
+  auxData:
+    usPostcodes: true
+    secondaryImportance: true
   api:
     replicas: 1
     suspendDuringOperations: Never

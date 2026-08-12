@@ -92,6 +92,38 @@ type FlatnodeSpec struct {
 	Volume VolumeSource `json:"volume"`
 }
 
+// AuxDataSpec toggles optional Nominatim auxiliary datasets downloaded to the
+// operation staging PVC and symlinked into the project directory before import.
+type AuxDataSpec struct {
+	// WikimediaImportance downloads wikimedia-importance.csv.gz from nominatim.org/data.
+	// +optional
+	WikimediaImportance *bool `json:"wikimediaImportance,omitempty"`
+
+	// SecondaryImportance downloads wikimedia-secondary-importance.sql.gz as
+	// secondary_importance.sql.gz in the project directory.
+	// +optional
+	SecondaryImportance *bool `json:"secondaryImportance,omitempty"`
+
+	// USPostcodes downloads us_postcodes.csv.gz (TIGER-derived US postcodes).
+	// +optional
+	USPostcodes *bool `json:"usPostcodes,omitempty"`
+}
+
+// AuxDataStatus reports which auxiliary datasets are present on the project volume.
+type AuxDataStatus struct {
+	// WikimediaImportance is true when wikimedia-importance.csv.gz is present and non-empty.
+	// +optional
+	WikimediaImportance bool `json:"wikimediaImportance,omitempty"`
+
+	// SecondaryImportance is true when secondary_importance.sql.gz is present and non-empty.
+	// +optional
+	SecondaryImportance bool `json:"secondaryImportance,omitempty"`
+
+	// USPostcodes is true when us_postcodes.csv.gz is present and non-empty.
+	// +optional
+	USPostcodes bool `json:"usPostcodes,omitempty"`
+}
+
 // StagingSpec defaults for operation-scoped staging PVCs (PBF/aux downloads; not emptyDir).
 type StagingSpec struct {
 	// StorageClassName for staging PVCs.
@@ -435,6 +467,11 @@ type NominatimSpec struct {
 	// +optional
 	Staging *StagingSpec `json:"staging,omitempty"`
 
+	// AuxData controls optional Wikipedia importance and external postcode downloads
+	// during Bootstrap (and Refresh backfill when enabled).
+	// +optional
+	AuxData *AuxDataSpec `json:"auxData,omitempty"`
+
 	// Regions is the desired set of Geofabrik-style region paths (e.g. north-america/us).
 	// Removal from this list does not delete DB data — a Reimport (or putting the region back) is required to shrink.
 	// +optional
@@ -559,6 +596,10 @@ type NominatimStatus struct {
 	// ObservedNominatim records import-time Nominatim settings sealed at Bootstrap.
 	// +optional
 	ObservedNominatim *ObservedNominatimConfig `json:"observedNominatim,omitempty"`
+
+	// AuxData reports observed auxiliary dataset files on the project volume.
+	// +optional
+	AuxData *AuxDataStatus `json:"auxData,omitempty"`
 }
 
 // +kubebuilder:object:root=true

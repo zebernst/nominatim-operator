@@ -142,6 +142,25 @@ spec:
                     - All
                     type: string
                 type: object
+              auxData:
+                description: |-
+                  AuxData controls optional Wikipedia importance and external postcode downloads
+                  during Bootstrap (and Refresh backfill when enabled).
+                properties:
+                  secondaryImportance:
+                    description: |-
+                      SecondaryImportance downloads wikimedia-secondary-importance.sql.gz as
+                      secondary_importance.sql.gz in the project directory.
+                    type: boolean
+                  usPostcodes:
+                    description: USPostcodes downloads us_postcodes.csv.gz (TIGER-derived
+                      US postcodes).
+                    type: boolean
+                  wikimediaImportance:
+                    description: WikimediaImportance downloads wikimedia-importance.csv.gz
+                      from nominatim.org/data.
+                    type: boolean
+                type: object
               database:
                 description: Database attaches or creates Postgres for this instance.
                 properties:
@@ -652,7 +671,7 @@ spec:
                     default: WriteHeavy
                     description: |-
                       PauseBackupsDuringOperations controls continuous backup pausing around operations.
-                      Default WriteHeavy pauses Bootstrap/AddRegions/Reimport but not routine Update.
+                      Default WriteHeavy pauses Bootstrap/AddRegions/Reimport/Migrate/Freeze but not routine Update.
                     enum:
                     - Never
                     - BootstrapReimport
@@ -1404,6 +1423,23 @@ spec:
                   type: object
                   x-kubernetes-map-type: atomic
                 type: array
+              auxData:
+                description: AuxData reports observed auxiliary dataset files on the
+                  project volume.
+                properties:
+                  secondaryImportance:
+                    description: SecondaryImportance is true when secondary_importance.sql.gz
+                      is present and non-empty.
+                    type: boolean
+                  usPostcodes:
+                    description: USPostcodes is true when us_postcodes.csv.gz is present
+                      and non-empty.
+                    type: boolean
+                  wikimediaImportance:
+                    description: WikimediaImportance is true when wikimedia-importance.csv.gz
+                      is present and non-empty.
+                    type: boolean
+                type: object
               conditions:
                 description: Conditions represent the latest available observations
                   of the instance.
