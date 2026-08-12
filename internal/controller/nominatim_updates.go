@@ -71,7 +71,9 @@ func (r *NominatimReconciler) reconcileUpdates(ctx context.Context, nom *nominat
 		return ctrl.Result{}, fmt.Errorf("list operations for updates reconcile: %w", err)
 	}
 
-	// Probe conflict against a synthetic Update — same mutex as NominatimOperationReconciler.
+	// Probe against a synthetic Update — same evaluateWritePlane module as claim.
+	// ScheduleBusy (not Decision alone): creation-race peers must block scheduling
+	// even when the probe name would win the lex race.
 	probe := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "__schedule-probe__", Namespace: nom.Namespace},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
@@ -79,9 +81,13 @@ func (r *NominatimReconciler) reconcileUpdates(ctx context.Context, nom *nominat
 			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 	}
-	if conflict := findConflictingOperation(probe, ops); conflict != nil {
+	if ev := evaluateWritePlane(probe, ops); ev.ScheduleBusy() {
+		conflictName := ""
+		if ev.BusyPeer != nil {
+			conflictName = ev.BusyPeer.Name
+		}
 		log.Info("skipping scheduled Update due to active conflict",
-			"conflict", conflict.Name, "fire", missed.UTC().Format(time.RFC3339))
+			"conflict", conflictName, "fire", missed.UTC().Format(time.RFC3339))
 		// Do not advance the cursor — retry after a short delay while write-heavy work runs.
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}

@@ -175,6 +175,51 @@ func TestReconcileUpdates_SkipsOnWriteHeavyConflict(t *testing.T) {
 	}
 }
 
+func TestReconcileUpdates_SkipsOnCreationRacePeer(t *testing.T) {
+	// Schedule must stay busy while a write-heavy peer is still in the creation
+	// race (no Job yet) — even though evaluateWritePlane Decision for the
+	// synthetic probe may be Ok (lex-winner).
+	scheme := testScheme(t)
+	ctx := context.Background()
+
+	nom := baseNominatim("upd-race")
+	nom.CreationTimestamp = metav1.NewTime(time.Now().UTC().Add(-2 * time.Hour))
+	nom.Spec.Updates = &nominatimv1alpha1.UpdatesSpec{Enabled: true, Schedule: "* * * * *"}
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/liechtenstein"}}
+
+	boot := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "boot-racing", Namespace: "default"},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
+			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+		},
+		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: ""},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, boot).WithObjects(nom, boot).Build()
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
+
+	res, err := r.reconcileUpdates(ctx, nom)
+	if err != nil {
+		t.Fatalf("reconcileUpdates: %v", err)
+	}
+	if nom.Status.LastUpdateScheduleTime != nil {
+		t.Fatal("must not advance cursor while a write-heavy peer is still racing")
+	}
+	if res.RequeueAfter != 30*time.Second {
+		t.Fatalf("expected short requeue on schedule-busy, got %v", res)
+	}
+
+	ops := &nominatimv1alpha1.NominatimOperationList{}
+	if err := c.List(ctx, ops); err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range ops.Items {
+		if op.Spec.Type == nominatimv1alpha1.NominatimOperationUpdate {
+			t.Fatalf("expected no Update during creation race, got %s", op.Name)
+		}
+	}
+}
+
 func TestReconcileUpdates_NoCronJobCreated(t *testing.T) {
 	// Guardrail: reconcileUpdates must only create NominatimOperation, never batch/v1 CronJob.
 	scheme := testScheme(t)
