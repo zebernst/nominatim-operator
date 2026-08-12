@@ -11,7 +11,7 @@
 
 * **controller:** harden Operation write-plane mutex — atomic claim via parent `status.activeOperationRefs` (retry-on-conflict); creation-race peers requeue instead of dual terminal `Conflict`; terminal `Conflict` only when a peer is `Running` or has armed a Job.
 * **api:** default HTTP startup/readiness/liveness probes on `/status`; typed `spec.nominatim.api` runtime knobs (pool, query/request timeouts, CORS, default language); `spec.api.gunicornWorkers` with entrypoint cgroup-CPU fallback (nominatim-5et.14).
-* **test:** remove smoke e2e NotImplemented coverage — all reserved Operation types are implemented (nominatim-5et.12 / 5et.13 / 5et.18; was nominatim-5et.22).
+* **test:** kind e2e smoke arms Refresh/Migrate/Freeze Jobs (replacing NotImplemented coverage) and asserts write-heavy Conflict when a peer holds the write plane.
 * **docs:** document control / serving / data planes, sequence observation, and RWO project-flatnode vs multi-replica API in the root README, `images/README.md`, and samples (nominatim-5et.35.4).
 * **build:** rename image build files to `*.Dockerfile` (`operator.Dockerfile`, `api.Dockerfile`, `worker.Dockerfile`) so editors apply Dockerfile syntax highlighting.
 * **api:** read-only serving plane — API Deployment uses an emptyDir workdir only (no project/flatnode PVC mounts); entrypoint takes config from process env, checks `placex`, and starts gunicorn without writing `.env` / `import-finished` or running `nominatim refresh --functions` (nominatim-5et.35.1).

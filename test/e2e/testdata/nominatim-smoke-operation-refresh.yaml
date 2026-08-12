@@ -1,0 +1,9 @@
+apiVersion: nominatim.zebernst.dev/v1alpha1
+kind: NominatimOperation
+metadata:
+  name: smoke-refresh
+  namespace: nominatim-e2e
+spec:
+  type: Refresh
+  nominatimRef:
+    name: smoke

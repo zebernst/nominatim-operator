@@ -1,0 +1,9 @@
+apiVersion: nominatim.zebernst.dev/v1alpha1
+kind: NominatimOperation
+metadata:
+  name: smoke-freeze-conflict
+  namespace: nominatim-e2e
+spec:
+  type: Freeze
+  nominatimRef:
+    name: smoke

@@ -371,6 +371,80 @@ var _ = Describe("Manager", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(out).To(Equal("Running"))
 		})
+
+		// Cluster-level smoke for implemented database-only Operation types (nominatim-5et.12 /
+		// 5et.13 / 5et.18): the operator must arm a Job and staging PVC — not fail NotImplemented.
+		// Write-heavy peers are applied one at a time; the worker may Fail against the fake
+		// connectionSecretRef DSN, which is fine for this smoke.
+		It("arms Refresh, Migrate, and Freeze with Job and staging PVC", func() {
+			fixtureDir := filepath.Join("test", "e2e", "testdata")
+			for _, tc := range []struct{ file, name string }{
+				{"refresh", "smoke-refresh"},
+				{"migrate", "smoke-migrate"},
+				{"freeze", "smoke-freeze"},
+			} {
+				fixture := filepath.Join(fixtureDir, "nominatim-smoke-operation-"+tc.file+".yaml")
+				By("creating " + tc.name)
+				cmd := exec.Command("kubectl", "apply", "-f", fixture)
+				_, err := utils.Run(cmd)
+				Expect(err).NotTo(HaveOccurred(), "Failed to create %s", tc.name)
+
+				expectOperationArmed(appNamespace, tc.name)
+
+				By("deleting " + tc.name + " before the next Operation")
+				cmd = exec.Command("kubectl", "delete", "-f", fixture, "--ignore-not-found=true", "--wait=true")
+				_, err = utils.Run(cmd)
+				Expect(err).NotTo(HaveOccurred())
+			}
+		})
+
+		// Mutex smoke: a second write-heavy Operation must terminal-Fail with Conflict once a
+		// peer has armed a Job (hardened write-plane claim; nominatim-5et.3 follow-up).
+		It("fails a second write-heavy Operation with Conflict while Migrate holds the write plane", func() {
+			migrateFixture := filepath.Join("test", "e2e", "testdata", "nominatim-smoke-operation-migrate.yaml")
+			conflictFixture := filepath.Join("test", "e2e", "testdata", "nominatim-smoke-operation-freeze-conflict.yaml")
+
+			By("creating smoke-migrate (write-heavy)")
+			cmd := exec.Command("kubectl", "apply", "-f", migrateFixture)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func() {
+				cmd := exec.Command("kubectl", "delete", "-f", migrateFixture, "--ignore-not-found=true", "--wait=false")
+				_, _ = utils.Run(cmd)
+				cmd = exec.Command("kubectl", "delete", "-f", conflictFixture, "--ignore-not-found=true", "--wait=false")
+				_, _ = utils.Run(cmd)
+			})
+
+			expectOperationArmed(appNamespace, "smoke-migrate")
+
+			By("creating smoke-freeze-conflict while Migrate is armed")
+			cmd = exec.Command("kubectl", "apply", "-f", conflictFixture)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "nominatimoperation", "smoke-freeze-conflict",
+					"-n", appNamespace,
+					"-o", "jsonpath={.status.phase}")
+				phase, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(phase).To(Equal("Failed"))
+
+				cmd = exec.Command("kubectl", "get", "nominatimoperation", "smoke-freeze-conflict",
+					"-n", appNamespace,
+					"-o", "jsonpath={.status.message}")
+				msg, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(msg).To(ContainSubstring("Conflict"))
+			}, 2*time.Minute, time.Second).Should(Succeed())
+
+			cmd = exec.Command("kubectl", "get", "job", "smoke-freeze-conflict",
+				"-n", appNamespace, "--ignore-not-found",
+				"-o", "jsonpath={.metadata.name}")
+			job, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(strings.TrimSpace(job)).To(BeEmpty(), "Conflict Op must not create Job smoke-freeze-conflict")
+		})
 	})
 
 	Context("Monaco+Andorra import", Ordered, func() {
@@ -502,6 +576,38 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 	})
 })
+
+// expectOperationArmed waits until the operator registers jobRef and creates Job + staging PVC.
+// It asserts the Operation was not rejected as NotImplemented.
+func expectOperationArmed(ns, name string) {
+	Eventually(func(g Gomega) {
+		cmd := exec.Command("kubectl", "get", "nominatimoperation", name,
+			"-n", ns,
+			"-o", "jsonpath={.status.jobRef.name}")
+		jobRef, err := utils.Run(cmd)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(strings.TrimSpace(jobRef)).To(Equal(name))
+
+		cmd = exec.Command("kubectl", "get", "nominatimoperation", name,
+			"-n", ns,
+			"-o", "jsonpath={.status.message}")
+		msg, err := utils.Run(cmd)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(msg).NotTo(ContainSubstring("NotImplemented"))
+
+		cmd = exec.Command("kubectl", "get", "job", name,
+			"-n", ns, "-o", "jsonpath={.metadata.name}")
+		job, err := utils.Run(cmd)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(strings.TrimSpace(job)).To(Equal(name))
+
+		cmd = exec.Command("kubectl", "get", "pvc", name+"-staging",
+			"-n", ns, "-o", "jsonpath={.metadata.name}")
+		pvc, err := utils.Run(cmd)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(strings.TrimSpace(pvc)).To(Equal(name + "-staging"))
+	}, 2*time.Minute, time.Second).Should(Succeed())
+}
 
 // expectAPIScaledTo waits until the API Deployment's desired replicas match want and, when
 // scaling to zero, until no pods remain (status.replicas == 0). Used to assert
