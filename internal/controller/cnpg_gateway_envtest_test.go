@@ -209,7 +209,7 @@ var _ = Describe("owned HTTPRoutes against the vendored Gateway API schema", fun
 	})
 
 	It("creates the API HTTPRoute alongside the Deployment and Service", func() {
-		group := "gateway.networking.k8s.io"
+		group := gatewayAPIGroup
 		kind := "Gateway"
 		nom := nominatimWithConnectionSecret("envtest-api-route")
 		nom.Spec.API = &nominatimv1alpha1.APISpec{

@@ -38,7 +38,7 @@ import (
 // HTTPRouteGVK is the Gateway API HTTPRoute resource. Referenced as unstructured so the
 // operator does not add a go.mod dependency on sigs.k8s.io/gateway-api.
 var HTTPRouteGVK = schema.GroupVersionKind{
-	Group:   "gateway.networking.k8s.io",
+	Group:   gatewayAPIGroup,
 	Version: "v1",
 	Kind:    "HTTPRoute",
 }
@@ -46,6 +46,8 @@ var HTTPRouteGVK = schema.GroupVersionKind{
 // Default image coordinates and workload component labels.
 // Mount paths / volume names share package consts with Operation Jobs (nominatimoperation_resources.go).
 const (
+	gatewayAPIGroup = "gateway.networking.k8s.io"
+
 	DefaultAPIRepository = "ghcr.io/zebernst/nominatim-api"
 	DefaultUIRepository  = "ghcr.io/zebernst/nominatim-ui"
 	DefaultImageTag      = "latest"
@@ -590,7 +592,7 @@ func (r *NominatimInstanceReconciler) reconcileHTTPRoute(ctx context.Context, no
 			if ref.Group != nil {
 				pr["group"] = *ref.Group
 			} else {
-				pr["group"] = "gateway.networking.k8s.io"
+				pr["group"] = gatewayAPIGroup
 			}
 			if ref.Kind != nil {
 				pr["kind"] = *ref.Kind
