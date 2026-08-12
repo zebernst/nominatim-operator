@@ -314,7 +314,7 @@ var _ = Describe("Manager", Ordered, func() {
 
 			By("waiting for the Nominatim API Deployment")
 			verifyAPIDeployment := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "nominatim", nomName,
+				cmd := exec.Command("kubectl", "get", "nominatiminstance", nomName,
 					"-n", appNamespace, "-o", "yaml")
 				nomYAML, _ := utils.Run(cmd)
 				_, _ = fmt.Fprintf(GinkgoWriter, "NominatimInstance CR:\n%s\n", nomYAML)
@@ -345,14 +345,14 @@ var _ = Describe("Manager", Ordered, func() {
 
 			By("confirming degraded database mode is recorded on status")
 			verifyDatabaseStatus := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "nominatim", nomName,
+				cmd := exec.Command("kubectl", "get", "nominatiminstance", nomName,
 					"-n", appNamespace,
 					"-o", "jsonpath={.status.database.connectionSecretName}")
 				out, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(out).To(Equal("nominatim-pg-app"))
 
-				cmd = exec.Command("kubectl", "get", "nominatim", nomName,
+				cmd = exec.Command("kubectl", "get", "nominatiminstance", nomName,
 					"-n", appNamespace,
 					"-o", "jsonpath={.status.database.mode}")
 				mode, err := utils.Run(cmd)
@@ -547,7 +547,7 @@ var _ = Describe("Manager", Ordered, func() {
 
 			By("asserting status.regions lists both Spec regions")
 			Eventually(func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "nominatim", nomName,
+				cmd := exec.Command("kubectl", "get", "nominatiminstance", nomName,
 					"-n", validationNamespace,
 					"-o", "jsonpath={.status.regions[*].name}")
 				out, err := utils.Run(cmd)
@@ -559,7 +559,7 @@ var _ = Describe("Manager", Ordered, func() {
 
 			By("asserting status.auxData.usPostcodes after Bootstrap aux download + sequence probe")
 			Eventually(func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "nominatim", nomName,
+				cmd := exec.Command("kubectl", "get", "nominatiminstance", nomName,
 					"-n", validationNamespace,
 					"-o", "jsonpath={.status.auxData.usPostcodes}")
 				out, err := utils.Run(cmd)
