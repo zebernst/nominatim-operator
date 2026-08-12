@@ -209,7 +209,7 @@ var _ = Describe("owned HTTPRoutes against the vendored Gateway API schema", fun
 	})
 
 	It("creates the API HTTPRoute alongside the Deployment and Service", func() {
-		group := "gateway.networking.k8s.io"
+		group := gatewayAPIGroup
 		kind := "Gateway"
 		nom := nominatimWithConnectionSecret("envtest-api-route")
 		nom.Spec.API = &nominatimv1alpha1.APISpec{
@@ -300,6 +300,75 @@ var _ = Describe("owned HTTPRoutes against the vendored Gateway API schema", fun
 			getUnstructured(HTTPRouteGVK, "envtest-hostnames", nom.Namespace).Object, "spec", "hostnames")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(found).To(BeFalse())
+	})
+
+	It("does not churn resourceVersion by rewriting server-defaulted rules[].matches", func() {
+		nom := persistNominatim(nominatimWithConnectionSecret("envtest-route-matches"))
+		route := &nominatimv1alpha1.RouteSpec{
+			ParentRefs: []nominatimv1alpha1.ParentReference{{Name: "gw"}},
+		}
+		Expect(reconciler.reconcileHTTPRoute(ctx, nom, "envtest-matches", "svc", route, ComponentAPI)).To(Succeed())
+
+		first := getUnstructured(HTTPRouteGVK, "envtest-matches", nom.Namespace)
+		rules, found, err := unstructured.NestedSlice(first.Object, "spec", "rules")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(found).To(BeTrue())
+		Expect(rules).To(HaveLen(1))
+		rule, ok := rules[0].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		matches, ok := rule["matches"].([]interface{})
+		Expect(ok).To(BeTrue(), "Gateway API should default rules[].matches when omitted; rule=%#v", rule)
+		Expect(matches).NotTo(BeEmpty())
+		rv1 := first.GetResourceVersion()
+		Expect(rv1).NotTo(BeEmpty())
+
+		Expect(reconciler.reconcileHTTPRoute(ctx, nom, "envtest-matches", "svc", route, ComponentAPI)).To(Succeed())
+
+		second := getUnstructured(HTTPRouteGVK, "envtest-matches", nom.Namespace)
+		Expect(second.GetResourceVersion()).To(Equal(rv1),
+			"second reconcile must not Update solely because matches were stripped and re-defaulted")
+		rules2, found, err := unstructured.NestedSlice(second.Object, "spec", "rules")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(found).To(BeTrue())
+		Expect(rules2).To(HaveLen(1))
+		rule2, ok := rules2[0].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(rule2["matches"]).To(Equal(matches))
+	})
+
+	It("preserves an existing non-default rules[].matches across reconciles", func() {
+		nom := persistNominatim(nominatimWithConnectionSecret("envtest-route-custom-match"))
+		route := &nominatimv1alpha1.RouteSpec{
+			ParentRefs: []nominatimv1alpha1.ParentReference{{Name: "gw"}},
+		}
+		Expect(reconciler.reconcileHTTPRoute(ctx, nom, "envtest-custom-match", "svc", route, ComponentAPI)).To(Succeed())
+
+		live := getUnstructured(HTTPRouteGVK, "envtest-custom-match", nom.Namespace)
+		customMatches := []interface{}{
+			map[string]interface{}{
+				"path": map[string]interface{}{
+					"type":  "Exact",
+					"value": "/search",
+				},
+			},
+		}
+		rules, found, err := unstructured.NestedSlice(live.Object, "spec", "rules")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(found).To(BeTrue())
+		Expect(rules).To(HaveLen(1))
+		rule := rules[0].(map[string]interface{})
+		rule["matches"] = customMatches
+		Expect(unstructured.SetNestedSlice(live.Object, rules, "spec", "rules")).To(Succeed())
+		Expect(k8sClient.Update(ctx, live)).To(Succeed())
+
+		Expect(reconciler.reconcileHTTPRoute(ctx, nom, "envtest-custom-match", "svc", route, ComponentAPI)).To(Succeed())
+
+		after := getUnstructured(HTTPRouteGVK, "envtest-custom-match", nom.Namespace)
+		rulesAfter, found, err := unstructured.NestedSlice(after.Object, "spec", "rules")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(found).To(BeTrue())
+		Expect(rulesAfter).To(HaveLen(1))
+		Expect(rulesAfter[0].(map[string]interface{})["matches"]).To(Equal(customMatches))
 	})
 
 	It("rejects an HTTPRoute hostname the Gateway API schema disallows", func() {

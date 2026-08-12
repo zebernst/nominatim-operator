@@ -354,10 +354,51 @@ func TestReconcileUI_NoopWhenUnset(t *testing.T) {
 	}
 }
 
+func TestReconcileUI_DisabledRemovesServing(t *testing.T) {
+	scheme := testScheme(t)
+	nom := baseNominatim("ui-disabled")
+	disabled := false
+	nom.Spec.UI = &nominatimv1alpha1.UISpec{Enabled: &disabled}
+
+	existing := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      UIName(nom),
+			Namespace: "default",
+			Labels:    commonLabels(nom, ComponentUI),
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: commonLabels(nom, ComponentUI)},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: commonLabels(nom, ComponentUI)},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "ui", Image: "example.com/ui:old"}}},
+			},
+		},
+	}
+	existingSvc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: UIName(nom), Namespace: "default"},
+		Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: 80}}},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, existing, existingSvc).Build()
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
+
+	if err := r.reconcileUI(context.Background(), nom); err != nil {
+		t.Fatalf("reconcileUI: %v", err)
+	}
+
+	deploy := &appsv1.Deployment{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: UIName(nom), Namespace: "default"}, deploy); err == nil {
+		t.Fatal("expected UI Deployment deleted when ui.enabled=false")
+	}
+	svc := &corev1.Service{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: UIName(nom), Namespace: "default"}, svc); err == nil {
+		t.Fatal("expected UI Service deleted when ui.enabled=false")
+	}
+}
+
 func TestReconcileUI_CreatesDeploymentServiceRoute(t *testing.T) {
 	scheme := testScheme(t)
 	nom := baseNominatim("ui-set")
-	group := "gateway.networking.k8s.io"
+	group := gatewayAPIGroup
 	nom.Spec.UI = &nominatimv1alpha1.UISpec{
 		Route: &nominatimv1alpha1.RouteSpec{
 			ParentRefs: []nominatimv1alpha1.ParentReference{{Name: "gw", Group: &group}},
@@ -387,6 +428,37 @@ func TestReconcileUI_CreatesDeploymentServiceRoute(t *testing.T) {
 	route.SetGroupVersionKind(HTTPRouteGVK)
 	if err := c.Get(context.Background(), types.NamespacedName{Name: UIName(nom), Namespace: "default"}, route); err != nil {
 		t.Fatalf("get UI HTTPRoute: %v", err)
+	}
+}
+
+func TestUIAPIEndpointEnv_FromAPIRouteHostname(t *testing.T) {
+	if env := uiAPIEndpointEnv(baseNominatim("no-api")); env != nil {
+		t.Fatalf("expected nil env without API route, got %#v", env)
+	}
+
+	nom := baseNominatim("with-api-host")
+	nom.Spec.API = &nominatimv1alpha1.APISpec{
+		Route: &nominatimv1alpha1.RouteSpec{Hostnames: []string{"nominatim.example.com"}},
+	}
+	env := uiAPIEndpointEnv(nom)
+	if len(env) != 1 || env[0].Name != "NOMINATIM_API_ENDPOINT" || env[0].Value != "https://nominatim.example.com/" {
+		t.Fatalf("env=%#v", env)
+	}
+
+	nom.Spec.UI = &nominatimv1alpha1.UISpec{}
+	scheme := testScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
+	if err := r.reconcileUI(context.Background(), nom); err != nil {
+		t.Fatalf("reconcileUI: %v", err)
+	}
+	deploy := &appsv1.Deployment{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: UIName(nom), Namespace: "default"}, deploy); err != nil {
+		t.Fatalf("get UI deployment: %v", err)
+	}
+	got := deploy.Spec.Template.Spec.Containers[0].Env
+	if len(got) != 1 || got[0].Value != "https://nominatim.example.com/" {
+		t.Fatalf("deployment env=%#v", got)
 	}
 }
 

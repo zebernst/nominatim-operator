@@ -38,7 +38,7 @@ import (
 // HTTPRouteGVK is the Gateway API HTTPRoute resource. Referenced as unstructured so the
 // operator does not add a go.mod dependency on sigs.k8s.io/gateway-api.
 var HTTPRouteGVK = schema.GroupVersionKind{
-	Group:   "gateway.networking.k8s.io",
+	Group:   gatewayAPIGroup,
 	Version: "v1",
 	Kind:    "HTTPRoute",
 }
@@ -46,6 +46,8 @@ var HTTPRouteGVK = schema.GroupVersionKind{
 // Default image coordinates and workload component labels.
 // Mount paths / volume names share package consts with Operation Jobs (nominatimoperation_resources.go).
 const (
+	gatewayAPIGroup = "gateway.networking.k8s.io"
+
 	DefaultAPIRepository = "ghcr.io/zebernst/nominatim-api"
 	DefaultUIRepository  = "ghcr.io/zebernst/nominatim-ui"
 	DefaultImageTag      = "latest"
@@ -204,6 +206,25 @@ func resolvePullPolicy(spec *nominatimv1alpha1.ImageSpec) corev1.PullPolicy {
 		return spec.PullPolicy
 	}
 	return ""
+}
+
+// uiAPIEndpointEnv returns NOMINATIM_API_ENDPOINT for the UI container when the
+// Nominatim API publishes a hostname (browser-reachable). Empty when unknown so
+// the UI image entrypoint falls back to "/".
+func uiAPIEndpointEnv(nom *nominatimv1alpha1.NominatimInstance) []corev1.EnvVar {
+	if nom.Spec.API == nil || nom.Spec.API.Route == nil {
+		return nil
+	}
+	for _, host := range nom.Spec.API.Route.Hostnames {
+		if host == "" {
+			continue
+		}
+		return []corev1.EnvVar{{
+			Name:  "NOMINATIM_API_ENDPOINT",
+			Value: "https://" + host + "/",
+		}}
+	}
+	return nil
 }
 
 // dbEnvVars maps the CNPG/connection-secret conventional keys onto the environment
@@ -445,23 +466,16 @@ func (r *NominatimInstanceReconciler) reconcileAPI(ctx context.Context, nom *nom
 	return nil
 }
 
-// reconcileUI reconciles the optional UI Deployment, Service, and HTTPRoute. It is a
-// no-op when spec.ui is unset. Like the API, UI objects are not created until
-// Bootstrap has populated status.regions when regions are desired.
+// reconcileUI reconciles the optional UI Deployment, Service, and HTTPRoute.
+// Omit spec.ui or set ui.enabled=false for API/DB-only (owned UI objects are deleted).
+// Like the API, UI objects are not created until Bootstrap has populated status.regions
+// when regions are desired.
 func (r *NominatimInstanceReconciler) reconcileUI(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) error {
-	uiSpec := nom.Spec.UI
-	if uiSpec == nil {
-		// Still clean up a stray UI if Bootstrap is in progress and UI was removed from spec.
-		if !servingWorkloadsAllowed(nom) {
-			return r.deleteServingComponent(ctx, nom, UIName(nom), ComponentUI)
-		}
-		return nil
-	}
-
-	if !servingWorkloadsAllowed(nom) {
+	if !uiServingDesired(nom) || !servingWorkloadsAllowed(nom) {
 		return r.deleteServingComponent(ctx, nom, UIName(nom), ComponentUI)
 	}
 
+	uiSpec := nom.Spec.UI
 	replicas := int32(1)
 	if uiSpec.Replicas != nil {
 		replicas = *uiSpec.Replicas
@@ -488,6 +502,7 @@ func (r *NominatimInstanceReconciler) reconcileUI(ctx context.Context, nom *nomi
 					Ports: []corev1.ContainerPort{
 						{Name: "http", ContainerPort: workloadContainerPort},
 					},
+					Env: uiAPIEndpointEnv(nom),
 				},
 			},
 		}
@@ -522,6 +537,19 @@ func (r *NominatimInstanceReconciler) reconcileUI(ctx context.Context, nom *nomi
 	}
 
 	return nil
+}
+
+// uiServingDesired reports whether the NominatimInstance should run UI workloads.
+// spec.ui omitted or enabled=false → API/DB-only; enabled unset defaults to true.
+func uiServingDesired(nom *nominatimv1alpha1.NominatimInstance) bool {
+	ui := nom.Spec.UI
+	if ui == nil {
+		return false
+	}
+	if ui.Enabled != nil {
+		return *ui.Enabled
+	}
+	return true
 }
 
 // deleteServingComponent removes an owned API/UI Deployment, Service, and HTTPRoute
@@ -589,9 +617,13 @@ func (r *NominatimInstanceReconciler) reconcileHTTPRoute(ctx context.Context, no
 			pr := map[string]interface{}{"name": ref.Name}
 			if ref.Group != nil {
 				pr["group"] = *ref.Group
+			} else {
+				pr["group"] = gatewayAPIGroup
 			}
 			if ref.Kind != nil {
 				pr["kind"] = *ref.Kind
+			} else {
+				pr["kind"] = "Gateway"
 			}
 			if ref.Namespace != nil {
 				pr["namespace"] = *ref.Namespace
@@ -619,13 +651,35 @@ func (r *NominatimInstanceReconciler) reconcileHTTPRoute(ctx context.Context, no
 
 		rules := []interface{}{
 			map[string]interface{}{
+				// Seed the Gateway API default match (PathPrefix "/") and backendRef
+				// defaults so CreateOrUpdate stays idempotent against server-defaulted
+				// fields. RouteSpec does not model matches; omitting them would strip
+				// defaults on every reconcile.
+				"matches": []interface{}{
+					map[string]interface{}{
+						"path": map[string]interface{}{
+							"type":  "PathPrefix",
+							"value": "/",
+						},
+					},
+				},
 				"backendRefs": []interface{}{
 					map[string]interface{}{
-						"name": serviceName,
-						"port": int64(workloadServicePort),
+						"group":  "",
+						"kind":   "Service",
+						"name":   serviceName,
+						"port":   int64(workloadServicePort),
+						"weight": int64(1),
 					},
 				},
 			},
+		}
+		if existingRules, found, err := unstructured.NestedSlice(httpRoute.Object, "spec", "rules"); err == nil && found && len(existingRules) > 0 {
+			if existingRule, ok := existingRules[0].(map[string]interface{}); ok {
+				if existingMatches, ok := existingRule["matches"]; ok {
+					rules[0].(map[string]interface{})["matches"] = existingMatches
+				}
+			}
 		}
 		return unstructured.SetNestedSlice(httpRoute.Object, rules, "spec", "rules")
 	})
