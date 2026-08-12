@@ -30,25 +30,25 @@ const (
 )
 
 // RegionChangePolicy controls how newly listed regions are imported.
-// +kubebuilder:validation:Enum=AddData;Reimport
+// +kubebuilder:validation:Enum=AddData;Rebuild
 type RegionChangePolicy string
 
 const (
 	// RegionChangeAddData imports new regions without wiping existing data (default).
 	RegionChangeAddData RegionChangePolicy = "AddData"
-	// RegionChangeReimport rebuilds the database for region set changes.
-	RegionChangeReimport RegionChangePolicy = "Reimport"
+	// RegionChangeRebuild rebuilds the database for region set changes.
+	RegionChangeRebuild RegionChangePolicy = "Rebuild"
 )
 
 // OperationImpact selects which operation classes trigger a side effect (API suspend, backup pause).
-// +kubebuilder:validation:Enum=Never;BootstrapReimport;WriteHeavy;All
+// +kubebuilder:validation:Enum=Never;BootstrapRebuild;WriteHeavy;All
 type OperationImpact string
 
 const (
 	OperationImpactNever OperationImpact = "Never"
-	// OperationImpactBootstrapReimport covers Bootstrap and Reimport only (not AddRegions/Update).
-	OperationImpactBootstrapReimport OperationImpact = "BootstrapReimport"
-	// OperationImpactWriteHeavy covers Bootstrap, AddRegions, Reimport, Migrate, and Freeze.
+	// OperationImpactBootstrapRebuild covers Bootstrap and Rebuild only (not AddRegions/Update).
+	OperationImpactBootstrapRebuild OperationImpact = "BootstrapRebuild"
+	// OperationImpactWriteHeavy covers Bootstrap, AddRegions, Rebuild, Migrate, and Freeze.
 	OperationImpactWriteHeavy OperationImpact = "WriteHeavy"
 	OperationImpactAll        OperationImpact = "All"
 )
@@ -222,7 +222,7 @@ type DatabaseSpec struct {
 	PostgresProfiles *PostgresProfiles `json:"postgresProfiles,omitempty"`
 
 	// PauseBackupsDuringOperations controls continuous backup pausing around operations.
-	// Default WriteHeavy pauses Bootstrap/AddRegions/Reimport/Migrate/Freeze but not routine Update.
+	// Default WriteHeavy pauses Bootstrap/AddRegions/Rebuild/Migrate/Freeze but not routine Update.
 	// +optional
 	// +kubebuilder:default="WriteHeavy"
 	PauseBackupsDuringOperations OperationImpact `json:"pauseBackupsDuringOperations,omitempty"`
@@ -319,7 +319,7 @@ type APISpec struct {
 	Route *RouteSpec `json:"route,omitempty"`
 
 	// SuspendDuringOperations controls scaling the API during day-2 operations
-	// (AddRegions, Reimport, Update, …). Default Never keeps the API up.
+	// (AddRegions, Rebuild, Update, …). Default Never keeps the API up.
 	// Day-0 Bootstrap is not covered here: API/UI are not created until Bootstrap
 	// has populated status.regions (see servingWorkloadsAllowed).
 	// +optional
@@ -378,7 +378,7 @@ type UISpec struct {
 }
 
 // WorkerSpec configures the NominatimOperation Job worker image used for
-// Bootstrap / AddRegions / Reimport / Update Jobs.
+// Bootstrap / AddRegions / Rebuild / Update Jobs.
 type WorkerSpec struct {
 	// Image for Operation Job containers. Defaults to ghcr.io/zebernst/nominatim-worker:latest.
 	// Sole supported image hatch; podSpec.containers[].image is ignored.
@@ -416,7 +416,7 @@ type NominatimReplicationSpec struct {
 // NominatimConfigSpec is the typed Nominatim settings surface (dotenv / NOMINATIM_* env).
 //
 // Import-time fields (ImportStyle, Tokenizer) cannot be changed after Bootstrap without
-// a Reimport — the controller seals observed values into status and surfaces
+// a Rebuild — the controller seals observed values into status and surfaces
 // ImportConfigDrift when spec diverges. Runtime fields (Languages, Replication, API)
 // apply on every reconcile.
 type NominatimConfigSpec struct {
@@ -473,7 +473,7 @@ type NominatimInstanceSpec struct {
 	AuxData *AuxDataSpec `json:"auxData,omitempty"`
 
 	// Regions is the desired set of Geofabrik-style region paths (e.g. north-america/us).
-	// Removal from this list does not delete DB data — a Reimport (or putting the region back) is required to shrink.
+	// Removal from this list does not delete DB data — a Rebuild (or putting the region back) is required to shrink.
 	// +optional
 	Regions []string `json:"regions,omitempty"`
 
@@ -564,7 +564,7 @@ type NominatimInstanceStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// Regions is the cluster source of truth for which Geofabrik regions are imported
-	// (synced from Succeeded Bootstrap/AddRegions/Reimport). Project PVC files such as
+	// (synced from Succeeded Bootstrap/AddRegions/Rebuild). Project PVC files such as
 	// imported-regions.txt / import-finished are worker-local resume bookmarks only.
 	// +optional
 	Regions []RegionStatus `json:"regions,omitempty"`

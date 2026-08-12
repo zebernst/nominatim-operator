@@ -23,7 +23,7 @@ import (
 )
 
 // observeRegionsFromSucceededOps is the single status.regions writer from Succeeded
-// Operations: Bootstrap fills an empty set, AddRegions merges, Reimport replaces.
+// Operations: Bootstrap fills an empty set, AddRegions merges, Rebuild replaces.
 // Bootstrap/drift reconcile only ensure Operation creates.
 func observeRegionsFromSucceededOps(nom *nominatimv1alpha1.NominatimInstance, peers []nominatimv1alpha1.NominatimOperation) {
 	syncRegionsFromBootstrap(nom, peers)
@@ -73,9 +73,9 @@ func syncRegionsFromBootstrap(nom *nominatimv1alpha1.NominatimInstance, peers []
 	}
 }
 
-// syncRegionsFromDriftOps updates status.regions when an AddRegions or Reimport
+// syncRegionsFromDriftOps updates status.regions when an AddRegions or Rebuild
 // Operation targeting this parent has Succeeded. Removals are never applied here —
-// shrinking the observed set requires a Succeeded Reimport whose Spec.Regions is
+// shrinking the observed set requires a Succeeded Rebuild whose Spec.Regions is
 // the new desired set (full rebuild), not a surgical delete.
 func syncRegionsFromDriftOps(nom *nominatimv1alpha1.NominatimInstance, peers []nominatimv1alpha1.NominatimOperation) {
 	for i := range peers {
@@ -86,7 +86,7 @@ func syncRegionsFromDriftOps(nom *nominatimv1alpha1.NominatimInstance, peers []n
 		switch op.Spec.Type {
 		case nominatimv1alpha1.NominatimOperationAddRegions:
 			mergeRegionsIntoStatus(nom, op.Spec.Regions)
-		case nominatimv1alpha1.NominatimOperationReimport:
+		case nominatimv1alpha1.NominatimOperationRebuild:
 			replaceRegionsStatus(nom, op.Spec.Regions)
 		}
 	}
@@ -120,6 +120,6 @@ func replaceRegionsStatus(nom *nominatimv1alpha1.NominatimInstance, regions []st
 		})
 	}
 	nom.Status.Regions = statuses
-	// Reimport rebuilds the DB — reseal import-time Nominatim settings from current spec.
+	// Rebuild rebuilds the DB — reseal import-time Nominatim settings from current spec.
 	sealObservedNominatimConfigForce(nom, true)
 }

@@ -405,7 +405,7 @@ var _ = Describe("NominatimOperation Controller", func() {
 		first := &nominatimv1alpha1.NominatimOperation{
 			ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: "default"},
 			Spec: nominatimv1alpha1.NominatimOperationSpec{
-				Type:                 nominatimv1alpha1.NominatimOperationReimport,
+				Type:                 nominatimv1alpha1.NominatimOperationRebuild,
 				NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: parentName},
 			},
 		}

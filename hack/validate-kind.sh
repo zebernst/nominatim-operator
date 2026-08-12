@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local kind validation: CNPG + operator + Monaco import + search probe (+ optional AddRegions/Reimport).
+# Local kind validation: CNPG + operator + Monaco import + search probe (+ optional AddRegions/Rebuild).
 # Does NOT use the homelab kubeconfig. Requires docker, kind, kubectl, curl, python3.
 set -euo pipefail
 
@@ -16,7 +16,7 @@ FIXTURE="${FIXTURE:-test/e2e/testdata/nominatim-monaco.yaml}"
 CNPG_VERSION="${CNPG_VERSION:-1.26.1}"
 CNPG_URL="https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.26/releases/cnpg-${CNPG_VERSION}.yaml"
 RUN_ADD_REGIONS="${RUN_ADD_REGIONS:-1}"
-RUN_REIMPORT="${RUN_REIMPORT:-1}"
+RUN_REBUILD="${RUN_REBUILD:-1}"
 SEARCH_QUERY="${SEARCH_QUERY:-avenue%20pasteur}"
 
 log() { printf '==> %s\n' "$*"; }
@@ -219,27 +219,27 @@ add_regions() {
   return 1
 }
 
-reimport() {
-  [[ "${RUN_REIMPORT}" == "1" ]] || { log "skipping Reimport"; return 0; }
+rebuild() {
+  [[ "${RUN_REBUILD}" == "1" ]] || { log "skipping Rebuild"; return 0; }
 
   local db="${NOM_NAME}-pg-nominatim" prev_uid
   prev_uid="$(kubectl get database "${db}" -n "${VALIDATION_NS}" \
     -o jsonpath='{.metadata.uid}' 2>/dev/null || true)"
   if [[ -z "${prev_uid}" ]]; then
-    echo "expected an owned CNPG Database ${db} before Reimport" >&2
+    echo "expected an owned CNPG Database ${db} before Rebuild" >&2
     return 1
   fi
-  log "owned CNPG Database ${db} uid before Reimport: ${prev_uid}"
+  log "owned CNPG Database ${db} uid before Rebuild: ${prev_uid}"
 
-  log "creating Reimport NominatimOperation"
+  log "creating Rebuild NominatimOperation"
   kubectl apply -f - <<EOF
 apiVersion: nominatim.zebernst.dev/v1alpha1
 kind: NominatimOperation
 metadata:
-  name: ${NOM_NAME}-reimport-validation
+  name: ${NOM_NAME}-rebuild-validation
   namespace: ${VALIDATION_NS}
 spec:
-  type: Reimport
+  type: Rebuild
   nominatimInstanceRef:
     name: ${NOM_NAME}
   regions:
@@ -251,37 +251,37 @@ spec:
 EOF
 
 
-  assert_reimport_database_replaced "${db}" "${prev_uid}" || return 1
+  assert_rebuild_database_replaced "${db}" "${prev_uid}" || return 1
 
   local deadline=$((SECONDS + 2400))
   while (( SECONDS < deadline )); do
-    phase="$(kubectl get nominatimoperation "${NOM_NAME}-reimport-validation" -n "${VALIDATION_NS}" \
+    phase="$(kubectl get nominatimoperation "${NOM_NAME}-rebuild-validation" -n "${VALIDATION_NS}" \
       -o jsonpath='{.status.phase}' 2>/dev/null || true)"
     if [[ "${phase}" == "Succeeded" ]]; then
-      log "Reimport Succeeded"
+      log "Rebuild Succeeded"
       return 0
     fi
     if [[ "${phase}" == "Failed" ]]; then
-      kubectl get nominatimoperation "${NOM_NAME}-reimport-validation" -n "${VALIDATION_NS}" -o yaml || true
-      echo "Reimport Failed" >&2
+      kubectl get nominatimoperation "${NOM_NAME}-rebuild-validation" -n "${VALIDATION_NS}" -o yaml || true
+      echo "Rebuild Failed" >&2
       return 1
     fi
     sleep 10
   done
-  echo "timed out waiting for Reimport" >&2
+  echo "timed out waiting for Rebuild" >&2
   return 1
 }
 
 # The worker Job may only be armed once the owned CNPG Database has been replaced by a new
 # object (fresh uid) reporting status.applied=true, so PostGIS/hstore are reinstalled by
 # CNPG on an empty database. Polling can miss a short violation, so this fails fast the
-# moment it sees the Job next to the pre-Reimport uid.
-assert_reimport_database_replaced() {
+# moment it sees the Job next to the pre-Rebuild uid.
+assert_rebuild_database_replaced() {
   local db="$1" prev_uid="$2"
-  local op="${NOM_NAME}-reimport-validation"
+  local op="${NOM_NAME}-rebuild-validation"
   local deadline=$((SECONDS + 900)) uid applied job
 
-  log "waiting for owned CNPG Database ${db} to be replaced before the Reimport Job"
+  log "waiting for owned CNPG Database ${db} to be replaced before the Rebuild Job"
   while (( SECONDS < deadline )); do
     uid="$(kubectl get database "${db}" -n "${VALIDATION_NS}" \
       -o jsonpath='{.metadata.uid}' 2>/dev/null || true)"
@@ -292,19 +292,19 @@ assert_reimport_database_replaced() {
 
     if [[ -n "${job}" ]]; then
       if [[ "${uid}" == "${prev_uid}" ]]; then
-        echo "Reimport Job armed while the pre-Reimport Database ${db} was still present" >&2
+        echo "Rebuild Job armed while the pre-Rebuild Database ${db} was still present" >&2
         return 1
       fi
       if [[ "${applied}" != "true" ]]; then
-        echo "Reimport Job armed before Database ${db} reported status.applied=true" >&2
+        echo "Rebuild Job armed before Database ${db} reported status.applied=true" >&2
         return 1
       fi
-      log "Reimport Job armed after Database ${db} was replaced (uid ${uid}, applied=true)"
+      log "Rebuild Job armed after Database ${db} was replaced (uid ${uid}, applied=true)"
       return 0
     fi
     sleep 2
   done
-  echo "timed out waiting for the Reimport Job to be armed" >&2
+  echo "timed out waiting for the Rebuild Job to be armed" >&2
   kubectl get database,jobs,nominatimoperation -n "${VALIDATION_NS}" -o wide || true
   return 1
 }
@@ -318,7 +318,7 @@ main() {
   wait_bootstrap
   assert_search
   add_regions
-  reimport
+  rebuild
   assert_search
   log "validation complete (namespace ${VALIDATION_NS} left running)"
   log "destroy with: kubectl delete ns ${VALIDATION_NS}; make undeploy uninstall"

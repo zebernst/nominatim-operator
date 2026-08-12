@@ -1095,7 +1095,7 @@ func TestOperationReconcile_ConflictFailure_SyncsParentSideEffectsWithoutError(t
 	conflicting := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "op-conflict", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:                 nominatimv1alpha1.NominatimOperationReimport,
+			Type:                 nominatimv1alpha1.NominatimOperationRebuild,
 			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
 		},
 	}

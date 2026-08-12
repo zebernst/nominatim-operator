@@ -13,7 +13,7 @@ Usage: entrypoint.sh [OPERATION_TYPE]
 OPERATION_TYPE (env or first arg):
   Bootstrap   Fresh or resumed nominatim import against external Postgres
   AddRegions  Import additional Geofabrik regions (add-data)
-  Reimport    Full re-import (expects empty/ready DB; then Bootstrap)
+  Rebuild    Full re-import (expects empty/ready DB; then Bootstrap)
   Update      Incremental Geofabrik diffs for imported regions
   CatchUp     Update loop until no further diffs (or max rounds)
   Refresh     Recompute postcodes / word-counts / functions / importance
@@ -29,7 +29,7 @@ EOF
 op="${OPERATION_TYPE:-}"
 if [ -z "${op}" ] && [ "${#}" -gt 0 ]; then
   case "$1" in
-    Bootstrap | AddRegions | Reimport | Update | CatchUp | Refresh | Migrate | Freeze | -h | --help)
+    Bootstrap | AddRegions | Rebuild | Update | CatchUp | Refresh | Migrate | Freeze | -h | --help)
       op="$1"
       shift
       ;;
@@ -54,8 +54,8 @@ case "${op}" in
   AddRegions)
     exec "${SCRIPTS_DIR}/add-regions.sh" "$@"
     ;;
-  Reimport)
-    exec "${SCRIPTS_DIR}/reimport.sh" "$@"
+  Rebuild)
+    exec "${SCRIPTS_DIR}/rebuild.sh" "$@"
     ;;
   Update)
     exec "${SCRIPTS_DIR}/update.sh" "$@"
@@ -73,6 +73,6 @@ case "${op}" in
     exec "${SCRIPTS_DIR}/freeze.sh" "$@"
     ;;
   *)
-    die "Unknown OPERATION_TYPE='${op}' (expected Bootstrap|AddRegions|Reimport|Update|CatchUp|Refresh|Migrate|Freeze)"
+    die "Unknown OPERATION_TYPE='${op}' (expected Bootstrap|AddRegions|Rebuild|Update|CatchUp|Refresh|Migrate|Freeze)"
     ;;
 esac

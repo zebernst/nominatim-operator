@@ -92,7 +92,7 @@ spec:
                 type: object
               regions:
                 description: |-
-                  Regions are Geofabrik-style region paths targeted by AddRegions or Reimport.
+                  Regions are Geofabrik-style region paths targeted by AddRegions or Rebuild.
                   Ignored for other operation types unless documented otherwise by the controller.
                 items:
                   type: string
@@ -114,7 +114,7 @@ spec:
                 enum:
                 - Bootstrap
                 - AddRegions
-                - Reimport
+                - Rebuild
                 - Update
                 - CatchUp
                 - Refresh

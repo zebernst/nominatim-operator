@@ -25,7 +25,7 @@ The operator keeps Kubernetes orchestration and status separate from Nominatim C
 2. **Workers are Nominatim CLI only** — no Kubernetes client, ServiceAccount tokens for the API server are not part of Operation Jobs. Sequencing into `status.regions` is operator-owned.
 3. **CR status is GitOps / cluster truth** — `status.regions` (and Succeeded Bootstrap peers) gate serving and day-2 Jobs. PVC files (`import-finished`, `imported-regions.txt`, `update/*/sequence.state`) are **worker-local bookmarks**, not coordination.
 4. **Flatnode is write-plane only** — mount on import/update Jobs when `spec.flatnode` is set; never on the API Deployment.
-5. **Sequence state** — after Succeeded Bootstrap / AddRegions / Reimport / Update / CatchUp, the operator starts a short **sequence probe** Job that read-only mounts the project PVC, writes ConfigMap `{name}-sequence`, and the reconciler merges into `status.regions[].sequenceState`. That string is a **pyosmium / Geofabrik** cursor (`sequenceNumber@timestamp`), not Nominatim `NOMINATIM_REPLICATION_*` lag.
+5. **Sequence state** — after Succeeded Bootstrap / AddRegions / Rebuild / Update / CatchUp, the operator starts a short **sequence probe** Job that read-only mounts the project PVC, writes ConfigMap `{name}-sequence`, and the reconciler merges into `status.regions[].sequenceState`. That string is a **pyosmium / Geofabrik** cursor (`sequenceNumber@timestamp`), not Nominatim `NOMINATIM_REPLICATION_*` lag.
 
 Details, contracts, and shell tests: [`images/README.md`](images/README.md).
 

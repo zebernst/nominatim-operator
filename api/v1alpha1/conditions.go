@@ -23,7 +23,7 @@ const (
 	ConditionRegionsDrift             = "RegionsDrift"
 	ConditionRegionRemovalUnsupported = "RegionRemovalUnsupported"
 	// ConditionImportConfigDrift is True when import-time Nominatim settings in spec
-	// differ from those sealed at Bootstrap (requires Reimport to apply).
+	// differ from those sealed at Bootstrap (requires Rebuild to apply).
 	ConditionImportConfigDrift = "ImportConfigDrift"
 )
 

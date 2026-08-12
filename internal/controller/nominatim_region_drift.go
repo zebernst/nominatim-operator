@@ -30,10 +30,10 @@ import (
 
 const (
 	addRegionsNameSuffix = "-addregions"
-	reimportNameSuffix   = "-reimport"
+	rebuildNameSuffix    = "-rebuild"
 )
 
-// reconcileRegionDrift creates AddRegions or Reimport NominatimOperations when
+// reconcileRegionDrift creates AddRegions or Rebuild NominatimOperations when
 // spec.regions diverges from status.regions. Removals never delete DB data — they
 // only surface ConditionRegionRemovalUnsupported (set in syncStatus).
 // ops is the Reconcile-scoped parent Operation list (one list per pass).
@@ -60,8 +60,8 @@ func (r *NominatimInstanceReconciler) reconcileRegionDrift(ctx context.Context, 
 	}
 
 	switch policy {
-	case nominatimv1alpha1.RegionChangeReimport:
-		return r.ensureReimportOperation(ctx, nom, ops, desired)
+	case nominatimv1alpha1.RegionChangeRebuild:
+		return r.ensureRebuildOperation(ctx, nom, ops, desired)
 	default:
 		return r.ensureAddRegionsOperation(ctx, nom, ops, missing)
 	}
@@ -133,7 +133,7 @@ func (r *NominatimInstanceReconciler) ensureAddRegionsOperation(
 	return nil
 }
 
-func (r *NominatimInstanceReconciler) ensureReimportOperation(
+func (r *NominatimInstanceReconciler) ensureRebuildOperation(
 	ctx context.Context,
 	nom *nominatimv1alpha1.NominatimInstance,
 	peers []nominatimv1alpha1.NominatimOperation,
@@ -143,20 +143,20 @@ func (r *NominatimInstanceReconciler) ensureReimportOperation(
 
 	for i := range peers {
 		peer := &peers[i]
-		if peer.Spec.Type == nominatimv1alpha1.NominatimOperationReimport && isActiveOperationPhase(peer.Status.Phase) {
+		if peer.Spec.Type == nominatimv1alpha1.NominatimOperationRebuild && isActiveOperationPhase(peer.Status.Phase) {
 			return nil
 		}
 		if isWriteHeavyOperation(peer.Spec.Type) && isActiveOperationPhase(peer.Status.Phase) {
-			log.Info("skipping Reimport create; write-heavy operation active", "peer", peer.Name)
+			log.Info("skipping Rebuild create; write-heavy operation active", "peer", peer.Name)
 			return nil
 		}
 	}
 
 	if nom.Status.Database.ConnectionSecretName == "" {
-		return fmt.Errorf("cannot create Reimport operation: status.database.connectionSecretName is empty")
+		return fmt.Errorf("cannot create Rebuild operation: status.database.connectionSecretName is empty")
 	}
 
-	name := nom.Name + reimportNameSuffix
+	name := nom.Name + rebuildNameSuffix
 	opName := name
 	for i := range peers {
 		if peers[i].Name == opName {
@@ -168,17 +168,17 @@ func (r *NominatimInstanceReconciler) ensureReimportOperation(
 	op := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: opName, Namespace: nom.Namespace},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:                 nominatimv1alpha1.NominatimOperationReimport,
+			Type:                 nominatimv1alpha1.NominatimOperationRebuild,
 			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 			Regions:              append([]string(nil), desired...),
 		},
 	}
 	if err := controllerutil.SetControllerReference(nom, op, r.Scheme); err != nil {
-		return fmt.Errorf("set controller reference on Reimport operation: %w", err)
+		return fmt.Errorf("set controller reference on Rebuild operation: %w", err)
 	}
 	if err := r.Create(ctx, op); err != nil {
-		return fmt.Errorf("create Reimport operation: %w", err)
+		return fmt.Errorf("create Rebuild operation: %w", err)
 	}
-	log.Info("created Reimport operation", "operation", op.Name, "regions", strings.Join(desired, ","))
+	log.Info("created Rebuild operation", "operation", op.Name, "regions", strings.Join(desired, ","))
 	return nil
 }

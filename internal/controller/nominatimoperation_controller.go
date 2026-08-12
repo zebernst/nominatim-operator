@@ -180,7 +180,7 @@ func (r *NominatimOperationReconciler) enforceRegionGates(
 }
 
 // waitForJobPrerequisites blocks Job creation until the connection Secret exists, the CNPG
-// Cluster/Database is ready, and (for Reimport) the owned Database has been drop/recreated.
+// Cluster/Database is ready, and (for Rebuild) the owned Database has been drop/recreated.
 // wait=true means the caller should return result without creating the Job.
 func (r *NominatimOperationReconciler) waitForJobPrerequisites(
 	ctx context.Context,
@@ -209,12 +209,12 @@ func (r *NominatimOperationReconciler) waitForJobPrerequisites(
 		return ctrl.Result{}, false, err
 	}
 
-	// Reimport reset must run before cnpgClusterReadyForJobs: after the drop the owned
+	// Rebuild reset must run before cnpgClusterReadyForJobs: after the drop the owned
 	// Database is absent / not-applied, and the Operation (not readiness gating) recreates it.
-	if ready, err := r.ensureReimportDatabaseReset(ctx, op, parent); err != nil {
+	if ready, err := r.ensureRebuildDatabaseReset(ctx, op, parent); err != nil {
 		return ctrl.Result{}, false, err
 	} else if !ready {
-		log.Info("waiting for owned CNPG Database drop/recreate before Reimport Job",
+		log.Info("waiting for owned CNPG Database drop/recreate before Rebuild Job",
 			"nominatim", parent.Name, "database", OwnedCNPGDatabaseName(parent))
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, true, nil
 	}
@@ -407,22 +407,22 @@ func cnpgOwnedDatabaseApplied(ctx context.Context, c client.Client, namespace, n
 }
 
 const (
-	annotationReimportDBReset   = "nominatim.zebernst.dev/reimport-db-reset"
-	annotationReimportDBPrevUID = "nominatim.zebernst.dev/reimport-db-prev-uid"
-	reimportDBResetPending      = "pending"
-	reimportDBResetDone         = "done"
-	reimportDBPrevUIDNone       = "none"
+	annotationRebuildDBReset   = "nominatim.zebernst.dev/rebuild-db-reset"
+	annotationRebuildDBPrevUID = "nominatim.zebernst.dev/rebuild-db-prev-uid"
+	rebuildDBResetPending      = "pending"
+	rebuildDBResetDone         = "done"
+	rebuildDBPrevUIDNone       = "none"
 )
 
-// ensureReimportDatabaseReset drops and recreates the owned CNPG Database CR before a
-// Reimport Job so PostGIS/hstore are reinstalled by CNPG (superuser) on an empty DB.
-// Non-Reimport / non-owned-cluster modes are a no-op (ready=true).
-func (r *NominatimOperationReconciler) ensureReimportDatabaseReset(
+// ensureRebuildDatabaseReset drops and recreates the owned CNPG Database CR before a
+// Rebuild Job so PostGIS/hstore are reinstalled by CNPG (superuser) on an empty DB.
+// Non-Rebuild / non-owned-cluster modes are a no-op (ready=true).
+func (r *NominatimOperationReconciler) ensureRebuildDatabaseReset(
 	ctx context.Context,
 	op *nominatimv1alpha1.NominatimOperation,
 	parent *nominatimv1alpha1.NominatimInstance,
 ) (bool, error) {
-	if op.Spec.Type != nominatimv1alpha1.NominatimOperationReimport {
+	if op.Spec.Type != nominatimv1alpha1.NominatimOperationRebuild {
 		return true, nil
 	}
 	owned := parent.Spec.Database.Cluster != nil ||
@@ -431,13 +431,13 @@ func (r *NominatimOperationReconciler) ensureReimportDatabaseReset(
 		return true, nil
 	}
 
-	if op.Annotations[annotationReimportDBReset] == reimportDBResetDone {
+	if op.Annotations[annotationRebuildDBReset] == rebuildDBResetDone {
 		return true, nil
 	}
 
 	// Wait for the API Deployment to reach zero replicas before DROP DATABASE. The parent
-	// scales it down once this Operation is in activeOperationRefs (Reimport always suspends).
-	if quiesced, err := r.apiQuiescedForReimport(ctx, parent); err != nil {
+	// scales it down once this Operation is in activeOperationRefs (Rebuild always suspends).
+	if quiesced, err := r.apiQuiescedForRebuild(ctx, parent); err != nil {
 		return false, err
 	} else if !quiesced {
 		return false, nil
@@ -452,13 +452,13 @@ func (r *NominatimOperationReconciler) ensureReimportDatabaseReset(
 	db := &unstructured.Unstructured{}
 	db.SetGroupVersionKind(CNPGDatabaseGVK)
 	err := r.Get(ctx, types.NamespacedName{Name: dbName, Namespace: parent.Namespace}, db)
-	prevUID := op.Annotations[annotationReimportDBPrevUID]
+	prevUID := op.Annotations[annotationRebuildDBPrevUID]
 
 	switch {
 	case prevUID == "":
 		// First pass: record current UID (or none) and delete so CNPG drops the database.
 		if apierrors.IsNotFound(err) {
-			if err := r.patchReimportResetAnnotations(ctx, op, reimportDBResetPending, reimportDBPrevUIDNone); err != nil {
+			if err := r.patchRebuildResetAnnotations(ctx, op, rebuildDBResetPending, rebuildDBPrevUIDNone); err != nil {
 				return false, err
 			}
 			return false, nil
@@ -475,7 +475,7 @@ func (r *NominatimOperationReconciler) ensureReimportDatabaseReset(
 		fresh.SetGroupVersionKind(CNPGDatabaseGVK)
 		if err := r.Get(ctx, types.NamespacedName{Name: dbName, Namespace: parent.Namespace}, fresh); err != nil {
 			if apierrors.IsNotFound(err) {
-				if err := r.patchReimportResetAnnotations(ctx, op, reimportDBResetPending, uid); err != nil {
+				if err := r.patchRebuildResetAnnotations(ctx, op, rebuildDBResetPending, uid); err != nil {
 					return false, err
 				}
 				return false, nil
@@ -483,9 +483,9 @@ func (r *NominatimOperationReconciler) ensureReimportDatabaseReset(
 			return false, err
 		}
 		if err := r.Delete(ctx, fresh); err != nil && !apierrors.IsNotFound(err) {
-			return false, fmt.Errorf("delete owned CNPG Database %q for Reimport: %w", dbName, err)
+			return false, fmt.Errorf("delete owned CNPG Database %q for Rebuild: %w", dbName, err)
 		}
-		if err := r.patchReimportResetAnnotations(ctx, op, reimportDBResetPending, uid); err != nil {
+		if err := r.patchRebuildResetAnnotations(ctx, op, rebuildDBResetPending, uid); err != nil {
 			return false, err
 		}
 		return false, nil
@@ -502,7 +502,7 @@ func (r *NominatimOperationReconciler) ensureReimportDatabaseReset(
 
 	default:
 		// Replacement exists — wait until it is a new object and applied.
-		if prevUID != reimportDBPrevUIDNone && string(db.GetUID()) == prevUID {
+		if prevUID != rebuildDBPrevUIDNone && string(db.GetUID()) == prevUID {
 			return false, nil
 		}
 		applied, found, aerr := unstructured.NestedBool(db.Object, "status", "applied")
@@ -512,19 +512,19 @@ func (r *NominatimOperationReconciler) ensureReimportDatabaseReset(
 		if !found || !applied {
 			return false, nil
 		}
-		if err := r.patchReimportResetAnnotations(ctx, op, reimportDBResetDone, prevUID); err != nil {
+		if err := r.patchRebuildResetAnnotations(ctx, op, rebuildDBResetDone, prevUID); err != nil {
 			return false, err
 		}
 		return true, nil
 	}
 }
 
-// apiQuiescedForReimport reports whether the owned API Deployment has no pods left that
+// apiQuiescedForRebuild reports whether the owned API Deployment has no pods left that
 // could hold connections open against the application database. Missing Deployments are
 // treated as quiesced (pre-bootstrap / never created). When a Deployment still requests
 // replicas, this scales it to zero so DROP DATABASE is not blocked waiting on the parent
 // reconciler to observe activeOperationRefs.
-func (r *NominatimOperationReconciler) apiQuiescedForReimport(ctx context.Context, parent *nominatimv1alpha1.NominatimInstance) (bool, error) {
+func (r *NominatimOperationReconciler) apiQuiescedForRebuild(ctx context.Context, parent *nominatimv1alpha1.NominatimInstance) (bool, error) {
 	deploy := &appsv1.Deployment{}
 	key := types.NamespacedName{Name: APIName(parent), Namespace: parent.Namespace}
 	err := r.Get(ctx, key, deploy)
@@ -572,7 +572,7 @@ func ensureDatabaseReclaimDelete(ctx context.Context, c client.Client, db *unstr
 	})
 }
 
-func (r *NominatimOperationReconciler) patchReimportResetAnnotations(ctx context.Context, op *nominatimv1alpha1.NominatimOperation, reset, prevUID string) error {
+func (r *NominatimOperationReconciler) patchRebuildResetAnnotations(ctx context.Context, op *nominatimv1alpha1.NominatimOperation, reset, prevUID string) error {
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		latest := &nominatimv1alpha1.NominatimOperation{}
 		if err := r.Get(ctx, types.NamespacedName{Name: op.Name, Namespace: op.Namespace}, latest); err != nil {
@@ -581,8 +581,8 @@ func (r *NominatimOperationReconciler) patchReimportResetAnnotations(ctx context
 		if latest.Annotations == nil {
 			latest.Annotations = map[string]string{}
 		}
-		latest.Annotations[annotationReimportDBReset] = reset
-		latest.Annotations[annotationReimportDBPrevUID] = prevUID
+		latest.Annotations[annotationRebuildDBReset] = reset
+		latest.Annotations[annotationRebuildDBPrevUID] = prevUID
 		if err := r.Update(ctx, latest); err != nil {
 			return err
 		}

@@ -41,7 +41,7 @@ func TestIsWriteHeavyOperation(t *testing.T) {
 	g := NewWithT(t)
 	g.Expect(isWriteHeavyOperation(nominatimv1alpha1.NominatimOperationBootstrap)).To(BeTrue())
 	g.Expect(isWriteHeavyOperation(nominatimv1alpha1.NominatimOperationAddRegions)).To(BeTrue())
-	g.Expect(isWriteHeavyOperation(nominatimv1alpha1.NominatimOperationReimport)).To(BeTrue())
+	g.Expect(isWriteHeavyOperation(nominatimv1alpha1.NominatimOperationRebuild)).To(BeTrue())
 	g.Expect(isWriteHeavyOperation(nominatimv1alpha1.NominatimOperationUpdate)).To(BeFalse())
 	g.Expect(isWriteHeavyOperation(nominatimv1alpha1.NominatimOperationCatchUp)).To(BeFalse())
 	g.Expect(isWriteHeavyOperation(nominatimv1alpha1.NominatimOperationRefresh)).To(BeFalse())
@@ -98,7 +98,7 @@ func TestEvaluateWritePlaneScheduleBusyFromHelpers(t *testing.T) {
 	ev := evaluateWritePlane(&nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "bootstrap-2", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:                 nominatimv1alpha1.NominatimOperationReimport,
+			Type:                 nominatimv1alpha1.NominatimOperationRebuild,
 			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
 		},
 	}, []nominatimv1alpha1.NominatimOperation{bootstrap, otherNom, done})
@@ -287,12 +287,12 @@ func TestBuildOperationJob_AuxDataEnv(t *testing.T) {
 	g.Expect(envValue(env, envAuxUSPostcodes)).To(Equal("false"))
 }
 
-func TestBuildOperationJob_ReimportSetsConfirmEnv(t *testing.T) {
+func TestBuildOperationJob_RebuildSetsConfirmEnv(t *testing.T) {
 	g := NewWithT(t)
 	op := &nominatimv1alpha1.NominatimOperation{
-		ObjectMeta: metav1.ObjectMeta{Name: "reimport-1", Namespace: "ns"},
+		ObjectMeta: metav1.ObjectMeta{Name: "rebuild-1", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:                 nominatimv1alpha1.NominatimOperationReimport,
+			Type:                 nominatimv1alpha1.NominatimOperationRebuild,
 			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: "mynom"},
 			Regions:              []string{"europe/monaco"},
 		},
@@ -310,8 +310,8 @@ func TestBuildOperationJob_ReimportSetsConfirmEnv(t *testing.T) {
 	}
 	job := mustBuildOperationJob(t, op, parent, "staging-pvc", resolveImage(nil, defaultWorkerRepository), "")
 	c := job.Spec.Template.Spec.Containers[0]
-	g.Expect(envValue(c.Env, "NOMINATIM_REIMPORT_CONFIRM")).To(Equal("1"))
-	g.Expect(envValue(c.Env, "OPERATION_TYPE")).To(Equal("Reimport"))
+	g.Expect(envValue(c.Env, "NOMINATIM_REBUILD_CONFIRM")).To(Equal("1"))
+	g.Expect(envValue(c.Env, "OPERATION_TYPE")).To(Equal("Rebuild"))
 }
 
 func TestBuildOperationJob_IncludesDBEnvAndPBFURLForBootstrap(t *testing.T) {
@@ -489,7 +489,7 @@ func TestRequiresRegionGate(t *testing.T) {
 	g.Expect(requiresRegionGate(nominatimv1alpha1.NominatimOperationUpdate)).To(BeTrue())
 	g.Expect(requiresRegionGate(nominatimv1alpha1.NominatimOperationCatchUp)).To(BeTrue())
 	g.Expect(requiresRegionGate(nominatimv1alpha1.NominatimOperationBootstrap)).To(BeFalse())
-	g.Expect(requiresRegionGate(nominatimv1alpha1.NominatimOperationReimport)).To(BeFalse())
+	g.Expect(requiresRegionGate(nominatimv1alpha1.NominatimOperationRebuild)).To(BeFalse())
 	g.Expect(requiresRegionGate(nominatimv1alpha1.NominatimOperationRefresh)).To(BeFalse())
 	g.Expect(requiresRegionGate(nominatimv1alpha1.NominatimOperationMigrate)).To(BeFalse())
 	g.Expect(requiresRegionGate(nominatimv1alpha1.NominatimOperationFreeze)).To(BeFalse())
@@ -530,7 +530,7 @@ func TestIsOperationTypeImplemented(t *testing.T) {
 	g := NewWithT(t)
 	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationBootstrap)).To(BeTrue())
 	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationAddRegions)).To(BeTrue())
-	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationReimport)).To(BeTrue())
+	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationRebuild)).To(BeTrue())
 	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationUpdate)).To(BeTrue())
 	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationCatchUp)).To(BeTrue())
 	g.Expect(isOperationTypeImplemented(nominatimv1alpha1.NominatimOperationRefresh)).To(BeTrue())

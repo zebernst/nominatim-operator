@@ -157,12 +157,12 @@ func TestReconcileRegionDrift_AddDataSerialMultiMissingCreatesNextOpAfterSucceed
 	}
 }
 
-func TestReconcileRegionDrift_ReimportPolicyCreatesReimport(t *testing.T) {
+func TestReconcileRegionDrift_RebuildPolicyCreatesRebuild(t *testing.T) {
 	scheme := testScheme(t)
 	ctx := context.Background()
 	nom := baseNominatim("drift-reimp")
 	nom.Spec.Regions = []string{"south-america/brazil"}
-	nom.Spec.RegionChangePolicy = nominatimv1alpha1.RegionChangeReimport
+	nom.Spec.RegionChangePolicy = nominatimv1alpha1.RegionChangeRebuild
 	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{
 		{Name: "north-america/us-midwest"},
 		{Name: "asia/kazakhstan"},
@@ -180,11 +180,11 @@ func TestReconcileRegionDrift_ReimportPolicyCreatesReimport(t *testing.T) {
 	if err := c.List(ctx, ops); err != nil {
 		t.Fatal(err)
 	}
-	if len(ops.Items) != 1 || ops.Items[0].Spec.Type != nominatimv1alpha1.NominatimOperationReimport {
-		t.Fatalf("expected Reimport, got %#v", ops.Items)
+	if len(ops.Items) != 1 || ops.Items[0].Spec.Type != nominatimv1alpha1.NominatimOperationRebuild {
+		t.Fatalf("expected Rebuild, got %#v", ops.Items)
 	}
 	if len(ops.Items[0].Spec.Regions) != 1 || ops.Items[0].Spec.Regions[0] != "south-america/brazil" {
-		t.Fatalf("reimport regions=%v", ops.Items[0].Spec.Regions)
+		t.Fatalf("rebuild regions=%v", ops.Items[0].Spec.Regions)
 	}
 }
 
@@ -251,7 +251,7 @@ func TestReconcileRegionDrift_NoParallelAddRegions(t *testing.T) {
 	}
 }
 
-func TestSyncRegionsFromDriftOps_AddAndReimport(t *testing.T) {
+func TestSyncRegionsFromDriftOps_AddAndRebuild(t *testing.T) {
 	nom := baseNominatim("sync-drift")
 	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "a"}}
 
@@ -265,12 +265,12 @@ func TestSyncRegionsFromDriftOps_AddAndReimport(t *testing.T) {
 	}
 
 	reimp := nominatimv1alpha1.NominatimOperation{
-		Spec:   nominatimv1alpha1.NominatimOperationSpec{Type: nominatimv1alpha1.NominatimOperationReimport, Regions: []string{"c"}},
+		Spec:   nominatimv1alpha1.NominatimOperationSpec{Type: nominatimv1alpha1.NominatimOperationRebuild, Regions: []string{"c"}},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}
 	syncRegionsFromDriftOps(nom, []nominatimv1alpha1.NominatimOperation{reimp})
 	if len(nom.Status.Regions) != 1 || nom.Status.Regions[0].Name != "c" {
-		t.Fatalf("reimport replace: %#v", nom.Status.Regions)
+		t.Fatalf("rebuild replace: %#v", nom.Status.Regions)
 	}
 }
 

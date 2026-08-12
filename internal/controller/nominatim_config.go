@@ -175,7 +175,7 @@ func syncImportConfigDriftCondition(nom *nominatimv1alpha1.NominatimInstance) {
 		return
 	}
 	msg := fmt.Sprintf(
-		"import-time nominatim settings differ from Bootstrap seal (spec importStyle=%q tokenizer=%q; sealed importStyle=%q tokenizer=%q); Reimport required to apply",
+		"import-time nominatim settings differ from Bootstrap seal (spec importStyle=%q tokenizer=%q; sealed importStyle=%q tokenizer=%q); Rebuild required to apply",
 		specStyle, specTok, obs.ImportStyle, obs.Tokenizer,
 	)
 	meta.SetStatusCondition(&nom.Status.Conditions, metav1.Condition{

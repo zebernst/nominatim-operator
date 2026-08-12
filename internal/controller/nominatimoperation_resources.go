@@ -55,7 +55,7 @@ func isOperationTypeImplemented(t nominatimv1alpha1.NominatimOperationType) bool
 	switch t {
 	case nominatimv1alpha1.NominatimOperationBootstrap,
 		nominatimv1alpha1.NominatimOperationAddRegions,
-		nominatimv1alpha1.NominatimOperationReimport,
+		nominatimv1alpha1.NominatimOperationRebuild,
 		nominatimv1alpha1.NominatimOperationUpdate,
 		nominatimv1alpha1.NominatimOperationCatchUp,
 		nominatimv1alpha1.NominatimOperationRefresh,
@@ -69,7 +69,7 @@ func isOperationTypeImplemented(t nominatimv1alpha1.NominatimOperationType) bool
 
 // Mutex policy for NominatimOperations targeting the same NominatimInstance:
 //
-// At most one write-heavy Operation (Bootstrap, AddRegions, Reimport, Migrate,
+// At most one write-heavy Operation (Bootstrap, AddRegions, Rebuild, Migrate,
 // Freeze) may be Pending or Running per NominatimInstance. If another write-heavy
 // Operation already holds the write plane (Running or Job armed), a new
 // Operation is set to Failed with reason Conflict (no Job created). Two fresh
@@ -86,7 +86,7 @@ func isWriteHeavyOperation(t nominatimv1alpha1.NominatimOperationType) bool {
 	switch t {
 	case nominatimv1alpha1.NominatimOperationBootstrap,
 		nominatimv1alpha1.NominatimOperationAddRegions,
-		nominatimv1alpha1.NominatimOperationReimport,
+		nominatimv1alpha1.NominatimOperationRebuild,
 		nominatimv1alpha1.NominatimOperationMigrate,
 		nominatimv1alpha1.NominatimOperationFreeze:
 		return true
@@ -110,12 +110,12 @@ func requiresRegionsEnv(t nominatimv1alpha1.NominatimOperationType) bool {
 }
 
 // requiresImportPBFURL is true for Operations that run nominatim import with
-// Geofabrik extracts (Bootstrap/Reimport). Migrate/Freeze/AddRegions are
+// Geofabrik extracts (Bootstrap/Rebuild). Migrate/Freeze/AddRegions are
 // write-heavy for the mutex but do not download PBFs via PBF_URL.
 func requiresImportPBFURL(t nominatimv1alpha1.NominatimOperationType) bool {
 	switch t {
 	case nominatimv1alpha1.NominatimOperationBootstrap,
-		nominatimv1alpha1.NominatimOperationReimport:
+		nominatimv1alpha1.NominatimOperationRebuild:
 		return true
 	default:
 		return false
@@ -149,8 +149,8 @@ func effectiveRegions(op *nominatimv1alpha1.NominatimOperation, parent *nominati
 
 // requiresRegionGate reports whether an Operation type is subject to the pre-Job
 // region gate (R1: regions required, R2: Bootstrap-done for regions-mode parents).
-// Bootstrap and Reimport intentionally opt out: Bootstrap is how a regions-mode
-// parent first gets imported, and Reimport rebuilds from a caller-supplied region set.
+// Bootstrap and Rebuild intentionally opt out: Bootstrap is how a regions-mode
+// parent first gets imported, and Rebuild rebuilds from a caller-supplied region set.
 func requiresRegionGate(t nominatimv1alpha1.NominatimOperationType) bool {
 	switch t {
 	case nominatimv1alpha1.NominatimOperationAddRegions,
@@ -311,10 +311,10 @@ func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominat
 		{Name: "PROJECT_DIR", Value: projectMountPath},
 		{Name: "IMPORT_STAGING", Value: stagingMountPath},
 	}
-	if op.Spec.Type == nominatimv1alpha1.NominatimOperationReimport {
-		// Worker refuses Reimport unless the operator explicitly arms it after
-		// orchestrating DB/project reset (see images/worker/scripts/reimport.sh).
-		env = append(env, corev1.EnvVar{Name: "NOMINATIM_REIMPORT_CONFIRM", Value: "1"})
+	if op.Spec.Type == nominatimv1alpha1.NominatimOperationRebuild {
+		// Worker refuses Rebuild unless the operator explicitly arms it after
+		// orchestrating DB/project reset (see images/worker/scripts/rebuild.sh).
+		env = append(env, corev1.EnvVar{Name: "NOMINATIM_REBUILD_CONFIRM", Value: "1"})
 	}
 
 	if requiresRegionsEnv(op.Spec.Type) {
@@ -390,7 +390,7 @@ func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominat
 }
 
 // pbfURLForRegion builds the Geofabrik download URL for a single region path.
-// Bootstrap/Reimport Jobs set PBF_URL from regions[0]; the worker still downloads
+// Bootstrap/Rebuild Jobs set PBF_URL from regions[0]; the worker still downloads
 // all NOMINATIM_REGIONS extracts and passes them as multiple --osm-file flags.
 func pbfURLForRegion(region string) string {
 	return fmt.Sprintf("https://download.geofabrik.de/%s-latest.osm.pbf", region)

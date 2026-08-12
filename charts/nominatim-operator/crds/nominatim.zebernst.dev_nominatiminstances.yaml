@@ -133,12 +133,12 @@ spec:
                     default: Never
                     description: |-
                       SuspendDuringOperations controls scaling the API during day-2 operations
-                      (AddRegions, Reimport, Update, …). Default Never keeps the API up.
+                      (AddRegions, Rebuild, Update, …). Default Never keeps the API up.
                       Day-0 Bootstrap is not covered here: API/UI are not created until Bootstrap
                       has populated status.regions (see servingWorkloadsAllowed).
                     enum:
                     - Never
-                    - BootstrapReimport
+                    - BootstrapRebuild
                     - WriteHeavy
                     - All
                     type: string
@@ -672,10 +672,10 @@ spec:
                     default: WriteHeavy
                     description: |-
                       PauseBackupsDuringOperations controls continuous backup pausing around operations.
-                      Default WriteHeavy pauses Bootstrap/AddRegions/Reimport/Migrate/Freeze but not routine Update.
+                      Default WriteHeavy pauses Bootstrap/AddRegions/Rebuild/Migrate/Freeze but not routine Update.
                     enum:
                     - Never
-                    - BootstrapReimport
+                    - BootstrapRebuild
                     - WriteHeavy
                     - All
                     type: string
@@ -1245,12 +1245,12 @@ spec:
                   Defaults to AddData.
                 enum:
                 - AddData
-                - Reimport
+                - Rebuild
                 type: string
               regions:
                 description: |-
                   Regions is the desired set of Geofabrik-style region paths (e.g. north-america/us).
-                  Removal from this list does not delete DB data — a Reimport (or putting the region back) is required to shrink.
+                  Removal from this list does not delete DB data — a Rebuild (or putting the region back) is required to shrink.
                 items:
                   type: string
                 type: array
@@ -1549,7 +1549,7 @@ spec:
               regions:
                 description: |-
                   Regions is the cluster source of truth for which Geofabrik regions are imported
-                  (synced from Succeeded Bootstrap/AddRegions/Reimport). Project PVC files such as
+                  (synced from Succeeded Bootstrap/AddRegions/Rebuild). Project PVC files such as
                   imported-regions.txt / import-finished are worker-local resume bookmarks only.
                 items:
                   description: |-

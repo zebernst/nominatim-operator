@@ -10,6 +10,7 @@
 
 ### Changed
 
+* **api:** rename Operation type and `regionChangePolicy` value `Reimport` → `Rebuild`; `OperationImpact` value `BootstrapReimport` → `BootstrapRebuild`; worker confirm env `NOMINATIM_REBUILD_CONFIRM` (ADR-0002).
 * **controller:** collapse CNPG Operation side-effects onto `CNPGEffects` — pause/profile live next to `applyPreJob`/`applyTerminal`; unattached `status.database.mode` no-ops in the shared helpers; Nominatim reconcile no longer owns pause/profile wrappers (nominatim-kfy.2).
 * **controller:** observe `status.regions` from Succeeded Operations in one `observeRegionsFromSucceededOps` path; Bootstrap/drift reconcile only ensure creates (nominatim-kfy.3).
 * **worker:** split `prepare_db` vs `prepare_import` so Migrate/Freeze/Update/Refresh do not link staging PBF/aux extracts (nominatim-kfy.4).
@@ -34,7 +35,7 @@
 * **status:** operator-owned sequence probe Job reads project `update/*/sequence.state` into a ConfigMap and merges `status.regions[].sequenceState` (workers do not call the Kubernetes API; nominatim-5et.35.3).
 * **test:** bats + shellcheck CI for worker `common.sh` helpers (`detect_continue_at`, `parse_regions`, `seed_project_env`); portable `sed -i.bak` in `seed_project_env` (nominatim-5et.26).
 * **test:** envtest starts the manager and asserts the API Deployment appears via watches without calling `Reconcile()` directly (nominatim-5et.29).
-* **test:** CI import e2e asserts the API Deployment scales to zero while Reimport is active and restores afterward (`suspendDuringOperations` / Reimport-always-quiesce; nominatim-5et.27).
+* **test:** CI import e2e asserts the API Deployment scales to zero while Rebuild is active and restores afterward (`suspendDuringOperations` / Rebuild-always-quiesce; nominatim-5et.27).
 * **test:** CI import e2e (`make test-e2e-import`) bootstraps `europe/monaco` + `europe/andorra` via multi `--osm-file` (`test/e2e/testdata/nominatim-monaco-andorra.yaml`), asserts both names on `status.regions`, and probes each country with `countrycodes=` so a regions[0]-only import cannot pass. The monaco-only fixture remains for `hack/validate-kind.sh` day-2 AddRegions. See `images/README.md` for the Bootstrap vs AddRegions contract.
 * **worker:** `add-regions.sh` now imports every region in `NOMINATIM_REGIONS` (the operator's `Spec.Regions` contract) not already in `imported-regions.txt`, indexing once if any region changed. Removed the `NOMINATIM_IMPORT_MAX_REGIONS` / `NOMINATIM_IMPORT_ONLY_REGION` single-region deferral; the operator (not the worker) now owns AddRegions chunking. Deploy the operator and worker images together — see `images/README.md` for the Spec/`NOMINATIM_REGIONS` contract.
 * **worker:** `wait_for_postgres` in `scripts/common.sh` now defaults to 15 attempts at a 2s sleep (~30s, down from ~180s), honoring `NOMINATIM_PG_WAIT_ATTEMPTS` to override the attempt count. The operator's CNPG readiness gate (`cnpgClusterReadyForJobs`) is the primary check before a Job is created; this shortened loop is last-mile only. See `images/README.md` for the readiness split and the mode-aware Bootstrap-done gate (PBF-only vs regions mode).
@@ -48,7 +49,7 @@
 * **api:** define NominatimOperation v1alpha1 workflow CRD ([eb27daf](https://github.com/zebernst/nominatim-operator/commit/eb27dafb8fec4ed93d0d2b13e2057b1298e14cfa))
 * **chart:** package nominatim-operator Helm chart on bjw-s common ([571d6bc](https://github.com/zebernst/nominatim-operator/commit/571d6bcf6f88e4ed174337af15d7b41800405b43))
 * **controller:** auto-bootstrap empty Nominatim and sync status.regions ([#6](https://github.com/zebernst/nominatim-operator/issues/6)) ([43be2d8](https://github.com/zebernst/nominatim-operator/commit/43be2d8dac691ef5ac4951db0cb04b53a23d2364))
-* **controller:** drive AddRegions/Reimport from region drift ([#10](https://github.com/zebernst/nominatim-operator/issues/10)) ([040473a](https://github.com/zebernst/nominatim-operator/commit/040473ae46eeb10339c7f54c1913bf576d716dae))
+* **controller:** drive AddRegions/Rebuild from region drift ([#10](https://github.com/zebernst/nominatim-operator/issues/10)) ([040473a](https://github.com/zebernst/nominatim-operator/commit/040473ae46eeb10339c7f54c1913bf576d716dae))
 * **controller:** NominatimOperation Jobs, staging PVC, write-heavy mutex ([#3](https://github.com/zebernst/nominatim-operator/issues/3)) ([eb3ee13](https://github.com/zebernst/nominatim-operator/commit/eb3ee138b5959512e36715a5487614447e7d5e85))
 * **controller:** Operation lifecycle side-effects (ActiveOperationRefs, CNPG pause, profiles) ([#8](https://github.com/zebernst/nominatim-operator/issues/8)) ([e0ab05f](https://github.com/zebernst/nominatim-operator/commit/e0ab05f4dd976d374e7ead2c5e8a87bfaf99b5d7))
 * **controller:** reconcile API/UI Deployments, Services, HTTPRoutes, PVCs ([#5](https://github.com/zebernst/nominatim-operator/issues/5)) ([3b1477f](https://github.com/zebernst/nominatim-operator/commit/3b1477f2c1f8ba016ed83491425c13e7aa4c3ce9))
