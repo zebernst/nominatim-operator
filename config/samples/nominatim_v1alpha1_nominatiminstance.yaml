@@ -6,24 +6,24 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: nominatim-sample
 spec:
-  # Data plane: project PVC is for worker Jobs + sequence probe (RWO is fine).
-  # The API Deployment never mounts project or flatnode (read-only serving plane).
+  # Project PVC is for worker Jobs (and a short read-only sequence probe). RWO is fine.
+  # The API never mounts project or flatnode — see docs/concepts.md.
   project:
     volume:
       claimName: nominatim-project
   # flatnode:
   #   volume:
-  #     claimName: nominatim-flatnode  # Jobs only; do not assume API multi-attach
+  #     claimName: nominatim-flatnode  # Jobs only
   regions:
     - north-america/us
   regionChangePolicy: AddData
-  # Optional Wikipedia importance + external postcode aux downloads (Bootstrap staging).
+  # Optional aux downloads during Bootstrap (see docs/configuration.md).
   # auxData:
   #   wikimediaImportance: true
   #   secondaryImportance: true
   #   usPostcodes: true
-  # Typed Nominatim settings (preferred over NOMINATIM_* in podSpec).
-  # ImportStyle/Tokenizer seal after Bootstrap; change requires Rebuild.
+  # Typed Nominatim settings (prefer over NOMINATIM_* in podSpec).
+  # ImportStyle/Tokenizer seal after Bootstrap; changing them needs Rebuild.
   # nominatim:
   #   importStyle: extratags
   #   tokenizer: icu
@@ -36,29 +36,33 @@ spec:
   #     requestTimeoutSeconds: 60
   #     defaultLanguage: en
   #     corsNoAccessControl: true
+  #
+  # Postgres: exactly one of cluster | clusterRef | connectionSecretRef.
+  # For CNPG backup/restore, author a Cluster with backup and use clusterRef
+  # (docs/database.md). Owned database.cluster does not expose backup knobs.
   database:
     clusterRef:
       name: nominatim-pg
-      # Optional: override the default CNPG "{name}-app" credentials Secret.
+      # Optional override of the default CNPG "{name}-app" Secret:
       # connectionSecretRef:
       #   name: nominatim-pg-app
+  # Degraded attach (no Cluster manage / profiles / backup pause):
+  # database:
+  #   connectionSecretRef:
+  #     name: nominatim-pg-credentials
   updates:
     enabled: true
     schedule: "0 3 * * *"
   api:
-    # Stateless serving (DB + env). May be >1; project/flatnode stay single-writer Jobs.
+    # Stateless serving; replicas may be >1. Project/flatnode stay Jobs-only.
     replicas: 1
-    # Optional: pin Gunicorn workers; when unset, entrypoint uses cgroup CPU quota.
     # gunicornWorkers: 2
-    # Day-2 only (Never = keep API up during AddRegions/Update/…).
-    # Bootstrap does not use this: serving workloads wait for status.regions.
-    # Default probes: GET /status (startup/readiness/liveness); override via podSpec.
+    # Day-2: Never keeps API up during AddRegions/Update. Rebuild always scales API down.
     suspendDuringOperations: Never
-    # Optional podSpec overlay (affinity/resources/probes/…). Sibling image seals container image.
     # podSpec:
     #   nodeSelector:
     #     disktype: ssd
-  # Optional debug UI (packages osm-search/nominatim-ui). Omit or set enabled: false for API/DB-only.
+  # Optional UI. Omit or enabled: false for API/DB-only.
   # ui:
   #   enabled: true
   #   route:
@@ -70,11 +74,7 @@ spec:
   #   image:
   #     repository: ghcr.io/zebernst/nominatim-worker
   #     tag: latest
-  #   # Optional Job podSpec overlay (also used by Update Jobs).
-  #   # podSpec:
-  #   #   tolerations: []
-  # Owned Cluster create (alternative to clusterRef) also accepts resources/affinity/
-  # topologySpreadConstraints. For full CNPG (backup, custom bootstrap), use clusterRef.
+  # Owned Cluster (alternative to clusterRef) — basic knobs only:
   # database:
   #   cluster:
   #     instances: 1
@@ -84,9 +84,3 @@ spec:
   #         resources:
   #           requests:
   #             storage: 50Gi
-  #     resources:
-  #       requests:
-  #         memory: 1Gi
-  #     affinity:
-  #       nodeSelector:
-  #         node-role.kubernetes.io/postgres: ""

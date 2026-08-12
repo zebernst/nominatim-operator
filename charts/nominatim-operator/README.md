@@ -22,8 +22,7 @@ reference them. This chart does **not** install those third-party CRDs.
 They must **not** be applied as Flux desired-state (GitOps) objects. Manage only
 `NominatimInstance` CRs via Flux; let the operator create and garbage-collect operations.
 
-Instance architecture (control vs serving vs data/write planes, volumes, multi-replica
-API): see the repository [README](../../README.md) and [images/README.md](../../images/README.md).
+Instance architecture and day-2 Operations: [Getting started](../../docs/getting-started.md), [Concepts](../../docs/concepts.md), and [images/README.md](../../images/README.md) (builds only).
 
 ## CRDs (NominatimInstance / NominatimOperation)
 
