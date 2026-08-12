@@ -42,9 +42,8 @@ func (r *NominatimReconciler) reconcileRegionDrift(ctx context.Context, nom *nom
 		return fmt.Errorf("list operations for region drift: %w", err)
 	}
 
-	syncRegionsFromDriftOps(nom, ops)
-
-	// Bootstrap owns the empty→first-import path.
+	// Bootstrap owns the empty→first-import path. Observation of Succeeded ops
+	// into status.regions happens in observeRegionsFromSucceededOps (Reconcile).
 	if len(nom.Status.Regions) == 0 {
 		return nil
 	}
@@ -116,7 +115,7 @@ func (r *NominatimReconciler) ensureAddRegionsOperation(
 
 	// Create one AddRegions operation per missing region, serially: only the
 	// first missing region is included here. The next missing region is picked
-	// up on a later reconcile once this operation Succeeds and syncRegionsFromDriftOps
+	// up on a later reconcile once this operation Succeeds and observeRegionsFromSucceededOps
 	// merges it into status.regions (see the serial-AddRegions guard above).
 	next := missing[0]
 

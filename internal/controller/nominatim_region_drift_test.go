@@ -130,8 +130,16 @@ func TestReconcileRegionDrift_AddDataSerialMultiMissingCreatesNextOpAfterSucceed
 		t.Fatalf("update op status: %v", err)
 	}
 
-	// Re-reconcile: syncRegionsFromDriftOps should merge "b" into status, and drift
-	// should then create a new op for the next missing region, "c".
+	// Reconcile observes Succeeded ops, then drift ensure creates the next chunk.
+	if err := c.Get(ctx, client.ObjectKeyFromObject(nom), nom); err != nil {
+		t.Fatalf("get nom: %v", err)
+	}
+	listed := &nominatimv1alpha1.NominatimOperationList{}
+	if err := c.List(ctx, listed); err != nil {
+		t.Fatal(err)
+	}
+	observeRegionsFromSucceededOps(nom, listed.Items)
+
 	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
 		t.Fatalf("reconcileRegionDrift (2nd): %v", err)
 	}

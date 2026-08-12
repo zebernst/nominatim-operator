@@ -45,8 +45,6 @@ import (
 type NominatimReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
-	// CNPGEffects optional override for tests; defaults to no-op stubs until Operations wire patches.
-	CNPGEffects CNPGEffects
 	// ControllerName overrides the controller-runtime name (tests only).
 	ControllerName string
 }
@@ -108,9 +106,16 @@ func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	// Bootstrap before serving workloads so status.regions (synced on Succeeded)
+	ops, err := r.listOperationsForParent(ctx, nom)
+	if err != nil {
+		log.Error(err, "failed to list NominatimOperations for parent")
+		return ctrl.Result{}, err
+	}
+	observeRegionsFromSucceededOps(nom, ops)
+
+	// Ensure Bootstrap before serving workloads so status.regions (observed above)
 	// can unlock API/UI creation in the same reconcile pass.
-	if err := r.reconcileBootstrap(ctx, nom); err != nil {
+	if err := r.ensureBootstrapOperation(ctx, nom, ops); err != nil {
 		log.Error(err, "failed to reconcile Nominatim bootstrap")
 		return ctrl.Result{}, err
 	}

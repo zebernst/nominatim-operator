@@ -38,17 +38,15 @@ func BootstrapOperationName(nom *nominatimv1alpha1.Nominatim) string {
 	return nom.Name + bootstrapNameSuffix
 }
 
-// reconcileBootstrap auto-bootstraps an empty Nominatim instance and syncs
-// status.regions once a Bootstrap NominatimOperation succeeds. It must run after
-// reconcileDatabase (status.database.connectionSecretName known) and before
-// syncStatus, so Ready/RegionsDrift reflect any newly-synced regions.
+// reconcileBootstrap ensures a Bootstrap NominatimOperation exists for an empty
+// instance. Observation of Succeeded ops into status.regions is
+// observeRegionsFromSucceededOps (called from Reconcile before this). It must run
+// after reconcileDatabase (status.database.connectionSecretName known).
 func (r *NominatimReconciler) reconcileBootstrap(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
 	ops, err := r.listOperationsForParent(ctx, nom)
 	if err != nil {
 		return fmt.Errorf("list operations for bootstrap reconcile: %w", err)
 	}
-
-	syncRegionsFromBootstrap(nom, ops)
 
 	return r.ensureBootstrapOperation(ctx, nom, ops)
 }
@@ -110,6 +108,14 @@ func (r *NominatimReconciler) ensureBootstrapOperation(ctx context.Context, nom 
 		return fmt.Errorf("create Bootstrap operation: %w", err)
 	}
 	return nil
+}
+
+// observeRegionsFromSucceededOps is the single status.regions writer from Succeeded
+// Operations: Bootstrap fills an empty set, AddRegions merges, Reimport replaces.
+// Bootstrap/drift reconcile only ensure Operation creates.
+func observeRegionsFromSucceededOps(nom *nominatimv1alpha1.Nominatim, peers []nominatimv1alpha1.NominatimOperation) {
+	syncRegionsFromBootstrap(nom, peers)
+	syncRegionsFromDriftOps(nom, peers)
 }
 
 // syncRegionsFromBootstrap populates nom.Status.Regions (in-memory; persisted by the
