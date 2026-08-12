@@ -7,6 +7,7 @@ Own images for Nominatim on Kubernetes — **not** based on `mediagis/nominatim`
 | Operator (kubebuilder manager) | `operator.Dockerfile` | `ghcr.io/zebernst/nominatim-operator` | Control |
 | API (gunicorn + nominatim-api) | `api.Dockerfile` | `ghcr.io/zebernst/nominatim-api` | Serving |
 | Worker (nominatim CLI + Operation phases) | `worker.Dockerfile` | `ghcr.io/zebernst/nominatim-worker` | Data / write |
+| UI (static nominatim-ui) | `ui.Dockerfile` | `ghcr.io/zebernst/nominatim-ui` | Serving |
 
 Root operator architecture (planes, status SoT, replica/volume notes): see the repository [README](../README.md).
 
@@ -36,6 +37,7 @@ Override version at build time:
 
 ```bash
 docker build -f api.Dockerfile --build-arg NOMINATIM_VERSION=5.3.2 -t ghcr.io/zebernst/nominatim-api:dev .
+docker build -f ui.Dockerfile --build-arg NOMINATIM_UI_VERSION=3.12.0 -t ghcr.io/zebernst/nominatim-ui:dev .
 ```
 
 ## Local builds
@@ -49,9 +51,19 @@ docker build -t ghcr.io/zebernst/nominatim-api:dev -f api.Dockerfile .
 
 # Worker
 docker build -t ghcr.io/zebernst/nominatim-worker:dev -f worker.Dockerfile .
+
+# UI (packages https://github.com/osm-search/nominatim-ui/releases into nginx)
+docker build -t ghcr.io/zebernst/nominatim-ui:dev -f ui.Dockerfile .
+# or: make docker-build-ui
 ```
 
-CI (`.github/workflows/release.yaml`) builds and pushes all three to GHCR on pushes to `main` and on version tags.
+CI (`.github/workflows/release.yaml`) builds and pushes all four to GHCR on pushes to `main` and on version tags.
+
+## UI configuration
+
+The UI image is static HTML/JS from upstream. At container start, `images/ui/entrypoint.sh` writes `theme/config.theme.js` from `NOMINATIM_API_ENDPOINT` (browser-reachable Nominatim API base URL; trailing slash added). When unset, the endpoint defaults to `/` (same-origin reverse proxies). The operator sets this automatically from the first `spec.api.route.hostnames` entry when present (`https://<hostname>/`); override via `spec.ui.podSpec` env if needed.
+
+Omit `spec.ui`, or set `spec.ui.enabled: false`, for API- and database-only serving — the operator deletes any owned UI Deployment/Service/HTTPRoute. `enabled` defaults to `true` when the `ui` block is present.
 
 ## External Postgres
 

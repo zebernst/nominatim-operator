@@ -7,7 +7,7 @@ Kubernetes operator for running [Nominatim](https://nominatim.org/) in-cluster.
 | `NominatimInstance` (`nominatim.zebernst.dev/v1alpha1`) | GitOps desired state (one top-level CR) |
 | `NominatimOperation` | Controller-created finite workflows (Jobs); **not** Flux-driven |
 
-Images: `ghcr.io/zebernst/nominatim-{api,worker,operator}` — rebuilt for Kubernetes from upstream `nominatim-db` / `nominatim-api` (**not** `mediagis/nominatim`). See [`images/README.md`](images/README.md).
+Images: `ghcr.io/zebernst/nominatim-{api,worker,operator,ui}` — API/worker rebuilt for Kubernetes from upstream `nominatim-db` / `nominatim-api`; UI packages [osm-search/nominatim-ui](https://github.com/osm-search/nominatim-ui/releases) (**not** `mediagis/nominatim`). See [`images/README.md`](images/README.md).
 
 ## Control, serving, and data planes
 

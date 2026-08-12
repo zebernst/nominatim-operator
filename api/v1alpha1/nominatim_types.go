@@ -357,13 +357,23 @@ type NominatimAPIConfigSpec struct {
 }
 
 // UISpec configures an optional Nominatim UI Deployment and route.
+// Image defaults to ghcr.io/zebernst/nominatim-ui (upstream osm-search/nominatim-ui release package).
+// Omit spec.ui, or set enabled=false, for API- and database-only serving (no UI workloads).
 type UISpec struct {
+	// Enabled turns on the UI Deployment, Service, and optional HTTPRoute.
+	// Defaults to true when spec.ui is set. Set to false to keep API/DB-only while
+	// retaining UI image/route config in the CR (operator deletes any owned UI objects).
+	// +optional
+	// +kubebuilder:default=true
+	Enabled *bool `json:"enabled,omitempty"`
+
 	// Replicas for the UI Deployment.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	Replicas *int32 `json:"replicas,omitempty"`
 
-	// Image for the UI container (sole supported image hatch; podSpec.containers[].image is ignored).
+	// Image for the UI container. Defaults to ghcr.io/zebernst/nominatim-ui:latest.
+	// Sole supported image hatch; podSpec.containers[].image is ignored.
 	// +optional
 	Image *ImageSpec `json:"image,omitempty"`
 
@@ -499,7 +509,7 @@ type NominatimInstanceSpec struct {
 	// +optional
 	API *APISpec `json:"api,omitempty"`
 
-	// UI configures an optional UI workload.
+	// UI configures an optional UI workload. Omit or set ui.enabled=false for API/DB-only.
 	// +optional
 	UI *UISpec `json:"ui,omitempty"`
 
