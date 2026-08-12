@@ -99,7 +99,7 @@ func commonLabels(nom *nominatimv1alpha1.Nominatim, component string) map[string
 
 // reconcileWorkloads reconciles the project/flatnode PVCs and the API/UI serving plane.
 // It must run after reconcileDatabase (connection secret known) and preferably after
-// reconcileBootstrap so status.regions can unlock API/UI in the same pass.
+// ensureBootstrapOperation so status.regions can unlock API/UI in the same pass.
 // Project/flatnode PVCs remain for worker Jobs (write plane); the API Deployment does
 // not mount them (nominatim-5et.35.1).
 func (r *NominatimReconciler) reconcileWorkloads(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {

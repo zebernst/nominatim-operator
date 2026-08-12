@@ -29,28 +29,12 @@ import (
 
 const (
 	bootstrapNameSuffix = "-bootstrap"
-	regionPhaseImported = "Imported"
 )
 
 // BootstrapOperationName is the deterministic name for the auto-created Bootstrap
 // NominatimOperation for a given Nominatim instance.
 func BootstrapOperationName(nom *nominatimv1alpha1.Nominatim) string {
 	return nom.Name + bootstrapNameSuffix
-}
-
-// reconcileBootstrap auto-bootstraps an empty Nominatim instance and syncs
-// status.regions once a Bootstrap NominatimOperation succeeds. It must run after
-// reconcileDatabase (status.database.connectionSecretName known) and before
-// syncStatus, so Ready/RegionsDrift reflect any newly-synced regions.
-func (r *NominatimReconciler) reconcileBootstrap(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
-	ops, err := r.listOperationsForParent(ctx, nom)
-	if err != nil {
-		return fmt.Errorf("list operations for bootstrap reconcile: %w", err)
-	}
-
-	syncRegionsFromBootstrap(nom, ops)
-
-	return r.ensureBootstrapOperation(ctx, nom, ops)
 }
 
 // listOperationsForParent lists NominatimOperations in the same namespace whose
@@ -110,48 +94,4 @@ func (r *NominatimReconciler) ensureBootstrapOperation(ctx context.Context, nom 
 		return fmt.Errorf("create Bootstrap operation: %w", err)
 	}
 	return nil
-}
-
-// syncRegionsFromBootstrap populates nom.Status.Regions (in-memory; persisted by the
-// caller's later Status().Update, e.g. syncStatus) once a Bootstrap Operation targeting
-// this parent has Succeeded. It is a no-op when status.regions is already populated.
-//
-// A Succeeded Bootstrap Job is required to have imported every region listed on the
-// Operation via nominatim import with multiple --osm-file flags. Marking the full
-// region list here is therefore accurate — not a blind copy of an unfinished import.
-func syncRegionsFromBootstrap(nom *nominatimv1alpha1.Nominatim, peers []nominatimv1alpha1.NominatimOperation) {
-	if len(nom.Status.Regions) > 0 {
-		return
-	}
-
-	for i := range peers {
-		op := &peers[i]
-		if op.Spec.Type != nominatimv1alpha1.NominatimOperationBootstrap {
-			continue
-		}
-		if op.Status.Phase != nominatimv1alpha1.NominatimOperationPhaseSucceeded {
-			continue
-		}
-
-		regions := op.Spec.Regions
-		if len(regions) == 0 {
-			regions = nom.Spec.Regions
-		}
-		if len(regions) == 0 {
-			continue
-		}
-
-		now := metav1.Now()
-		statuses := make([]nominatimv1alpha1.RegionStatus, 0, len(regions))
-		for _, region := range regions {
-			statuses = append(statuses, nominatimv1alpha1.RegionStatus{
-				Name:            region,
-				Phase:           regionPhaseImported,
-				LastUpdatedTime: &now,
-			})
-		}
-		nom.Status.Regions = statuses
-		sealObservedNominatimConfig(nom)
-		return
-	}
 }

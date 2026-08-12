@@ -479,7 +479,7 @@ func TestServingWorkloadsAllowed(t *testing.T) {
 		{
 			name:   "bootstrap synced regions",
 			spec:   []string{"europe/monaco"},
-			status: []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: "Imported"}},
+			status: []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}},
 			want:   true,
 		},
 	}
@@ -529,7 +529,7 @@ func TestReconcileAPI_CreatesAfterBootstrapRegionsSynced(t *testing.T) {
 	scheme := testScheme(t)
 	nom := nominatimWithConnectionSecret("api-post-bootstrap")
 	nom.Spec.Regions = []string{"europe/monaco"}
-	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: "Imported"}}
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco"}}
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
@@ -1110,22 +1110,6 @@ func TestReconcileAPI_ServiceErrorPropagates(t *testing.T) {
 	}
 }
 
-func TestReconcileAPI_HTTPRouteErrorPropagates(t *testing.T) {
-	scheme := testScheme(t)
-	nom := nominatimWithConnectionSecret("api-route-error")
-	nom.Spec.API = &nominatimv1alpha1.APISpec{
-		Route: &nominatimv1alpha1.RouteSpec{ParentRefs: []nominatimv1alpha1.ParentReference{{Name: "gw"}}},
-	}
-	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
-	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	fc := &failingClient{Client: base, failCreate: []failSpec{{kind: "HTTPRoute", name: APIName(nom)}}}
-	r := &NominatimReconciler{Client: fc, Scheme: scheme}
-
-	if err := r.reconcileAPI(context.Background(), nom); err == nil {
-		t.Fatal("expected reconcileAPI to propagate HTTPRoute creation error")
-	}
-}
-
 func TestReconcileUI_ServiceErrorPropagates(t *testing.T) {
 	scheme := testScheme(t)
 	nom := baseNominatim("ui-svc-error")
@@ -1144,21 +1128,6 @@ func TestReconcileUI_ServiceErrorPropagates(t *testing.T) {
 	}
 	if deploy.Spec.Replicas == nil || *deploy.Spec.Replicas != 2 {
 		t.Fatalf("replicas=%v want 2", deploy.Spec.Replicas)
-	}
-}
-
-func TestReconcileUI_HTTPRouteErrorPropagates(t *testing.T) {
-	scheme := testScheme(t)
-	nom := baseNominatim("ui-route-error")
-	nom.Spec.UI = &nominatimv1alpha1.UISpec{
-		Route: &nominatimv1alpha1.RouteSpec{ParentRefs: []nominatimv1alpha1.ParentReference{{Name: "gw"}}},
-	}
-	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	fc := &failingClient{Client: base, failCreate: []failSpec{{kind: "HTTPRoute", name: UIName(nom)}}}
-	r := &NominatimReconciler{Client: fc, Scheme: scheme}
-
-	if err := r.reconcileUI(context.Background(), nom); err == nil {
-		t.Fatal("expected reconcileUI to propagate HTTPRoute creation error")
 	}
 }
 

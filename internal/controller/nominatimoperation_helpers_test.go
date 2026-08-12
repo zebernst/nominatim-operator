@@ -58,11 +58,11 @@ func TestIsActiveOperationPhase(t *testing.T) {
 	g.Expect(isActiveOperationPhase(nominatimv1alpha1.NominatimOperationPhaseFailed)).To(BeFalse())
 }
 
-func TestFindConflictingOperation(t *testing.T) {
+func TestEvaluateWritePlaneScheduleBusyFromHelpers(t *testing.T) {
 	g := NewWithT(t)
 
 	bootstrap := nominatimv1alpha1.NominatimOperation{
-		ObjectMeta: metav1.ObjectMeta{Name: "bootstrap-1"},
+		ObjectMeta: metav1.ObjectMeta{Name: "bootstrap-1", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
 			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
 			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
@@ -70,7 +70,7 @@ func TestFindConflictingOperation(t *testing.T) {
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseRunning},
 	}
 	update := nominatimv1alpha1.NominatimOperation{
-		ObjectMeta: metav1.ObjectMeta{Name: "update-1"},
+		ObjectMeta: metav1.ObjectMeta{Name: "update-1", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
 			Type:         nominatimv1alpha1.NominatimOperationUpdate,
 			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
@@ -78,7 +78,7 @@ func TestFindConflictingOperation(t *testing.T) {
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhasePending},
 	}
 	otherNom := nominatimv1alpha1.NominatimOperation{
-		ObjectMeta: metav1.ObjectMeta{Name: "other"},
+		ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
 			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
 			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "other-nom"},
@@ -86,7 +86,7 @@ func TestFindConflictingOperation(t *testing.T) {
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseRunning},
 	}
 	done := nominatimv1alpha1.NominatimOperation{
-		ObjectMeta: metav1.ObjectMeta{Name: "done"},
+		ObjectMeta: metav1.ObjectMeta{Name: "done", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
 			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
 			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
@@ -95,31 +95,33 @@ func TestFindConflictingOperation(t *testing.T) {
 	}
 
 	// Write-heavy vs write-heavy.
-	conflict := findConflictingOperation(&nominatimv1alpha1.NominatimOperation{
-		ObjectMeta: metav1.ObjectMeta{Name: "bootstrap-2"},
+	ev := evaluateWritePlane(&nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "bootstrap-2", Namespace: "ns"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
 			Type:         nominatimv1alpha1.NominatimOperationReimport,
 			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
 		},
 	}, []nominatimv1alpha1.NominatimOperation{bootstrap, otherNom, done})
-	g.Expect(conflict).NotTo(BeNil())
-	g.Expect(conflict.Name).To(Equal("bootstrap-1"))
+	g.Expect(ev.ScheduleBusy()).To(BeTrue())
+	g.Expect(ev.BusyPeer.Name).To(Equal("bootstrap-1"))
+	g.Expect(ev.Decision).To(Equal(writePlaneHold))
 
 	// Update conflicts with active write-heavy.
-	conflict = findConflictingOperation(&update, []nominatimv1alpha1.NominatimOperation{bootstrap})
-	g.Expect(conflict).NotTo(BeNil())
-	g.Expect(conflict.Name).To(Equal("bootstrap-1"))
+	ev = evaluateWritePlane(&update, []nominatimv1alpha1.NominatimOperation{bootstrap})
+	g.Expect(ev.ScheduleBusy()).To(BeTrue())
+	g.Expect(ev.BusyPeer.Name).To(Equal("bootstrap-1"))
 
 	// Write-heavy conflicts with active Update.
-	conflict = findConflictingOperation(&bootstrap, []nominatimv1alpha1.NominatimOperation{update})
-	g.Expect(conflict).NotTo(BeNil())
-	g.Expect(conflict.Name).To(Equal("update-1"))
+	ev = evaluateWritePlane(&bootstrap, []nominatimv1alpha1.NominatimOperation{update})
+	g.Expect(ev.ScheduleBusy()).To(BeTrue())
+	g.Expect(ev.BusyPeer.Name).To(Equal("update-1"))
 
 	// Two Updates with no write-heavy are allowed.
 	update2 := update
 	update2.Name = "update-2"
-	conflict = findConflictingOperation(&update2, []nominatimv1alpha1.NominatimOperation{update, done, otherNom})
-	g.Expect(conflict).To(BeNil())
+	ev = evaluateWritePlane(&update2, []nominatimv1alpha1.NominatimOperation{update, done, otherNom})
+	g.Expect(ev.ScheduleBusy()).To(BeFalse())
+	g.Expect(ev.Decision).To(Equal(writePlaneOK))
 }
 
 func TestResolveStagingSpec(t *testing.T) {

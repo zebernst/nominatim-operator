@@ -490,12 +490,44 @@ require_bootstrap_ready() {
   die "Import not finished (${IMPORT_FINISHED} missing and Nominatim schema incomplete); run Bootstrap first (operator gate uses status.regions)"
 }
 
-prepare_worker() {
+prepare_db() {
   require_db_env
   mkdir -p "${STAGING_DIR}" "${PROJECT_DIR}" "${PROJECT_DIR}/update"
-  ensure_aux_data_downloads
-  link_staging
   seed_project_env
   wait_for_postgres
   fix_project_ownership
+}
+
+# Import-shaped Operations (Bootstrap/Reimport/AddRegions) also fetch aux datasets
+# and link staging PBF extracts onto the project dir.
+prepare_import() {
+  prepare_db
+  ensure_aux_data_downloads
+  link_staging
+}
+
+# Update.sh exit contract for CatchUp (internal; Jobs only see the final CatchUp exit):
+#   0  — idle: no diffs applied this round
+#   10 — applied: diffs imported (CatchUp continues)
+#   *  — failure
+UPDATE_APPLIED_EXIT=10
+
+update_round_exit_code() {
+  if [ "${1:-false}" = "true" ]; then
+    return "${UPDATE_APPLIED_EXIT}"
+  fi
+  return 0
+}
+
+# Shared by Update and AddRegions once the phase knows whether work happened.
+index_if_changed() {
+  local changed="${1:-false}"
+  local changed_msg="${2:-Re-indexing}"
+  local idle_msg="${3:-No new data applied}"
+  if [ "${changed}" = "true" ]; then
+    log "${changed_msg}"
+    run_nominatim index --project-dir "${PROJECT_DIR}" --threads "${THREADS}"
+  else
+    log "${idle_msg}"
+  fi
 }

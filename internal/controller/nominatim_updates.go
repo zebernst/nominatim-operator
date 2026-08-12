@@ -33,7 +33,8 @@ import (
 // reconcileUpdates creates scheduled Update NominatimOperations from spec.updates
 // (no batch/v1 CronJob). It persists status.lastUpdateScheduleTime as the schedule
 // cursor and returns RequeueAfter until the next cron fire.
-func (r *NominatimReconciler) reconcileUpdates(ctx context.Context, nom *nominatimv1alpha1.Nominatim) (ctrl.Result, error) {
+// ops is the Reconcile-scoped parent Operation list (one list per pass).
+func (r *NominatimReconciler) reconcileUpdates(ctx context.Context, nom *nominatimv1alpha1.Nominatim, ops []nominatimv1alpha1.NominatimOperation) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	if nom.Spec.Updates == nil || !nom.Spec.Updates.Enabled || nom.Spec.Updates.Schedule == "" {
@@ -66,12 +67,9 @@ func (r *NominatimReconciler) reconcileUpdates(ctx context.Context, nom *nominat
 		return requeue, nil
 	}
 
-	ops, err := r.listOperationsForParent(ctx, nom)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("list operations for updates reconcile: %w", err)
-	}
-
-	// Probe conflict against a synthetic Update — same mutex as NominatimOperationReconciler.
+	// Probe against a synthetic Update — same evaluateWritePlane module as claim.
+	// ScheduleBusy (not Decision alone): creation-race peers must block scheduling
+	// even when the probe name would win the lex race.
 	probe := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "__schedule-probe__", Namespace: nom.Namespace},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
@@ -79,9 +77,13 @@ func (r *NominatimReconciler) reconcileUpdates(ctx context.Context, nom *nominat
 			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 	}
-	if conflict := findConflictingOperation(probe, ops); conflict != nil {
+	if ev := evaluateWritePlane(probe, ops); ev.ScheduleBusy() {
+		conflictName := ""
+		if ev.BusyPeer != nil {
+			conflictName = ev.BusyPeer.Name
+		}
 		log.Info("skipping scheduled Update due to active conflict",
-			"conflict", conflict.Name, "fire", missed.UTC().Format(time.RFC3339))
+			"conflict", conflictName, "fire", missed.UTC().Format(time.RFC3339))
 		// Do not advance the cursor — retry after a short delay while write-heavy work runs.
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}

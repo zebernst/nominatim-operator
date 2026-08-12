@@ -13,6 +13,7 @@ setup() {
   export PGDATABASE=nominatim
   export PGUSER=nominatim
   export PGPASSWORD=secret
+  export NOMINATIM_DATABASE_DSN="pgsql:dbname=nominatim;host=localhost;user=nominatim;password=secret"
   # Avoid nproc (coreutils) — not always on PATH in macOS CI runners / local shells.
   export THREADS=1
   unset NOMINATIM_CONTINUE_AT || true

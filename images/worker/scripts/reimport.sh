@@ -10,7 +10,7 @@ SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPTS_DIR}/common.sh"
 
-prepare_worker
+prepare_import
 
 if [ "${NOMINATIM_REIMPORT_CONFIRM:-}" != "1" ] && [ "${NOMINATIM_REIMPORT_CONFIRM:-}" != "true" ]; then
   die "Refusing Reimport without NOMINATIM_REIMPORT_CONFIRM=1 (operator must reset DB + project first)"

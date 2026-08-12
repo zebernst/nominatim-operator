@@ -35,13 +35,13 @@ func TestReconcileRegionDrift_AddDataCreatesAddRegions(t *testing.T) {
 	nom := baseNominatim("drift-add")
 	nom.Spec.Regions = []string{"north-america/us-midwest", "asia/kazakhstan"}
 	nom.Spec.RegionChangePolicy = nominatimv1alpha1.RegionChangeAddData
-	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "north-america/us-midwest", Phase: regionPhaseImported}}
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "north-america/us-midwest"}}
 	nom.Status.Database.ConnectionSecretName = testConnSecret
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("reconcileRegionDrift: %v", err)
 	}
 
@@ -67,13 +67,13 @@ func TestReconcileRegionDrift_AddDataMultiMissingCreatesSingleRegionOp(t *testin
 	nom := baseNominatim("drift-multi")
 	nom.Spec.Regions = []string{"a", "b", "c"}
 	nom.Spec.RegionChangePolicy = nominatimv1alpha1.RegionChangeAddData
-	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "a", Phase: regionPhaseImported}}
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "a"}}
 	nom.Status.Database.ConnectionSecretName = testConnSecret
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("reconcileRegionDrift: %v", err)
 	}
 
@@ -99,7 +99,7 @@ func TestReconcileRegionDrift_AddDataSerialMultiMissingCreatesNextOpAfterSucceed
 	nom := baseNominatim("drift-serial-multi")
 	nom.Spec.Regions = []string{"a", "b", "c"}
 	nom.Spec.RegionChangePolicy = nominatimv1alpha1.RegionChangeAddData
-	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "a", Phase: regionPhaseImported}}
+	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "a"}}
 	nom.Status.Database.ConnectionSecretName = testConnSecret
 
 	c := fake.NewClientBuilder().WithScheme(scheme).
@@ -108,7 +108,7 @@ func TestReconcileRegionDrift_AddDataSerialMultiMissingCreatesNextOpAfterSucceed
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
 	// First reconcile creates the op for "b" only.
-	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("reconcileRegionDrift (1st): %v", err)
 	}
 	ops := &nominatimv1alpha1.NominatimOperationList{}
@@ -130,9 +130,17 @@ func TestReconcileRegionDrift_AddDataSerialMultiMissingCreatesNextOpAfterSucceed
 		t.Fatalf("update op status: %v", err)
 	}
 
-	// Re-reconcile: syncRegionsFromDriftOps should merge "b" into status, and drift
-	// should then create a new op for the next missing region, "c".
-	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+	// Reconcile observes Succeeded ops, then drift ensure creates the next chunk.
+	if err := c.Get(ctx, client.ObjectKeyFromObject(nom), nom); err != nil {
+		t.Fatalf("get nom: %v", err)
+	}
+	listed := &nominatimv1alpha1.NominatimOperationList{}
+	if err := c.List(ctx, listed); err != nil {
+		t.Fatal(err)
+	}
+	observeRegionsFromSucceededOps(nom, listed.Items)
+
+	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("reconcileRegionDrift (2nd): %v", err)
 	}
 	if err := c.List(ctx, ops); err != nil {
@@ -156,15 +164,15 @@ func TestReconcileRegionDrift_ReimportPolicyCreatesReimport(t *testing.T) {
 	nom.Spec.Regions = []string{"south-america/brazil"}
 	nom.Spec.RegionChangePolicy = nominatimv1alpha1.RegionChangeReimport
 	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{
-		{Name: "north-america/us-midwest", Phase: regionPhaseImported},
-		{Name: "asia/kazakhstan", Phase: regionPhaseImported},
+		{Name: "north-america/us-midwest"},
+		{Name: "asia/kazakhstan"},
 	}
 	nom.Status.Database.ConnectionSecretName = testConnSecret
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("reconcileRegionDrift: %v", err)
 	}
 
@@ -186,8 +194,8 @@ func TestReconcileRegionDrift_RemovalDoesNotCreateOpOrShrinkStatus(t *testing.T)
 	nom := baseNominatim("drift-rm")
 	nom.Spec.Regions = []string{"north-america/us-midwest"} // removed asia/kazakhstan from spec
 	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{
-		{Name: "north-america/us-midwest", Phase: regionPhaseImported},
-		{Name: "asia/kazakhstan", Phase: regionPhaseImported},
+		{Name: "north-america/us-midwest"},
+		{Name: "asia/kazakhstan"},
 	}
 	nom.Status.Database.ConnectionSecretName = testConnSecret
 
@@ -195,7 +203,7 @@ func TestReconcileRegionDrift_RemovalDoesNotCreateOpOrShrinkStatus(t *testing.T)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatalf("reconcileRegionDrift: %v", err)
 	}
 	ops := &nominatimv1alpha1.NominatimOperationList{}
@@ -231,7 +239,7 @@ func TestReconcileRegionDrift_NoParallelAddRegions(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, active).WithObjects(nom, active).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatal(err)
 	}
 	ops := &nominatimv1alpha1.NominatimOperationList{}
@@ -273,7 +281,7 @@ func TestReconcileRegionDrift_SkipsWhenEmptyStatus(t *testing.T) {
 	// status.regions empty → bootstrap owns this; drift must no-op
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
-	if err := r.reconcileRegionDrift(context.Background(), nom); err != nil {
+	if err := r.reconcileRegionDrift(context.Background(), nom, parentOps(t, r, context.Background(), nom)); err != nil {
 		t.Fatal(err)
 	}
 	ops := &nominatimv1alpha1.NominatimOperationList{}
@@ -300,7 +308,7 @@ func TestReconcileRegionDrift_SkipsWhenBootstrapActive(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom, boot).WithObjects(nom, boot).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
-	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+	if err := r.reconcileRegionDrift(ctx, nom, parentOps(t, r, ctx, nom)); err != nil {
 		t.Fatal(err)
 	}
 	ops := &nominatimv1alpha1.NominatimOperationList{}

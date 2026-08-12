@@ -36,8 +36,8 @@ import (
 const CNPGBackupPausedAnnotation = "nominatim.zebernst.dev/backup-paused"
 
 // CNPGEffects abstracts Barman backup pause and postgres parameter patches for CNPG Clusters.
-// Operations (nominatim-vzw) call these hooks; degraded connectionSecretRef mode must never
-// invoke them (guarded in setBackupPaused/applyPostgresProfile, not here).
+// NominatimOperationReconciler calls these hooks; skipCNPGClusterEffects must
+// never invoke them (guarded in setBackupPaused/applyPostgresProfile, not here).
 type CNPGEffects interface {
 	PauseBackups(ctx context.Context, cluster *unstructured.Unstructured) error
 	ResumeBackups(ctx context.Context, cluster *unstructured.Unstructured) error
@@ -99,15 +99,6 @@ func (e defaultCNPGEffects) ApplyParameters(ctx context.Context, cluster *unstru
 		return fmt.Errorf("set spec.postgresql.parameters: %w", err)
 	}
 	return e.Client.Update(ctx, cluster)
-}
-
-// cnpgEffects returns r.CNPGEffects when set (test override), else defaultCNPGEffects backed
-// by r's own client.
-func (r *NominatimReconciler) cnpgEffects() CNPGEffects {
-	if r.CNPGEffects != nil {
-		return r.CNPGEffects
-	}
-	return defaultCNPGEffects{Client: r.Client}
 }
 
 // cnpgEffects returns r.CNPGEffects when set (test override), else defaultCNPGEffects backed

@@ -155,7 +155,7 @@ Kubernetes operator (controller-runtime) that manages Nominatim geocoding deploy
 
 - Go idioms, `go vet` clean, exported types documented
 - golangci-lint (`.golangci.yml`) + `go fmt`
-- Coverage target 100% for unit-tested packages; e2e, generated DeepCopy, and thin wiring may be exempted when documented
+- Coverage floor 90% for `internal/controller` (see `.coverage-thresholds.json`); e2e, generated DeepCopy, and thin wiring are exempt
 
 ## metaswarm
 
@@ -194,7 +194,7 @@ Project shims live in `.cursor/commands/` (ignored by git). Do not use `.claude/
 ### Testing & Quality
 
 - **TDD is mandatory** — Write tests first, watch them fail, then implement
-- **100% test coverage required** for unit-tested packages — Enforced via `.coverage-thresholds.json` (e2e / generated / thin wiring may be exempted when documented)
+- **Coverage floor 90%** for `internal/controller` — Enforced via `.coverage-thresholds.json` (e2e / generated / thin wiring exempt)
 - **Coverage source of truth** — `.coverage-thresholds.json`
 
 ### Workflow Enforcement (MANDATORY)

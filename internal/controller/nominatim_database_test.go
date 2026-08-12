@@ -80,6 +80,16 @@ func testScheme(t *testing.T) *runtime.Scheme {
 	return s
 }
 
+// parentOps lists NominatimOperations for nom — test helper matching Reconcile's one-list-per-pass.
+func parentOps(t *testing.T, r *NominatimReconciler, ctx context.Context, nom *nominatimv1alpha1.Nominatim) []nominatimv1alpha1.NominatimOperation {
+	t.Helper()
+	ops, err := r.listOperationsForParent(ctx, nom)
+	if err != nil {
+		t.Fatalf("listOperationsForParent: %v", err)
+	}
+	return ops
+}
+
 func baseNominatim(name string) *nominatimv1alpha1.Nominatim {
 	return &nominatimv1alpha1.Nominatim{
 		ObjectMeta: metav1.ObjectMeta{
@@ -113,7 +123,7 @@ func TestReconcileDatabase_ConnectionSecretRef_Degraded(t *testing.T) {
 
 	effects := &recordingCNPGEffects{}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, secret).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileDatabase: %v", err)
@@ -133,11 +143,11 @@ func TestReconcileDatabase_ConnectionSecretRef_Degraded(t *testing.T) {
 	}
 
 	// Degraded path must never attempt Barman/backup pause or profile apply.
-	if err := r.SetBackupPaused(context.Background(), nom, true); err != nil {
-		t.Fatalf("SetBackupPaused: %v", err)
+	if err := setBackupPaused(context.Background(), c, effects, nom, true); err != nil {
+		t.Fatalf("setBackupPaused: %v", err)
 	}
-	if err := r.ApplyPostgresProfile(context.Background(), nom, "import"); err != nil {
-		t.Fatalf("ApplyPostgresProfile: %v", err)
+	if err := applyPostgresProfile(context.Background(), c, effects, nom, postgresProfileImport); err != nil {
+		t.Fatalf("applyPostgresProfile: %v", err)
 	}
 	if effects.pauseCalls != 0 || effects.resumeCalls != 0 || effects.profileCalls != 0 {
 		t.Fatalf("degraded mode must not call CNPG effects; got pause=%d resume=%d profile=%d",
@@ -152,7 +162,7 @@ func TestReconcileDatabase_ConnectionSecretRef_MissingSecret(t *testing.T) {
 		ConnectionSecretRef: &nominatimv1alpha1.LocalObjectReference{Name: "nope"},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme, CNPGEffects: &recordingCNPGEffects{}}
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileDatabase(context.Background(), nom); err == nil {
 		t.Fatal("expected error for missing secret")
@@ -177,7 +187,7 @@ func TestReconcileDatabase_ClusterRef_Attach(t *testing.T) {
 
 	effects := &recordingCNPGEffects{}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, cluster).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
+	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
 	if err := r.reconcileDatabase(context.Background(), nom); err != nil {
 		t.Fatalf("reconcileDatabase: %v", err)
@@ -197,16 +207,16 @@ func TestReconcileDatabase_ClusterRef_Attach(t *testing.T) {
 		t.Fatalf("secret=%q want %q", nom.Status.Database.ConnectionSecretName, wantSecret)
 	}
 
-	if err := r.SetBackupPaused(context.Background(), nom, true); err != nil {
-		t.Fatalf("SetBackupPaused: %v", err)
+	if err := setBackupPaused(context.Background(), c, effects, nom, true); err != nil {
+		t.Fatalf("setBackupPaused: %v", err)
 	}
 	if effects.pauseCalls != 1 || effects.lastCluster != "existing-pg" {
 		t.Fatalf("expected PauseBackups on attached cluster, got pause=%d cluster=%q",
 			effects.pauseCalls, effects.lastCluster)
 	}
 
-	if err := r.ApplyPostgresProfile(context.Background(), nom, "runtime"); err != nil {
-		t.Fatalf("ApplyPostgresProfile: %v", err)
+	if err := applyPostgresProfile(context.Background(), c, effects, nom, postgresProfileRuntime); err != nil {
+		t.Fatalf("applyPostgresProfile: %v", err)
 	}
 	if effects.profileCalls != 1 || effects.lastParams["max_connections"] != "200" {
 		t.Fatalf("expected runtime profile apply, got calls=%d params=%v", effects.profileCalls, effects.lastParams)
@@ -555,29 +565,6 @@ func TestMapCNPGClusterToNominatim_OwnerAndClusterRef(t *testing.T) {
 	}
 }
 
-func TestApplyPostgresProfile_UnknownWhich(t *testing.T) {
-	scheme := testScheme(t)
-	nom := baseNominatim("prof")
-	nom.Spec.Database = nominatimv1alpha1.DatabaseSpec{
-		ClusterRef: &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
-	}
-	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{
-		Mode:        nominatimv1alpha1.DatabaseModeClusterAttached,
-		ClusterName: "pg",
-	}
-	cluster := &unstructured.Unstructured{}
-	cluster.SetGroupVersionKind(CNPGClusterGVK)
-	cluster.SetName("pg")
-	cluster.SetNamespace("default")
-
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, cluster).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme, CNPGEffects: &recordingCNPGEffects{}}
-
-	if err := r.ApplyPostgresProfile(context.Background(), nom, "nope"); err == nil {
-		t.Fatal("expected error for unknown profile")
-	}
-}
-
 func TestReconcileDatabase_NoMode(t *testing.T) {
 	scheme := testScheme(t)
 	nom := baseNominatim("nomode")
@@ -645,104 +632,6 @@ func TestReconcileDatabase_Cluster_EmptyStorageErrors(t *testing.T) {
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 	if err := r.reconcileDatabase(context.Background(), nom); err == nil {
 		t.Fatal("expected storage error")
-	}
-}
-
-func TestSetBackupPaused_ErrorsAndDefaults(t *testing.T) {
-	scheme := testScheme(t)
-	cluster := &unstructured.Unstructured{}
-	cluster.SetGroupVersionKind(CNPGClusterGVK)
-	cluster.SetName("pg")
-	cluster.SetNamespace("default")
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cluster).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme} // nil CNPGEffects → default stubs
-
-	nom := baseNominatim("bp")
-	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{
-		Mode: nominatimv1alpha1.DatabaseModeClusterAttached,
-	}
-	if err := r.SetBackupPaused(context.Background(), nom, true); err == nil {
-		t.Fatal("expected missing cluster name error")
-	}
-
-	nom.Status.Database.ClusterName = "missing"
-	if err := r.SetBackupPaused(context.Background(), nom, true); err == nil {
-		t.Fatal("expected get cluster error")
-	}
-
-	nom.Status.Database.ClusterName = "pg"
-	if err := r.SetBackupPaused(context.Background(), nom, true); err != nil {
-		t.Fatalf("default PauseBackups: %v", err)
-	}
-	if err := r.SetBackupPaused(context.Background(), nom, false); err != nil {
-		t.Fatalf("default ResumeBackups: %v", err)
-	}
-
-	// Mode ConnectionSecret without Degraded still no-ops.
-	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{Mode: nominatimv1alpha1.DatabaseModeConnectionSecret}
-	effects := &recordingCNPGEffects{}
-	r.CNPGEffects = effects
-	if err := r.SetBackupPaused(context.Background(), nom, true); err != nil {
-		t.Fatal(err)
-	}
-	if effects.pauseCalls != 0 {
-		t.Fatal("ConnectionSecret mode must not pause")
-	}
-}
-
-func TestApplyPostgresProfile_Branches(t *testing.T) {
-	scheme := testScheme(t)
-	cluster := &unstructured.Unstructured{}
-	cluster.SetGroupVersionKind(CNPGClusterGVK)
-	cluster.SetName("pg")
-	cluster.SetNamespace("default")
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cluster).Build()
-	effects := &recordingCNPGEffects{}
-	r := &NominatimReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
-
-	nom := baseNominatim("ap")
-	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{Mode: nominatimv1alpha1.DatabaseModeConnectionSecret}
-	if err := r.ApplyPostgresProfile(context.Background(), nom, "import"); err != nil {
-		t.Fatal(err)
-	}
-	if effects.profileCalls != 0 {
-		t.Fatal("degraded/secret mode must skip profiles")
-	}
-
-	nom.Spec.Database.PostgresProfiles = &nominatimv1alpha1.PostgresProfiles{
-		Import: map[string]string{"work_mem": "64MB"},
-	}
-	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{
-		Mode: nominatimv1alpha1.DatabaseModeClusterAttached,
-	}
-	if err := r.ApplyPostgresProfile(context.Background(), nom, "import"); err == nil {
-		t.Fatal("expected missing cluster name")
-	}
-	nom.Status.Database.ClusterName = "missing"
-	if err := r.ApplyPostgresProfile(context.Background(), nom, "import"); err == nil {
-		t.Fatal("expected get error")
-	}
-	nom.Status.Database.ClusterName = "pg"
-	if err := r.ApplyPostgresProfile(context.Background(), nom, "import"); err != nil {
-		t.Fatal(err)
-	}
-	if effects.profileCalls != 1 || effects.lastParams["work_mem"] != "64MB" {
-		t.Fatalf("import profile not applied: %#v", effects)
-	}
-	// empty runtime still clears import-only managed keys (work_mem)
-	if err := r.ApplyPostgresProfile(context.Background(), nom, "runtime"); err != nil {
-		t.Fatal(err)
-	}
-	if effects.profileCalls != 2 {
-		t.Fatalf("empty runtime should still clear import-only keys, got %d calls", effects.profileCalls)
-	}
-	// nil profiles + import
-	nom.Spec.Database.PostgresProfiles = nil
-	if err := r.ApplyPostgresProfile(context.Background(), nom, "import"); err != nil {
-		t.Fatal(err)
-	}
-	if effects.profileCalls != 2 {
-		t.Fatalf("nil profiles must be a no-op, got %d", effects.profileCalls)
 	}
 }
 
@@ -891,27 +780,6 @@ func TestReconcileDelete_NoFinalizerAndUpdateFail(t *testing.T) {
 	_, err = r.reconcileDelete(context.Background(), nom2)
 	if err == nil {
 		t.Fatal("expected update error removing finalizer")
-	}
-}
-
-func TestDefaultCNPGEffects_ApplyParameters(t *testing.T) {
-	scheme := testScheme(t)
-	cluster := &unstructured.Unstructured{}
-	cluster.SetGroupVersionKind(CNPGClusterGVK)
-	cluster.SetName("pg")
-	cluster.SetNamespace("default")
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cluster).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme} // default effects
-	nom := baseNominatim("defeff")
-	nom.Spec.Database.PostgresProfiles = &nominatimv1alpha1.PostgresProfiles{
-		Runtime: map[string]string{"a": "b"},
-	}
-	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{
-		Mode:        nominatimv1alpha1.DatabaseModeClusterAttached,
-		ClusterName: "pg",
-	}
-	if err := r.ApplyPostgresProfile(context.Background(), nom, "runtime"); err != nil {
-		t.Fatal(err)
 	}
 }
 

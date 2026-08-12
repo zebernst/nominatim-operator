@@ -10,3 +10,7 @@ cover.out
 coverage.out
 testbin/
 dist/
+# Tests are never production assets — keep them out of every image build context.
+**/*_test.go
+**/*.bats
+**/test/

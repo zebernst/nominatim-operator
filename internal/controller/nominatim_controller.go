@@ -45,8 +45,6 @@ import (
 type NominatimReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
-	// CNPGEffects optional override for tests; defaults to no-op stubs until Operations wire patches.
-	CNPGEffects CNPGEffects
 	// ControllerName overrides the controller-runtime name (tests only).
 	ControllerName string
 }
@@ -86,7 +84,7 @@ func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Persist database status before creating Operations/Jobs that read it from the API.
-	// reconcileBootstrap creates NominatimOperations immediately; without this write the
+	// ensureBootstrapOperation creates NominatimOperations immediately; without this write the
 	// Operation controller can race and build a worker Job with no NOMINATIM_DATABASE_DSN.
 	dbStatus := nom.Status.Database
 	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
@@ -108,9 +106,16 @@ func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	// Bootstrap before serving workloads so status.regions (synced on Succeeded)
+	ops, err := r.listOperationsForParent(ctx, nom)
+	if err != nil {
+		log.Error(err, "failed to list NominatimOperations for parent")
+		return ctrl.Result{}, err
+	}
+	observeRegionsFromSucceededOps(nom, ops)
+
+	// Ensure Bootstrap before serving workloads so status.regions (observed above)
 	// can unlock API/UI creation in the same reconcile pass.
-	if err := r.reconcileBootstrap(ctx, nom); err != nil {
+	if err := r.ensureBootstrapOperation(ctx, nom, ops); err != nil {
 		log.Error(err, "failed to reconcile Nominatim bootstrap")
 		return ctrl.Result{}, err
 	}
@@ -120,17 +125,17 @@ func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	if err := r.reconcileRegionDrift(ctx, nom); err != nil {
+	if err := r.reconcileRegionDrift(ctx, nom, ops); err != nil {
 		log.Error(err, "failed to reconcile Nominatim region drift")
 		return ctrl.Result{}, err
 	}
 
-	if err := r.reconcileSequenceObservation(ctx, nom); err != nil {
+	if err := r.reconcileSequenceObservation(ctx, nom, ops); err != nil {
 		log.Error(err, "failed to reconcile Nominatim sequence observation")
 		return ctrl.Result{}, err
 	}
 
-	updateResult, err := r.reconcileUpdates(ctx, nom)
+	updateResult, err := r.reconcileUpdates(ctx, nom, ops)
 	if err != nil {
 		log.Error(err, "failed to reconcile Nominatim scheduled updates")
 		return ctrl.Result{}, err

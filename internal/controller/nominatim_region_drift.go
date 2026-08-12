@@ -36,15 +36,10 @@ const (
 // reconcileRegionDrift creates AddRegions or Reimport NominatimOperations when
 // spec.regions diverges from status.regions. Removals never delete DB data — they
 // only surface ConditionRegionRemovalUnsupported (set in syncStatus).
-func (r *NominatimReconciler) reconcileRegionDrift(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
-	ops, err := r.listOperationsForParent(ctx, nom)
-	if err != nil {
-		return fmt.Errorf("list operations for region drift: %w", err)
-	}
-
-	syncRegionsFromDriftOps(nom, ops)
-
-	// Bootstrap owns the empty→first-import path.
+// ops is the Reconcile-scoped parent Operation list (one list per pass).
+func (r *NominatimReconciler) reconcileRegionDrift(ctx context.Context, nom *nominatimv1alpha1.Nominatim, ops []nominatimv1alpha1.NominatimOperation) error {
+	// Bootstrap owns the empty→first-import path. Observation of Succeeded ops
+	// into status.regions happens in observeRegionsFromSucceededOps (Reconcile).
 	if len(nom.Status.Regions) == 0 {
 		return nil
 	}
@@ -116,7 +111,7 @@ func (r *NominatimReconciler) ensureAddRegionsOperation(
 
 	// Create one AddRegions operation per missing region, serially: only the
 	// first missing region is included here. The next missing region is picked
-	// up on a later reconcile once this operation Succeeds and syncRegionsFromDriftOps
+	// up on a later reconcile once this operation Succeeds and observeRegionsFromSucceededOps
 	// merges it into status.regions (see the serial-AddRegions guard above).
 	next := missing[0]
 
@@ -186,57 +181,4 @@ func (r *NominatimReconciler) ensureReimportOperation(
 	}
 	log.Info("created Reimport operation", "operation", op.Name, "regions", strings.Join(desired, ","))
 	return nil
-}
-
-// syncRegionsFromDriftOps updates status.regions when an AddRegions or Reimport
-// Operation targeting this parent has Succeeded. Removals are never applied here —
-// shrinking the observed set requires a Succeeded Reimport whose Spec.Regions is
-// the new desired set (full rebuild), not a surgical delete.
-func syncRegionsFromDriftOps(nom *nominatimv1alpha1.Nominatim, peers []nominatimv1alpha1.NominatimOperation) {
-	for i := range peers {
-		op := &peers[i]
-		if op.Status.Phase != nominatimv1alpha1.NominatimOperationPhaseSucceeded {
-			continue
-		}
-		switch op.Spec.Type {
-		case nominatimv1alpha1.NominatimOperationAddRegions:
-			mergeRegionsIntoStatus(nom, op.Spec.Regions)
-		case nominatimv1alpha1.NominatimOperationReimport:
-			replaceRegionsStatus(nom, op.Spec.Regions)
-		}
-	}
-}
-
-func mergeRegionsIntoStatus(nom *nominatimv1alpha1.Nominatim, regions []string) {
-	have := make(map[string]struct{}, len(nom.Status.Regions))
-	for _, rs := range nom.Status.Regions {
-		have[rs.Name] = struct{}{}
-	}
-	now := metav1.Now()
-	for _, region := range regions {
-		if _, ok := have[region]; ok {
-			continue
-		}
-		nom.Status.Regions = append(nom.Status.Regions, nominatimv1alpha1.RegionStatus{
-			Name:            region,
-			Phase:           regionPhaseImported,
-			LastUpdatedTime: &now,
-		})
-		have[region] = struct{}{}
-	}
-}
-
-func replaceRegionsStatus(nom *nominatimv1alpha1.Nominatim, regions []string) {
-	now := metav1.Now()
-	statuses := make([]nominatimv1alpha1.RegionStatus, 0, len(regions))
-	for _, region := range regions {
-		statuses = append(statuses, nominatimv1alpha1.RegionStatus{
-			Name:            region,
-			Phase:           regionPhaseImported,
-			LastUpdatedTime: &now,
-		})
-	}
-	nom.Status.Regions = statuses
-	// Reimport rebuilds the DB — reseal import-time Nominatim settings from current spec.
-	sealObservedNominatimConfigForce(nom, true)
 }

@@ -44,6 +44,35 @@ func (e *writePlaneTerminalConflict) Error() string {
 	return fmt.Sprintf("write plane held by %q", e.peer.Name)
 }
 
+// writePlaneDecision is the claim-path outcome of evaluateWritePlane.
+type writePlaneDecision int
+
+const (
+	// writePlaneOK — claim may proceed (op wins creation race or no conflict).
+	writePlaneOK writePlaneDecision = iota
+	// writePlaneHold — a peer already holds the write plane; claim fails Conflict.
+	writePlaneHold
+	// writePlaneRaceWait — a creation-race peer wins by name order; claim requeues.
+	writePlaneRaceWait
+)
+
+// writePlaneEval is the single peer-evaluation result for Operation claim and
+// Nominatim schedule probes. Decision drives claim; ScheduleBusy drives schedule skip.
+type writePlaneEval struct {
+	Decision writePlaneDecision
+	// Peer is set for Hold (the holder). May also be set for RaceWait (the winner).
+	Peer *nominatimv1alpha1.NominatimOperation
+	// BusyPeer is any active mutex-conflicting peer (holder or still racing).
+	// Schedule probes skip whenever BusyPeer != nil — including when Decision is
+	// OK because the synthetic probe name would win a creation race.
+	BusyPeer *nominatimv1alpha1.NominatimOperation
+}
+
+// ScheduleBusy reports whether a parent should skip creating a scheduled Update.
+func (e writePlaneEval) ScheduleBusy() bool {
+	return e.BusyPeer != nil
+}
+
 // operationsMutexConflict reports whether two Operations may not run together
 // per the write-heavy mutex policy (see nominatimoperation_resources.go).
 func operationsMutexConflict(a, b *nominatimv1alpha1.NominatimOperation) bool {
@@ -69,39 +98,42 @@ func peerHoldsWritePlane(peer *nominatimv1alpha1.NominatimOperation) bool {
 	return peer.Status.JobRef != nil && peer.Status.JobRef.Name != ""
 }
 
-// findTerminalWritePlaneBlocker returns a conflicting peer that already holds
-// the write plane. Nil when the only blockers are creation-race peers.
-func findTerminalWritePlaneBlocker(op *nominatimv1alpha1.NominatimOperation, peers []nominatimv1alpha1.NominatimOperation) *nominatimv1alpha1.NominatimOperation {
-	for i := range peers {
-		peer := &peers[i]
-		if !operationsMutexConflict(op, peer) || !isActiveOperationPhase(peer.Status.Phase) {
-			continue
-		}
-		if peerHoldsWritePlane(peer) {
-			return peer
-		}
-	}
-	return nil
-}
+// evaluateWritePlane is the single write-plane peer evaluation for claim and schedule.
+func evaluateWritePlane(op *nominatimv1alpha1.NominatimOperation, peers []nominatimv1alpha1.NominatimOperation) writePlaneEval {
+	var ev writePlaneEval
+	var raceWinner *nominatimv1alpha1.NominatimOperation
 
-// shouldRequeueWritePlaneRace reports whether op must wait for a conflicting
-// peer that is still in the creation race (no Job yet). The lexicographically
-// smaller Operation name wins the race so two fresh write-heavy peers do not
-// both fail with terminal Conflict.
-func shouldRequeueWritePlaneRace(op *nominatimv1alpha1.NominatimOperation, peers []nominatimv1alpha1.NominatimOperation) bool {
 	for i := range peers {
 		peer := &peers[i]
 		if !operationsMutexConflict(op, peer) || !isActiveOperationPhase(peer.Status.Phase) {
 			continue
 		}
+		if ev.BusyPeer == nil {
+			ev.BusyPeer = peer
+		}
 		if peerHoldsWritePlane(peer) {
+			if ev.Peer == nil || ev.Decision != writePlaneHold {
+				ev.Decision = writePlaneHold
+				ev.Peer = peer
+			}
 			continue
 		}
-		if peer.Name < op.Name {
-			return true
+		// Creation-race peer: lex-smaller name wins.
+		if peer.Name < op.Name && raceWinner == nil {
+			raceWinner = peer
 		}
 	}
-	return false
+
+	if ev.Decision == writePlaneHold {
+		return ev
+	}
+	if raceWinner != nil {
+		ev.Decision = writePlaneRaceWait
+		ev.Peer = raceWinner
+		return ev
+	}
+	ev.Decision = writePlaneOK
+	return ev
 }
 
 func (r *NominatimOperationReconciler) listPeersForNominatim(ctx context.Context, op *nominatimv1alpha1.NominatimOperation) ([]nominatimv1alpha1.NominatimOperation, error) {
@@ -136,11 +168,12 @@ func (r *NominatimOperationReconciler) claimWritePlane(ctx context.Context, op *
 		if err != nil {
 			return err
 		}
-		if peer := findTerminalWritePlaneBlocker(op, peers); peer != nil {
-			terminal = &writePlaneTerminalConflict{peer: peer}
+		ev := evaluateWritePlane(op, peers)
+		switch ev.Decision {
+		case writePlaneHold:
+			terminal = &writePlaneTerminalConflict{peer: ev.Peer}
 			return nil
-		}
-		if shouldRequeueWritePlaneRace(op, peers) {
+		case writePlaneRaceWait:
 			return errWritePlaneBusy
 		}
 

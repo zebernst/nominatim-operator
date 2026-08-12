@@ -10,7 +10,7 @@ SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPTS_DIR}/common.sh"
 
-prepare_worker
+prepare_import
 
 require_bootstrap_ready
 
@@ -39,8 +39,5 @@ if [ "${CHANGED}" = "true" ]; then
   # Upstream Advanced-Installations: refresh --postcodes after add-data, then index.
   log "Running nominatim refresh --postcodes after AddRegions"
   run_nominatim refresh --postcodes --project-dir "${PROJECT_DIR}" || true
-  log "Re-indexing after AddRegions"
-  run_nominatim index --project-dir "${PROJECT_DIR}" --threads "${THREADS}"
-else
-  log "No new regions imported"
 fi
+index_if_changed "${CHANGED}" "Re-indexing after AddRegions" "No new regions imported"

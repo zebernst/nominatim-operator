@@ -509,13 +509,11 @@ type NominatimSpec struct {
 }
 
 // RegionStatus is the observed state of an imported region.
+// Presence in status.regions is the cluster source of truth that the region is imported;
+// there is no per-region lifecycle phase (Operations carry Pending/Running/Succeeded/Failed).
 type RegionStatus struct {
 	// Name is the Geofabrik-style region path.
 	Name string `json:"name"`
-
-	// Phase is a short status string (e.g. Imported, Updating, Error).
-	// +optional
-	Phase string `json:"phase,omitempty"`
 
 	// SequenceState is the last known Geofabrik update identity for this region
 	// (typically "sequenceNumber@timestamp" from update/<region>/sequence.state),
@@ -523,13 +521,9 @@ type RegionStatus struct {
 	// +optional
 	SequenceState string `json:"sequenceState,omitempty"`
 
-	// LastUpdatedTime is when this region status was last refreshed.
+	// LastUpdatedTime is when this region entry was last written (observe or sequence probe).
 	// +optional
 	LastUpdatedTime *metav1.Time `json:"lastUpdatedTime,omitempty"`
-
-	// Message is human-readable detail.
-	// +optional
-	Message string `json:"message,omitempty"`
 }
 
 // DatabaseMode identifies how Nominatim is attached to Postgres.

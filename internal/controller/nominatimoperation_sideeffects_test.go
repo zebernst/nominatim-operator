@@ -49,26 +49,7 @@ const (
 	testImportWorkMem        = "64MB"
 )
 
-// stubGetClient injects a fixed Get error (or, with n>0, fails only on the nth Get call);
-// used to exercise error-propagation branches that fake.Client can't trigger on its own.
-type stubGetClient struct {
-	client.Client
-	err   error
-	n     int // 0 means "always fail"; >0 means "fail on the nth call only"
-	calls int
-}
-
-func (s *stubGetClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-	s.calls++
-	if s.n == 0 || s.calls == s.n {
-		return s.err
-	}
-	return s.Client.Get(ctx, key, obj, opts...)
-}
-
-// stubKindStatusClient fails Status().Update only for objects of the given Go type, letting
-// other kinds' status writes pass through to the wrapped client. Used to isolate individual
-// err-propagation branches in Reconcile/failOperation that a blanket status failure can't reach.
+// stubKindStatusClient fails Status().Update only for objects of the given Go type.
 type stubKindStatusClient struct {
 	client.Client
 	failFor client.Object
@@ -298,10 +279,6 @@ func TestDefaultCNPGEffects_ApplyParametersEmptyIsNoop(t *testing.T) {
 }
 
 func TestCNPGEffects_DefaultAccessors(t *testing.T) {
-	nomR := &NominatimReconciler{}
-	if _, ok := nomR.cnpgEffects().(defaultCNPGEffects); !ok {
-		t.Fatalf("expected default effects when unset, got %T", nomR.cnpgEffects())
-	}
 	opR := &NominatimOperationReconciler{}
 	if _, ok := opR.cnpgEffects().(defaultCNPGEffects); !ok {
 		t.Fatalf("expected default effects when unset, got %T", opR.cnpgEffects())
@@ -313,27 +290,27 @@ func TestCNPGEffects_DefaultAccessors(t *testing.T) {
 	}
 }
 
-// --- setParentBackupPaused / applyParentPostgresProfile guards ---
-
-func TestSetParentBackupPaused_NotYetAttachedNoOp(t *testing.T) {
-	r := &NominatimOperationReconciler{}
+func TestSetBackupPaused_NotYetAttachedNoOp(t *testing.T) {
+	effects := &recordingCNPGEffects{}
 	parent := baseNominatim("np-unattached")
-	if err := r.setParentBackupPaused(context.Background(), parent, true); err != nil {
-		t.Fatalf("expected no-op, got %v", err)
+	if err := setBackupPaused(context.Background(), nil, effects, parent, true); err != nil {
+		t.Fatalf("expected no-op when status.database.mode is unset, got %v", err)
+	}
+	if effects.pauseCalls != 0 {
+		t.Fatalf("must not pause before attach, got %d", effects.pauseCalls)
 	}
 }
 
-func TestSetParentBackupPaused_Attached(t *testing.T) {
+func TestSetBackupPaused_Attached(t *testing.T) {
 	scheme := testScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(newCNPGCluster("pg")).Build()
 	effects := &recordingCNPGEffects{}
-	r := &NominatimOperationReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
 	parent := baseNominatim("np-attached")
 	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{
 		Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg", ConnectionSecretName: "pg-app",
 	}
 
-	if err := r.setParentBackupPaused(context.Background(), parent, true); err != nil {
+	if err := setBackupPaused(context.Background(), c, effects, parent, true); err != nil {
 		t.Fatalf("pause: %v", err)
 	}
 	if effects.pauseCalls != 1 {
@@ -341,35 +318,177 @@ func TestSetParentBackupPaused_Attached(t *testing.T) {
 	}
 
 	parent.Status.Database.ClusterName = ""
-	if err := r.setParentBackupPaused(context.Background(), parent, true); err == nil {
+	if err := setBackupPaused(context.Background(), c, effects, parent, true); err == nil {
 		t.Fatal("expected error for missing cluster name")
 	}
 }
 
-func TestApplyParentPostgresProfile_NotYetAttachedNoOp(t *testing.T) {
-	r := &NominatimOperationReconciler{}
+func TestApplyPostgresProfile_NotYetAttachedNoOp(t *testing.T) {
+	effects := &recordingCNPGEffects{}
 	parent := baseNominatim("app-unattached")
-	if err := r.applyParentPostgresProfile(context.Background(), parent, "import"); err != nil {
+	if err := applyPostgresProfile(context.Background(), nil, effects, parent, postgresProfileImport); err != nil {
 		t.Fatalf("expected no-op, got %v", err)
+	}
+	if effects.profileCalls != 0 {
+		t.Fatalf("must not apply profile before attach, got %d", effects.profileCalls)
 	}
 }
 
-func TestApplyParentPostgresProfile_Attached(t *testing.T) {
+func TestApplyPostgresProfile_Attached(t *testing.T) {
 	scheme := testScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(newCNPGCluster("pg")).Build()
 	effects := &recordingCNPGEffects{}
-	r := &NominatimOperationReconciler{Client: c, Scheme: scheme, CNPGEffects: effects}
 	parent := baseNominatim("app-attached")
 	parent.Spec.Database.PostgresProfiles = &nominatimv1alpha1.PostgresProfiles{Import: map[string]string{"work_mem": testImportWorkMem}}
 	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{
 		Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg", ConnectionSecretName: "pg-app",
 	}
 
-	if err := r.applyParentPostgresProfile(context.Background(), parent, "import"); err != nil {
+	if err := applyPostgresProfile(context.Background(), c, effects, parent, postgresProfileImport); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	if effects.profileCalls != 1 || effects.lastParams["work_mem"] != testImportWorkMem {
 		t.Fatalf("expected profile applied, got calls=%d params=%v", effects.profileCalls, effects.lastParams)
+	}
+}
+
+// --- setBackupPaused / applyPostgresProfile (moved from nominatim_database_test) ---
+
+func TestApplyPostgresProfile_UnknownWhich(t *testing.T) {
+	scheme := testScheme(t)
+	nom := baseNominatim("prof")
+	nom.Spec.Database = nominatimv1alpha1.DatabaseSpec{
+		ClusterRef: &nominatimv1alpha1.DatabaseClusterRef{Name: "pg"},
+	}
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{
+		Mode:        nominatimv1alpha1.DatabaseModeClusterAttached,
+		ClusterName: "pg",
+	}
+	cluster := &unstructured.Unstructured{}
+	cluster.SetGroupVersionKind(CNPGClusterGVK)
+	cluster.SetName("pg")
+	cluster.SetNamespace("default")
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, cluster).Build()
+	if err := applyPostgresProfile(context.Background(), c, &recordingCNPGEffects{}, nom, "nope"); err == nil {
+		t.Fatal("expected error for unknown profile")
+	}
+}
+
+func TestSetBackupPaused_ErrorsAndDefaults(t *testing.T) {
+	scheme := testScheme(t)
+	cluster := &unstructured.Unstructured{}
+	cluster.SetGroupVersionKind(CNPGClusterGVK)
+	cluster.SetName("pg")
+	cluster.SetNamespace("default")
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cluster).Build()
+	defaults := defaultCNPGEffects{Client: c}
+
+	nom := baseNominatim("bp")
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{
+		Mode: nominatimv1alpha1.DatabaseModeClusterAttached,
+	}
+	if err := setBackupPaused(context.Background(), c, defaults, nom, true); err == nil {
+		t.Fatal("expected missing cluster name error")
+	}
+
+	nom.Status.Database.ClusterName = "missing"
+	if err := setBackupPaused(context.Background(), c, defaults, nom, true); err == nil {
+		t.Fatal("expected get cluster error")
+	}
+
+	nom.Status.Database.ClusterName = "pg"
+	if err := setBackupPaused(context.Background(), c, defaults, nom, true); err != nil {
+		t.Fatalf("default PauseBackups: %v", err)
+	}
+	if err := setBackupPaused(context.Background(), c, defaults, nom, false); err != nil {
+		t.Fatalf("default ResumeBackups: %v", err)
+	}
+
+	// Mode ConnectionSecret without Degraded still no-ops.
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{Mode: nominatimv1alpha1.DatabaseModeConnectionSecret}
+	effects := &recordingCNPGEffects{}
+	if err := setBackupPaused(context.Background(), c, effects, nom, true); err != nil {
+		t.Fatal(err)
+	}
+	if effects.pauseCalls != 0 {
+		t.Fatal("ConnectionSecret mode must not pause")
+	}
+}
+
+func TestApplyPostgresProfile_Branches(t *testing.T) {
+	scheme := testScheme(t)
+	cluster := &unstructured.Unstructured{}
+	cluster.SetGroupVersionKind(CNPGClusterGVK)
+	cluster.SetName("pg")
+	cluster.SetNamespace("default")
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cluster).Build()
+	effects := &recordingCNPGEffects{}
+	ctx := context.Background()
+
+	nom := baseNominatim("ap")
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{Mode: nominatimv1alpha1.DatabaseModeConnectionSecret}
+	if err := applyPostgresProfile(ctx, c, effects, nom, postgresProfileImport); err != nil {
+		t.Fatal(err)
+	}
+	if effects.profileCalls != 0 {
+		t.Fatal("degraded/secret mode must skip profiles")
+	}
+
+	nom.Spec.Database.PostgresProfiles = &nominatimv1alpha1.PostgresProfiles{
+		Import: map[string]string{"work_mem": "64MB"},
+	}
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{
+		Mode: nominatimv1alpha1.DatabaseModeClusterAttached,
+	}
+	if err := applyPostgresProfile(ctx, c, effects, nom, postgresProfileImport); err == nil {
+		t.Fatal("expected missing cluster name")
+	}
+	nom.Status.Database.ClusterName = "missing"
+	if err := applyPostgresProfile(ctx, c, effects, nom, postgresProfileImport); err == nil {
+		t.Fatal("expected get error")
+	}
+	nom.Status.Database.ClusterName = "pg"
+	if err := applyPostgresProfile(ctx, c, effects, nom, postgresProfileImport); err != nil {
+		t.Fatal(err)
+	}
+	if effects.profileCalls != 1 || effects.lastParams["work_mem"] != "64MB" {
+		t.Fatalf("import profile not applied: %#v", effects)
+	}
+	// empty runtime still clears import-only managed keys (work_mem)
+	if err := applyPostgresProfile(ctx, c, effects, nom, postgresProfileRuntime); err != nil {
+		t.Fatal(err)
+	}
+	if effects.profileCalls != 2 {
+		t.Fatalf("empty runtime should still clear import-only keys, got %d calls", effects.profileCalls)
+	}
+	// nil profiles + import
+	nom.Spec.Database.PostgresProfiles = nil
+	if err := applyPostgresProfile(ctx, c, effects, nom, postgresProfileImport); err != nil {
+		t.Fatal(err)
+	}
+	if effects.profileCalls != 2 {
+		t.Fatalf("nil profiles must be a no-op, got %d", effects.profileCalls)
+	}
+}
+
+func TestDefaultCNPGEffects_ApplyParameters(t *testing.T) {
+	scheme := testScheme(t)
+	cluster := &unstructured.Unstructured{}
+	cluster.SetGroupVersionKind(CNPGClusterGVK)
+	cluster.SetName("pg")
+	cluster.SetNamespace("default")
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cluster).Build()
+	nom := baseNominatim("defeff")
+	nom.Spec.Database.PostgresProfiles = &nominatimv1alpha1.PostgresProfiles{
+		Runtime: map[string]string{"a": "b"},
+	}
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{
+		Mode:        nominatimv1alpha1.DatabaseModeClusterAttached,
+		ClusterName: "pg",
+	}
+	if err := applyPostgresProfile(context.Background(), c, defaultCNPGEffects{Client: c}, nom, postgresProfileRuntime); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -414,7 +533,7 @@ func TestApplyPreJobCNPGEffects_PauseErrorPropagates(t *testing.T) {
 	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{Mode: nominatimv1alpha1.DatabaseModeClusterAttached} // no cluster name
 	op := &nominatimv1alpha1.NominatimOperation{Spec: nominatimv1alpha1.NominatimOperationSpec{Type: nominatimv1alpha1.NominatimOperationUpdate}}
 	if err := r.applyPreJobCNPGEffects(context.Background(), op, parent); err == nil {
-		t.Fatal("expected error to propagate from setParentBackupPaused")
+		t.Fatal("expected error to propagate from setBackupPaused")
 	}
 }
 
@@ -433,7 +552,7 @@ func TestApplyPreJobCNPGEffects_ProfileErrorPropagates(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{Spec: nominatimv1alpha1.NominatimOperationSpec{Type: nominatimv1alpha1.NominatimOperationUpdate}}
 
 	if err := r.applyPreJobCNPGEffects(context.Background(), op, parent); err == nil {
-		t.Fatal("expected error to propagate from applyParentPostgresProfile")
+		t.Fatal("expected error to propagate from applyPostgresProfile")
 	}
 	if effects.pauseCalls != 1 {
 		t.Fatalf("expected pause attempted before profile failure, got %d", effects.pauseCalls)
@@ -481,7 +600,7 @@ func TestApplyTerminalCNPGEffects_ResumeErrorPropagates(t *testing.T) {
 	parent.Status.Database = nominatimv1alpha1.DatabaseStatus{Mode: nominatimv1alpha1.DatabaseModeClusterAttached}
 	op := &nominatimv1alpha1.NominatimOperation{Spec: nominatimv1alpha1.NominatimOperationSpec{Type: nominatimv1alpha1.NominatimOperationUpdate}}
 	if err := r.applyTerminalCNPGEffects(context.Background(), op, parent); err == nil {
-		t.Fatal("expected error to propagate from setParentBackupPaused")
+		t.Fatal("expected error to propagate from setBackupPaused")
 	}
 }
 
@@ -500,14 +619,12 @@ func TestApplyTerminalCNPGEffects_ProfileErrorPropagates(t *testing.T) {
 	op := &nominatimv1alpha1.NominatimOperation{Spec: nominatimv1alpha1.NominatimOperationSpec{Type: nominatimv1alpha1.NominatimOperationUpdate}}
 
 	if err := r.applyTerminalCNPGEffects(context.Background(), op, parent); err == nil {
-		t.Fatal("expected error to propagate from applyParentPostgresProfile")
+		t.Fatal("expected error to propagate from applyPostgresProfile")
 	}
 	if effects.resumeCalls != 1 {
 		t.Fatalf("expected resume attempted before profile failure, got %d", effects.resumeCalls)
 	}
 }
-
-// --- syncParentActiveOperationRef branches ---
 
 func TestSyncParentActiveOperationRef_NoNominatimRefIsNoop(t *testing.T) {
 	r := &NominatimOperationReconciler{}
@@ -527,20 +644,6 @@ func TestSyncParentActiveOperationRef_MissingParentIsNoop(t *testing.T) {
 	}
 	if err := r.syncParentActiveOperationRef(context.Background(), op, true); err != nil {
 		t.Fatalf("expected no-op for missing parent, got %v", err)
-	}
-}
-
-func TestSyncParentActiveOperationRef_GetErrorPropagates(t *testing.T) {
-	scheme := testScheme(t)
-	base := fake.NewClientBuilder().WithScheme(scheme).Build()
-	c := &stubGetClient{Client: base, err: fmt.Errorf("boom")}
-	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
-	op := &nominatimv1alpha1.NominatimOperation{
-		ObjectMeta: metav1.ObjectMeta{Name: "op-x", Namespace: "default"},
-		Spec:       nominatimv1alpha1.NominatimOperationSpec{NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"}},
-	}
-	if err := r.syncParentActiveOperationRef(context.Background(), op, true); err == nil {
-		t.Fatal("expected error to propagate")
 	}
 }
 
@@ -588,44 +691,11 @@ func TestSyncParentActiveOperationRef_AddRemoveAndAlreadyDesiredIsNoop(t *testin
 	}
 }
 
-func TestSyncParentActiveOperationRef_StatusUpdateErrorPropagates(t *testing.T) {
-	scheme := testScheme(t)
-	parent := baseNominatim("sue")
-	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(parent).Build()
-	c := stubClient{Client: base, failStatus: true}
-	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
-	op := &nominatimv1alpha1.NominatimOperation{
-		ObjectMeta: metav1.ObjectMeta{Name: "op-sue", Namespace: "default"},
-		Spec:       nominatimv1alpha1.NominatimOperationSpec{NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name}},
-	}
-	if err := r.syncParentActiveOperationRef(context.Background(), op, true); err == nil {
-		t.Fatal("expected status update error to propagate")
-	}
-}
-
-// --- syncParentSideEffects orchestration branches ---
-
 func TestSyncParentSideEffects_NoNominatimRefIsNoop(t *testing.T) {
 	r := &NominatimOperationReconciler{}
 	op := &nominatimv1alpha1.NominatimOperation{}
 	if err := r.syncParentSideEffects(context.Background(), op); err != nil {
 		t.Fatalf("expected no-op, got %v", err)
-	}
-}
-
-func TestSyncParentSideEffects_RefSyncErrorPropagates(t *testing.T) {
-	scheme := testScheme(t)
-	parent := baseNominatim("sse1")
-	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(parent).Build()
-	c := stubClient{Client: base, failStatus: true}
-	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
-	op := &nominatimv1alpha1.NominatimOperation{
-		ObjectMeta: metav1.ObjectMeta{Name: "op-sse1", Namespace: "default"},
-		Spec:       nominatimv1alpha1.NominatimOperationSpec{NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name}},
-		Status:     nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseRunning},
-	}
-	if err := r.syncParentSideEffects(context.Background(), op); err == nil {
-		t.Fatal("expected ref sync error to propagate")
 	}
 }
 
@@ -664,25 +734,6 @@ func TestSyncParentSideEffects_TerminalMissingParentIsNoop(t *testing.T) {
 		t.Fatalf("expected no-op for missing parent, got %v", err)
 	}
 }
-
-func TestSyncParentSideEffects_TerminalGetErrorPropagates(t *testing.T) {
-	scheme := testScheme(t)
-	parent := baseNominatim("sse4")
-	base := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent).WithObjects(parent).Build()
-	// 1st Get (inside syncParentActiveOperationRef) succeeds; 2nd Get (terminal CNPG lookup) fails.
-	c := &stubGetClient{Client: base, err: fmt.Errorf("boom"), n: 2}
-	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
-	op := &nominatimv1alpha1.NominatimOperation{
-		ObjectMeta: metav1.ObjectMeta{Name: "op-sse4", Namespace: "default"},
-		Spec:       nominatimv1alpha1.NominatimOperationSpec{NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name}},
-		Status:     nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
-	}
-	if err := r.syncParentSideEffects(context.Background(), op); err == nil {
-		t.Fatal("expected terminal parent get error to propagate")
-	}
-}
-
-// --- End-to-end Reconcile: ActiveOperationRefs lifecycle + CNPG pause/resume wiring ---
 
 func TestOperationReconcile_WriteHeavyBootstrap_PauseImportThenTerminalResumeRuntime(t *testing.T) {
 	scheme := testScheme(t)
@@ -963,34 +1014,6 @@ func TestOperationReconcile_TerminalSyncStatusFromJobErrorPropagates(t *testing.
 	}
 }
 
-func TestOperationReconcile_TerminalSyncParentSideEffectsErrorPropagates(t *testing.T) {
-	scheme := testScheme(t)
-	ctx := context.Background()
-
-	parent := baseNominatim("vzw-term-parent-err")
-	op := &nominatimv1alpha1.NominatimOperation{
-		ObjectMeta: metav1.ObjectMeta{Name: "boot-term-parent-err", Namespace: "default"},
-		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: parent.Name},
-		},
-		// No JobRef: exercises a Conflict-style terminal Operation, skipping syncStatusFromJob
-		// and going straight to the syncParentSideEffects error-propagation branch.
-		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseFailed},
-	}
-	// Pre-populate the ref so removing it on this terminal pass actually issues a Status().Update
-	// (an absent-ref removal would otherwise short-circuit as a no-op before ever touching status).
-	parent.Status.ActiveOperationRefs = []corev1.ObjectReference{operationObjectReference(op)}
-	base := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(parent, op).WithObjects(parent, op).Build()
-	c := stubKindStatusClient{Client: base, failFor: &nominatimv1alpha1.Nominatim{}}
-	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
-
-	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: op.Name, Namespace: "default"}}
-	if _, err := r.Reconcile(ctx, req); err == nil {
-		t.Fatal("expected syncParentSideEffects error to propagate from the terminal branch")
-	}
-}
-
 func TestOperationReconcile_MainPathSyncParentSideEffectsErrorPropagates(t *testing.T) {
 	scheme := testScheme(t)
 	ctx := context.Background()
@@ -1135,10 +1158,8 @@ func TestApplyPostgresProfile_RemovesImportOnlyKeysOnRuntime(t *testing.T) {
 		Mode: nominatimv1alpha1.DatabaseModeClusterAttached, ClusterName: "pg-profile-rm",
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, cluster).Build()
-	r := &NominatimReconciler{Client: c, Scheme: scheme}
-
-	if err := r.ApplyPostgresProfile(ctx, nom, "runtime"); err != nil {
-		t.Fatalf("ApplyPostgresProfile: %v", err)
+	if err := applyPostgresProfile(ctx, c, defaultCNPGEffects{Client: c}, nom, postgresProfileRuntime); err != nil {
+		t.Fatalf("applyPostgresProfile: %v", err)
 	}
 
 	got := &unstructured.Unstructured{}

@@ -71,8 +71,11 @@ func isOperationTypeImplemented(t nominatimv1alpha1.NominatimOperationType) bool
 //
 // At most one write-heavy Operation (Bootstrap, AddRegions, Reimport, Migrate,
 // Freeze) may be Pending or Running per Nominatim. If another write-heavy
-// Operation is already active, a new Operation is set to Failed with reason
-// Conflict (no Job created).
+// Operation already holds the write plane (Running or Job armed), a new
+// Operation is set to Failed with reason Conflict (no Job created). Two fresh
+// write-heavy peers without Jobs use a lex-name creation race (requeue, not
+// dual Conflict). Peer evaluation lives in evaluateWritePlane
+// (nominatimoperation_mutex.go); schedule probes use ScheduleBusy().
 //
 // Update and CatchUp use the same Conflict policy when a write-heavy Operation
 // is active (and vice versa): they may not run alongside write-heavy work.
@@ -131,25 +134,6 @@ func isActiveOperationPhase(phase nominatimv1alpha1.NominatimOperationPhase) boo
 func isTerminalOperationPhase(phase nominatimv1alpha1.NominatimOperationPhase) bool {
 	return phase == nominatimv1alpha1.NominatimOperationPhaseSucceeded ||
 		phase == nominatimv1alpha1.NominatimOperationPhaseFailed
-}
-
-func findConflictingOperation(op *nominatimv1alpha1.NominatimOperation, peers []nominatimv1alpha1.NominatimOperation) *nominatimv1alpha1.NominatimOperation {
-	for i := range peers {
-		peer := &peers[i]
-		if peer.Name == op.Name || peer.Namespace != op.Namespace {
-			continue
-		}
-		if peer.Spec.NominatimRef.Name != op.Spec.NominatimRef.Name {
-			continue
-		}
-		if !isActiveOperationPhase(peer.Status.Phase) {
-			continue
-		}
-		if operationsMutexConflict(op, peer) {
-			return peer
-		}
-	}
-	return nil
 }
 
 // effectiveRegions returns the region set an Operation acts on: Operation.spec.regions
