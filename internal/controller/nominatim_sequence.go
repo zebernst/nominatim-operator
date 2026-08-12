@@ -94,7 +94,7 @@ func sequenceProbeOperation(op *nominatimv1alpha1.NominatimOperation) bool {
 	switch op.Spec.Type {
 	case nominatimv1alpha1.NominatimOperationBootstrap,
 		nominatimv1alpha1.NominatimOperationAddRegions,
-		nominatimv1alpha1.NominatimOperationReimport,
+		nominatimv1alpha1.NominatimOperationRebuild,
 		nominatimv1alpha1.NominatimOperationUpdate,
 		nominatimv1alpha1.NominatimOperationCatchUp:
 		return true

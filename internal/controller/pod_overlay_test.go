@@ -237,20 +237,20 @@ func TestMergePodSpecOverlay_WorkerDoesNotInventPorts(t *testing.T) {
 
 func TestIsReservedEnvName(t *testing.T) {
 	cases := map[string]bool{
-		"NOMINATIM_DATABASE_DSN":     true,
-		"NOMINATIM_FLATNODE_FILE":    true,
-		"NOMINATIM_REGIONS":          true,
-		"NOMINATIM_REIMPORT_CONFIRM": true,
-		"NOMINATIM_IMPORT_STYLE":     false, // user/typed config — not operator-reserved
-		"NOMINATIM_TOKENIZER":        false,
-		"NOMINATIM_LANGUAGES":        false,
-		"PGHOST":                     true,
-		"PGOPTIONS":                  false, // only exact PG* keys the operator sets are reserved
-		"OPERATION_TYPE":             true,
-		"IMPORT_STAGING":             true,
-		"PBF_URL":                    true,
-		"CUSTOM":                     false,
-		"PATH":                       false,
+		"NOMINATIM_DATABASE_DSN":    true,
+		"NOMINATIM_FLATNODE_FILE":   true,
+		"NOMINATIM_REGIONS":         true,
+		"NOMINATIM_REBUILD_CONFIRM": true,
+		"NOMINATIM_IMPORT_STYLE":    false, // user/typed config — not operator-reserved
+		"NOMINATIM_TOKENIZER":       false,
+		"NOMINATIM_LANGUAGES":       false,
+		"PGHOST":                    true,
+		"PGOPTIONS":                 false, // only exact PG* keys the operator sets are reserved
+		"OPERATION_TYPE":            true,
+		"IMPORT_STAGING":            true,
+		"PBF_URL":                   true,
+		"CUSTOM":                    false,
+		"PATH":                      false,
 	}
 	for name, want := range cases {
 		if got := isReservedEnvName(name); got != want {

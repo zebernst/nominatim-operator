@@ -32,7 +32,7 @@ const (
 
 // applyPreJobCNPGEffects pauses backups and switches to the import postgres profile before
 // this Operation's Job is created, when the parent's pauseBackupsDuringOperations policy
-// matches this Operation's type (see operationImpactMatches: Never/BootstrapReimport/
+// matches this Operation's type (see operationImpactMatches: Never/BootstrapRebuild/
 // WriteHeavy/All). It is a no-op when the policy doesn't cover this Operation type — e.g.
 // Update under the default WriteHeavy policy only pauses when the policy is All.
 func (r *NominatimOperationReconciler) applyPreJobCNPGEffects(ctx context.Context, op *nominatimv1alpha1.NominatimOperation, parent *nominatimv1alpha1.Nominatim) error {

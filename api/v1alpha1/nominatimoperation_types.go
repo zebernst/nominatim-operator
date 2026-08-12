@@ -21,7 +21,7 @@ import (
 )
 
 // NominatimOperationType is the kind of finite workflow to run against a Nominatim instance.
-// +kubebuilder:validation:Enum=Bootstrap;AddRegions;Reimport;Update;CatchUp;Refresh;Migrate;Freeze
+// +kubebuilder:validation:Enum=Bootstrap;AddRegions;Rebuild;Update;CatchUp;Refresh;Migrate;Freeze
 type NominatimOperationType string
 
 const (
@@ -29,8 +29,8 @@ const (
 	NominatimOperationBootstrap NominatimOperationType = "Bootstrap"
 	// NominatimOperationAddRegions imports newly listed regions without wiping existing data.
 	NominatimOperationAddRegions NominatimOperationType = "AddRegions"
-	// NominatimOperationReimport rebuilds the database for a (possibly reduced) region set.
-	NominatimOperationReimport NominatimOperationType = "Reimport"
+	// NominatimOperationRebuild rebuilds the database for a (possibly reduced) region set.
+	NominatimOperationRebuild NominatimOperationType = "Rebuild"
 	// NominatimOperationUpdate applies incremental Geofabrik-style updates.
 	NominatimOperationUpdate NominatimOperationType = "Update"
 	// NominatimOperationCatchUp forces a catch-up / refresh-style update through the same queue.
@@ -76,7 +76,7 @@ type NominatimOperationSpec struct {
 	// +kubebuilder:validation:Required
 	NominatimRef LocalObjectReference `json:"nominatimRef"`
 
-	// Regions are Geofabrik-style region paths targeted by AddRegions or Reimport.
+	// Regions are Geofabrik-style region paths targeted by AddRegions or Rebuild.
 	// Ignored for other operation types unless documented otherwise by the controller.
 	// +optional
 	Regions []string `json:"regions,omitempty"`

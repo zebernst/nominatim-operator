@@ -10,7 +10,7 @@ spec:
   type: Update
   nominatimRef:
     name: nominatim-sample
-  # Optional: regions for AddRegions / Reimport
+  # Optional: regions for AddRegions / Rebuild
   # regions:
   #   - north-america/us-west
   # Optional: override Nominatim.spec.staging for this operation's PVC

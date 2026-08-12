@@ -393,7 +393,7 @@ region_staging_pbf() {
   echo "${STAGING_DIR}/$(echo "${region}" | tr '/' '-')-latest.osm.pbf"
 }
 
-# Populate OSM_FILES with local PBF paths for the Bootstrap/Reimport import command.
+# Populate OSM_FILES with local PBF paths for the Bootstrap/Rebuild import command.
 # When NOMINATIM_REGIONS is set, download every Geofabrik extract (resume-friendly).
 # Otherwise fall back to ensure_osm_file (PBF_URL / PBF_PATH / data.osm.pbf).
 ensure_import_osm_files() {
@@ -456,7 +456,7 @@ record_imported_regions_from_spec() {
 
 # Resume/no-op guard: schema ready must already list every desired region. If an older
 # Bootstrap only imported regions[0], refuse to paper over with add-data — operator should
-# Reimport with a multi --osm-file Bootstrap.
+# Rebuild with a multi --osm-file Bootstrap.
 assert_imported_list_complete() {
   parse_regions
   if [ "${#DESIRED_REGIONS[@]}" -eq 0 ]; then
@@ -469,7 +469,7 @@ assert_imported_list_complete() {
     fi
   done
   if [ "${#missing[@]}" -gt 0 ]; then
-    die "Nominatim schema is ready but imported-regions.txt is missing: ${missing[*]}. Create a Reimport Operation so Bootstrap can load all regions via nominatim import --osm-file … (add-data is not used for initial multi-region load)."
+    die "Nominatim schema is ready but imported-regions.txt is missing: ${missing[*]}. Create a Rebuild Operation so Bootstrap can load all regions via nominatim import --osm-file … (add-data is not used for initial multi-region load)."
   fi
 }
 
@@ -498,7 +498,7 @@ prepare_db() {
   fix_project_ownership
 }
 
-# Import-shaped Operations (Bootstrap/Reimport/AddRegions) also fetch aux datasets
+# Import-shaped Operations (Bootstrap/Rebuild/AddRegions) also fetch aux datasets
 # and link staging PBF extracts onto the project dir.
 prepare_import() {
   prepare_db

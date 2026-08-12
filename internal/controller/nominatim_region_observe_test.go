@@ -24,7 +24,7 @@ import (
 	nominatimv1alpha1 "github.com/zebernst/nominatim-operator/api/v1alpha1"
 )
 
-func TestObserveRegionsFromSucceededOps_BootstrapThenAddThenReimport(t *testing.T) {
+func TestObserveRegionsFromSucceededOps_BootstrapThenAddThenRebuild(t *testing.T) {
 	nom := nominatimWithRegions("observe-all", "europe/monaco")
 
 	boot := nominatimv1alpha1.NominatimOperation{
@@ -53,14 +53,14 @@ func TestObserveRegionsFromSucceededOps_BootstrapThenAddThenReimport(t *testing.
 
 	reimp := nominatimv1alpha1.NominatimOperation{
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:    nominatimv1alpha1.NominatimOperationReimport,
+			Type:    nominatimv1alpha1.NominatimOperationRebuild,
 			Regions: []string{"europe/liechtenstein"},
 		},
 		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: nominatimv1alpha1.NominatimOperationPhaseSucceeded},
 	}
 	observeRegionsFromSucceededOps(nom, []nominatimv1alpha1.NominatimOperation{boot, add, reimp})
 	if len(nom.Status.Regions) != 1 || nom.Status.Regions[0].Name != "europe/liechtenstein" {
-		t.Fatalf("reimport replace: %#v", nom.Status.Regions)
+		t.Fatalf("rebuild replace: %#v", nom.Status.Regions)
 	}
 }
 

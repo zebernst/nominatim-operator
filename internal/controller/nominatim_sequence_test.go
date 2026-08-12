@@ -537,7 +537,7 @@ func TestSequenceProbeOperation_AllWriteTypes(t *testing.T) {
 	opTypes := []nominatimv1alpha1.NominatimOperationType{
 		nominatimv1alpha1.NominatimOperationBootstrap,
 		nominatimv1alpha1.NominatimOperationAddRegions,
-		nominatimv1alpha1.NominatimOperationReimport,
+		nominatimv1alpha1.NominatimOperationRebuild,
 		nominatimv1alpha1.NominatimOperationCatchUp,
 	}
 	for _, typ := range opTypes {

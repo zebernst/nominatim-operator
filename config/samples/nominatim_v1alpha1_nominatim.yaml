@@ -23,7 +23,7 @@ spec:
   #   secondaryImportance: true
   #   usPostcodes: true
   # Typed Nominatim settings (preferred over NOMINATIM_* in podSpec).
-  # ImportStyle/Tokenizer seal after Bootstrap; change requires Reimport.
+  # ImportStyle/Tokenizer seal after Bootstrap; change requires Rebuild.
   # nominatim:
   #   importStyle: extratags
   #   tokenizer: icu

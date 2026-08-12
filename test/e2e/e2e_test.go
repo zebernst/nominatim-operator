@@ -486,7 +486,7 @@ var _ = Describe("Manager", Ordered, func() {
 			validationNamespace = "nominatim-validation"
 			nomName             = "monaco"
 			ownedDatabaseName   = nomName + "-pg-nominatim"
-			reimportName        = nomName + "-reimport"
+			rebuildName         = nomName + "-rebuild"
 		)
 
 		BeforeAll(func() {
@@ -513,8 +513,8 @@ var _ = Describe("Manager", Ordered, func() {
 				return
 			}
 			By("deleting Monaco+Andorra validation fixtures")
-			reimport := filepath.Join("test", "e2e", "testdata", "nominatim-monaco-reimport.yaml")
-			cmd := exec.Command("kubectl", "delete", "-f", reimport, "--ignore-not-found=true")
+			rebuild := filepath.Join("test", "e2e", "testdata", "nominatim-monaco-rebuild.yaml")
+			cmd := exec.Command("kubectl", "delete", "-f", rebuild, "--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-monaco-andorra.yaml")
 			cmd = exec.Command("kubectl", "delete", "-f", fixture, "--ignore-not-found=true")
@@ -577,45 +577,45 @@ var _ = Describe("Manager", Ordered, func() {
 			assertNonEmptySearchQuery("andorra%20la%20vella&countrycodes=ad")
 		})
 
-		// Reimport must start from an empty application database so CNPG (as superuser)
+		// Rebuild must start from an empty application database so CNPG (as superuser)
 		// reinstalls PostGIS/hstore. The controller drops and recreates the owned Database
 		// CR and only arms the worker Job once the replacement reports applied=true.
 		//
-		// This also covers suspendDuringOperations (fixture: BootstrapReimport) / the
-		// Reimport-always-quiesce rule: API replicas must hit 0 while the Op is active and
+		// This also covers suspendDuringOperations (fixture: BootstrapRebuild) / the
+		// Rebuild-always-quiesce rule: API replicas must hit 0 while the Op is active and
 		// restore after it reaches a terminal phase (nominatim-5et.27).
-		It("drops and recreates the owned CNPG Database before arming the Reimport Job", func() {
+		It("drops and recreates the owned CNPG Database before arming the Rebuild Job", func() {
 			By("recording the current owned CNPG Database UID")
 			oldUID := cnpgDatabaseField(validationNamespace, ownedDatabaseName, "metadata.uid")
 			Expect(oldUID).NotTo(BeEmpty(), "Bootstrap should have left an owned CNPG Database")
 
-			By("creating the Reimport NominatimOperation")
-			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-monaco-reimport.yaml")
+			By("creating the Rebuild NominatimOperation")
+			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-monaco-rebuild.yaml")
 			cmd := exec.Command("kubectl", "apply", "-f", fixture)
 			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to create the Reimport NominatimOperation")
+			Expect(err).NotTo(HaveOccurred(), "Failed to create the Rebuild NominatimOperation")
 
-			By("waiting for the API Deployment to scale to zero while Reimport is active")
+			By("waiting for the API Deployment to scale to zero while Rebuild is active")
 			expectAPIScaledTo(validationNamespace, nomName+"-api", 0)
 
-			expectDatabaseReplacedBeforeJob(validationNamespace, ownedDatabaseName, reimportName, oldUID)
+			expectDatabaseReplacedBeforeJob(validationNamespace, ownedDatabaseName, rebuildName, oldUID)
 
-			By("waiting for Reimport NominatimOperation Succeeded")
+			By("waiting for Rebuild NominatimOperation Succeeded")
 			Eventually(func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "nominatimoperation", reimportName,
+				cmd := exec.Command("kubectl", "get", "nominatimoperation", rebuildName,
 					"-n", validationNamespace,
 					"-o", "jsonpath={.status.phase}")
 				out, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(out).NotTo(Equal("Failed"), "Reimport should not Fail")
+				g.Expect(out).NotTo(Equal("Failed"), "Rebuild should not Fail")
 				g.Expect(out).To(Equal("Succeeded"))
 			}, 40*time.Minute, 15*time.Second).Should(Succeed())
 
-			By("waiting for the API Deployment to restore after Reimport completes")
+			By("waiting for the API Deployment to restore after Rebuild completes")
 			expectAPIScaledTo(validationNamespace, nomName+"-api", 1)
 			waitForAPIServing(validationNamespace, nomName+"-api")
 
-			By("probing both countries again after Reimport")
+			By("probing both countries again after Rebuild")
 			assertNonEmptySearchQuery("avenue%20pasteur&countrycodes=mc")
 			assertNonEmptySearchQuery("andorra%20la%20vella&countrycodes=ad")
 		})
@@ -656,7 +656,7 @@ func expectOperationArmed(ns, name string) {
 
 // expectAPIScaledTo waits until the API Deployment's desired replicas match want and, when
 // scaling to zero, until no pods remain (status.replicas == 0). Used to assert
-// suspendDuringOperations / Reimport quiesce in the import e2e.
+// suspendDuringOperations / Rebuild quiesce in the import e2e.
 func expectAPIScaledTo(ns, name string, want int32) {
 	Eventually(func(g Gomega) {
 		cmd := exec.Command("kubectl", "get", "deploy", name, "-n", ns,
@@ -693,18 +693,18 @@ func cnpgDatabaseField(ns, name, path string) string {
 	return strings.TrimSpace(out)
 }
 
-// expectDatabaseReplacedBeforeJob asserts the drop/recreate handshake: the Reimport Job may
+// expectDatabaseReplacedBeforeJob asserts the drop/recreate handshake: the Rebuild Job may
 // only appear once the owned Database is a different object (new UID) reporting
 // status.applied=true, with the Operation's handshake annotations recording the swap.
 //
 // Polling can miss a short-lived violation, so the loop fails fast whenever it observes a
-// Job alongside the pre-Reimport UID, and the annotation assertions afterwards are the
+// Job alongside the pre-Rebuild UID, and the annotation assertions afterwards are the
 // deterministic evidence that the handshake ran rather than being skipped.
 func expectDatabaseReplacedBeforeJob(ns, dbName, opName, oldUID string) {
-	By("asserting the Reimport Job is not created until the Database is replaced and applied")
+	By("asserting the Rebuild Job is not created until the Database is replaced and applied")
 	const (
-		resetAnnotation   = "nominatim.zebernst.dev/reimport-db-reset"
-		prevUIDAnnotation = "nominatim.zebernst.dev/reimport-db-prev-uid"
+		resetAnnotation   = "nominatim.zebernst.dev/rebuild-db-reset"
+		prevUIDAnnotation = "nominatim.zebernst.dev/rebuild-db-prev-uid"
 	)
 
 	armed := false
@@ -723,12 +723,12 @@ func expectDatabaseReplacedBeforeJob(ns, dbName, opName, oldUID string) {
 			continue
 		}
 		Expect(uid).NotTo(Equal(oldUID),
-			"Reimport Job was armed while the pre-Reimport CNPG Database was still present")
+			"Rebuild Job was armed while the pre-Rebuild CNPG Database was still present")
 		Expect(applied).To(Equal("true"),
-			"Reimport Job was armed before the replacement CNPG Database reported applied=true")
+			"Rebuild Job was armed before the replacement CNPG Database reported applied=true")
 		armed = true
 	}
-	Expect(armed).To(BeTrue(), "timed out waiting for the Reimport Job to be armed")
+	Expect(armed).To(BeTrue(), "timed out waiting for the Rebuild Job to be armed")
 
 	By("asserting the Operation recorded the drop/recreate handshake")
 	cmd := exec.Command("kubectl", "get", "nominatimoperation", opName, "-n", ns,

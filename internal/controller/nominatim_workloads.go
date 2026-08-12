@@ -303,9 +303,9 @@ func operationImpactMatches(impact nominatimv1alpha1.OperationImpact, opType nom
 		return true
 	case nominatimv1alpha1.OperationImpactWriteHeavy:
 		return isWriteHeavyOperation(opType)
-	case nominatimv1alpha1.OperationImpactBootstrapReimport:
+	case nominatimv1alpha1.OperationImpactBootstrapRebuild:
 		return opType == nominatimv1alpha1.NominatimOperationBootstrap ||
-			opType == nominatimv1alpha1.NominatimOperationReimport
+			opType == nominatimv1alpha1.NominatimOperationRebuild
 	case nominatimv1alpha1.OperationImpactNever, "":
 		return false
 	default:
@@ -317,7 +317,7 @@ func operationImpactMatches(impact nominatimv1alpha1.OperationImpact, opType nom
 // each NominatimOperation to inspect its Type. Missing operations (already completed and
 // pruned) are skipped rather than treated as errors.
 //
-// Reimport always suspends the API regardless of suspendDuringOperations: the Operation
+// Rebuild always suspends the API regardless of suspendDuringOperations: the Operation
 // drops the owned CNPG Database (reclaim=delete) before the worker Job starts, and open
 // API connections block DROP DATABASE indefinitely.
 func (r *NominatimReconciler) shouldSuspendAPI(ctx context.Context, nom *nominatimv1alpha1.Nominatim, impact nominatimv1alpha1.OperationImpact) (bool, error) {
@@ -333,7 +333,7 @@ func (r *NominatimReconciler) shouldSuspendAPI(ctx context.Context, nom *nominat
 		if err != nil {
 			return false, fmt.Errorf("get active operation %q: %w", ref.Name, err)
 		}
-		if op.Spec.Type == nominatimv1alpha1.NominatimOperationReimport {
+		if op.Spec.Type == nominatimv1alpha1.NominatimOperationRebuild {
 			return true, nil
 		}
 		if impact == nominatimv1alpha1.OperationImpactNever {

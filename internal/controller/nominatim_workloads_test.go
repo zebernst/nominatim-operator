@@ -409,7 +409,7 @@ func TestShouldSuspendAPI_ImpactMatrix(t *testing.T) {
 		want   bool
 	}{
 		{nominatimv1alpha1.OperationImpactNever, false},
-		{nominatimv1alpha1.OperationImpactBootstrapReimport, false},
+		{nominatimv1alpha1.OperationImpactBootstrapRebuild, false},
 		{nominatimv1alpha1.OperationImpactWriteHeavy, false},
 		{nominatimv1alpha1.OperationImpactAll, true},
 		// Empty impact defaults to Never; Update is not suspended.
@@ -426,19 +426,19 @@ func TestShouldSuspendAPI_ImpactMatrix(t *testing.T) {
 	}
 }
 
-// Reimport drops the application database; open API connections block CNPG reclaim=delete.
-// Even suspendDuringOperations=Never must quiesce the API while a Reimport is active.
-func TestShouldSuspendAPI_ReimportAlwaysSuspendsEvenWithNever(t *testing.T) {
+// Rebuild drops the application database; open API connections block CNPG reclaim=delete.
+// Even suspendDuringOperations=Never must quiesce the API while a Rebuild is active.
+func TestShouldSuspendAPI_RebuildAlwaysSuspendsEvenWithNever(t *testing.T) {
 	scheme := testScheme(t)
-	nom := baseNominatim("suspend-reimport")
+	nom := baseNominatim("suspend-rebuild")
 	op := &nominatimv1alpha1.NominatimOperation{
-		ObjectMeta: metav1.ObjectMeta{Name: "op-reimport", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "op-rebuild", Namespace: "default"},
 		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationReimport,
+			Type:         nominatimv1alpha1.NominatimOperationRebuild,
 			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
 		},
 	}
-	nom.Status.ActiveOperationRefs = []corev1.ObjectReference{{Name: "op-reimport"}}
+	nom.Status.ActiveOperationRefs = []corev1.ObjectReference{{Name: "op-rebuild"}}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, op).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
@@ -447,7 +447,7 @@ func TestShouldSuspendAPI_ReimportAlwaysSuspendsEvenWithNever(t *testing.T) {
 		t.Fatalf("shouldSuspendAPI: %v", err)
 	}
 	if !got {
-		t.Fatal("active Reimport must suspend the API even when suspendDuringOperations=Never")
+		t.Fatal("active Rebuild must suspend the API even when suspendDuringOperations=Never")
 	}
 }
 
@@ -904,7 +904,7 @@ func TestOperationImpactMatches_AllCombinations(t *testing.T) {
 	opTypes := []nominatimv1alpha1.NominatimOperationType{
 		nominatimv1alpha1.NominatimOperationBootstrap,
 		nominatimv1alpha1.NominatimOperationAddRegions,
-		nominatimv1alpha1.NominatimOperationReimport,
+		nominatimv1alpha1.NominatimOperationRebuild,
 		nominatimv1alpha1.NominatimOperationUpdate,
 		nominatimv1alpha1.NominatimOperationCatchUp,
 	}
@@ -916,14 +916,14 @@ func TestOperationImpactMatches_AllCombinations(t *testing.T) {
 			t.Fatalf("All must always match (type=%s)", opType)
 		}
 	}
-	if !operationImpactMatches(nominatimv1alpha1.OperationImpactBootstrapReimport, nominatimv1alpha1.NominatimOperationBootstrap) {
-		t.Fatal("BootstrapReimport should match Bootstrap")
+	if !operationImpactMatches(nominatimv1alpha1.OperationImpactBootstrapRebuild, nominatimv1alpha1.NominatimOperationBootstrap) {
+		t.Fatal("BootstrapRebuild should match Bootstrap")
 	}
-	if !operationImpactMatches(nominatimv1alpha1.OperationImpactBootstrapReimport, nominatimv1alpha1.NominatimOperationReimport) {
-		t.Fatal("BootstrapReimport should match Reimport")
+	if !operationImpactMatches(nominatimv1alpha1.OperationImpactBootstrapRebuild, nominatimv1alpha1.NominatimOperationRebuild) {
+		t.Fatal("BootstrapRebuild should match Rebuild")
 	}
-	if operationImpactMatches(nominatimv1alpha1.OperationImpactBootstrapReimport, nominatimv1alpha1.NominatimOperationAddRegions) {
-		t.Fatal("BootstrapReimport should not match AddRegions")
+	if operationImpactMatches(nominatimv1alpha1.OperationImpactBootstrapRebuild, nominatimv1alpha1.NominatimOperationAddRegions) {
+		t.Fatal("BootstrapRebuild should not match AddRegions")
 	}
 	if !operationImpactMatches(nominatimv1alpha1.OperationImpactWriteHeavy, nominatimv1alpha1.NominatimOperationAddRegions) {
 		t.Fatal("WriteHeavy should match AddRegions")
