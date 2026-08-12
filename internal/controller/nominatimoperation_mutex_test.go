@@ -61,65 +61,6 @@ func TestPeerHoldsWritePlane(t *testing.T) {
 	}
 }
 
-func TestShouldRequeueWritePlaneRace(t *testing.T) {
-	op := &nominatimv1alpha1.NominatimOperation{
-		ObjectMeta: metav1.ObjectMeta{Name: "bootstrap-bbb"},
-		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
-		},
-	}
-	peerWinner := nominatimv1alpha1.NominatimOperation{
-		ObjectMeta: metav1.ObjectMeta{Name: "bootstrap-aaa"},
-		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
-		},
-		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: ""},
-	}
-	if !shouldRequeueWritePlaneRace(op, []nominatimv1alpha1.NominatimOperation{peerWinner}) {
-		t.Fatal("lexicographically larger name must requeue during creation race")
-	}
-
-	opWinner := &nominatimv1alpha1.NominatimOperation{
-		ObjectMeta: metav1.ObjectMeta{Name: "bootstrap-aaa"},
-		Spec:       op.Spec,
-	}
-	peerLoser := peerWinner
-	peerLoser.Name = "bootstrap-bbb"
-	if shouldRequeueWritePlaneRace(opWinner, []nominatimv1alpha1.NominatimOperation{peerLoser}) {
-		t.Fatal("race winner must not requeue")
-	}
-}
-
-func TestFindTerminalWritePlaneBlocker(t *testing.T) {
-	op := &nominatimv1alpha1.NominatimOperation{
-		ObjectMeta: metav1.ObjectMeta{Name: "update-1"},
-		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationUpdate,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
-		},
-	}
-	racing := nominatimv1alpha1.NominatimOperation{
-		ObjectMeta: metav1.ObjectMeta{Name: "bootstrap-1"},
-		Spec: nominatimv1alpha1.NominatimOperationSpec{
-			Type:         nominatimv1alpha1.NominatimOperationBootstrap,
-			NominatimRef: nominatimv1alpha1.LocalObjectReference{Name: "nom"},
-		},
-		Status: nominatimv1alpha1.NominatimOperationStatus{Phase: ""},
-	}
-	if findTerminalWritePlaneBlocker(op, []nominatimv1alpha1.NominatimOperation{racing}) != nil {
-		t.Fatal("creation-race peer must not be a terminal blocker")
-	}
-
-	held := racing
-	held.Status.Phase = nominatimv1alpha1.NominatimOperationPhaseRunning
-	blocker := findTerminalWritePlaneBlocker(op, []nominatimv1alpha1.NominatimOperation{held})
-	if blocker == nil || blocker.Name != "bootstrap-1" {
-		t.Fatalf("Running write-heavy peer must terminal-block, got %#v", blocker)
-	}
-}
-
 func TestEvaluateWritePlane(t *testing.T) {
 	update := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "update-1", Namespace: "ns"},

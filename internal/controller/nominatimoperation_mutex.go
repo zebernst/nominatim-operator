@@ -136,24 +136,6 @@ func evaluateWritePlane(op *nominatimv1alpha1.NominatimOperation, peers []nomina
 	return ev
 }
 
-// findTerminalWritePlaneBlocker returns a conflicting peer that already holds
-// the write plane. Nil when the only blockers are creation-race peers.
-func findTerminalWritePlaneBlocker(op *nominatimv1alpha1.NominatimOperation, peers []nominatimv1alpha1.NominatimOperation) *nominatimv1alpha1.NominatimOperation {
-	ev := evaluateWritePlane(op, peers)
-	if ev.Decision == writePlaneHold {
-		return ev.Peer
-	}
-	return nil
-}
-
-// shouldRequeueWritePlaneRace reports whether op must wait for a conflicting
-// peer that is still in the creation race (no Job yet). The lexicographically
-// smaller Operation name wins the race so two fresh write-heavy peers do not
-// both fail with terminal Conflict.
-func shouldRequeueWritePlaneRace(op *nominatimv1alpha1.NominatimOperation, peers []nominatimv1alpha1.NominatimOperation) bool {
-	return evaluateWritePlane(op, peers).Decision == writePlaneRaceWait
-}
-
 func (r *NominatimOperationReconciler) listPeersForNominatim(ctx context.Context, op *nominatimv1alpha1.NominatimOperation) ([]nominatimv1alpha1.NominatimOperation, error) {
 	list := &nominatimv1alpha1.NominatimOperationList{}
 	if err := r.List(ctx, list, client.InNamespace(op.Namespace)); err != nil {
