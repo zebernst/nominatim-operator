@@ -194,7 +194,7 @@ func TestReconcilePVC_ExplicitTemplateName(t *testing.T) {
 
 	vs := nominatimv1alpha1.VolumeSource{
 		VolumeClaimTemplate: &nominatimv1alpha1.VolumeClaimTemplate{
-			Metadata: metav1.ObjectMeta{Name: "custom-name", Labels: map[string]string{"custom": "label"}},
+			Metadata: nominatimv1alpha1.EmbeddedObjectMeta{Name: "custom-name", Labels: map[string]string{"custom": "label"}},
 			Spec: corev1.PersistentVolumeClaimSpec{
 				Resources: corev1.VolumeResourceRequirements{
 					Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("5Gi")},

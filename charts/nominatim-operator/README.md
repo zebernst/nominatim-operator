@@ -189,6 +189,7 @@ Manager binary: command `/manager`, health probe bind address `:8081`
 
 ## Source of truth for RBAC
 
-Manager ClusterRole rules match `config/rbac/role.yaml`. Leader-election Role
-rules match `config/rbac/leader_election_role.yaml`. Regenerate the chart RBAC
-section in `templates/_helpers.tpl` when kubebuilder markers change.
+Manager ClusterRole rules in `templates/_helpers.tpl` (`rbac.roles.manager`) must
+match `config/rbac/role.yaml`. Leader-election Role rules must match
+`config/rbac/leader_election_role.yaml`. Update the chart when kubebuilder
+markers change.
