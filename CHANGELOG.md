@@ -4,6 +4,7 @@
 
 ### Fixed
 
+* **ci/test:** skip Manager + reconcile smoke under `E2E_IMPORT=1` (covered by the e2e job); check `go mod tidy` via `git diff --exit-code` instead of tidy-in-place; nil-guard envtest `AfterSuite`; add `timeout-minutes` on lint/test/worker-shell (nominatim-5et.31).
 * **controller:** seed Gateway API HTTPRoute `rules[].matches` (and related parentRef/backendRef defaults) and preserve existing matches across reconciles so CreateOrUpdate stays idempotent (nominatim-5et.32).
 
 ### Features

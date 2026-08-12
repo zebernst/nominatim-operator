@@ -143,6 +143,12 @@ var _ = Describe("Manager", Ordered, func() {
 	SetDefaultEventuallyPollingInterval(time.Second)
 
 	Context("Manager", func() {
+		BeforeEach(func() {
+			if runImportE2E {
+				Skip("Manager smoke is covered by the e2e job; skip under E2E_IMPORT=1")
+			}
+		})
+
 		It("should run successfully", func() {
 			By("validating that the controller-manager pod is running as expected")
 			verifyControllerUp := func(g Gomega) {
@@ -271,6 +277,9 @@ var _ = Describe("Manager", Ordered, func() {
 		)
 
 		BeforeAll(func() {
+			if runImportE2E {
+				Skip("reconcile smoke is covered by the e2e job; skip under E2E_IMPORT=1")
+			}
 			By("applying NominatimInstance smoke fixtures (secret, PVC, CR with connectionSecretRef)")
 			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-smoke.yaml")
 			cmd := exec.Command("kubectl", "apply", "-f", fixture)
@@ -493,6 +502,31 @@ var _ = Describe("Manager", Ordered, func() {
 			if !runImportE2E {
 				Skip("set E2E_IMPORT=1 to run Monaco+Andorra import e2e (CNPG + api/worker images)")
 			}
+
+			By("waiting for the controller-manager to be ready")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get",
+					"pods", "-l", "control-plane=controller-manager",
+					"-o", "go-template={{ range .items }}"+
+						"{{ if not .metadata.deletionTimestamp }}"+
+						"{{ .metadata.name }}"+
+						"{{ \"\\n\" }}{{ end }}{{ end }}",
+					"-n", namespace,
+				)
+				podOutput, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				podNames := utils.GetNonEmptyLines(podOutput)
+				g.Expect(podNames).To(HaveLen(1))
+				controllerPodName = podNames[0]
+
+				cmd = exec.Command("kubectl", "get",
+					"pods", controllerPodName, "-o", "jsonpath={.status.phase}",
+					"-n", namespace,
+				)
+				phase, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(phase).To(Equal("Running"))
+			}, 2*time.Minute, time.Second).Should(Succeed())
 
 			By("applying Monaco+Andorra NominatimInstance fixture (database.cluster + regions)")
 			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-monaco-andorra.yaml")
