@@ -4,9 +4,9 @@ Own images for Nominatim on Kubernetes — **not** based on `mediagis/nominatim`
 
 | Image | Dockerfile | Registry | Plane |
 |-------|------------|----------|-------|
-| Operator (kubebuilder manager) | `operator.Dockerfile` | `ghcr.io/zebernst/nominatim-operator` | Control |
-| API (gunicorn + nominatim-api) | `api.Dockerfile` | `ghcr.io/zebernst/nominatim-api` | Serving |
-| Worker (nominatim CLI + Operation phases) | `worker.Dockerfile` | `ghcr.io/zebernst/nominatim-worker` | Data / write |
+| Operator (kubebuilder manager) | `images/operator/Dockerfile` | `ghcr.io/zebernst/nominatim-operator` | Control |
+| API (gunicorn + nominatim-api) | `images/api/Dockerfile` | `ghcr.io/zebernst/nominatim-api` | Serving |
+| Worker (nominatim CLI + Operation phases) | `images/worker/Dockerfile` | `ghcr.io/zebernst/nominatim-worker` | Data / write |
 
 Root operator architecture (planes, status SoT, replica/volume notes): see the repository [README](../README.md).
 
@@ -35,20 +35,20 @@ API and worker use **Ubuntu 24.04** and install Nominatim from **PyPI** (`nomina
 Override version at build time:
 
 ```bash
-docker build -f api.Dockerfile --build-arg NOMINATIM_VERSION=5.3.2 -t ghcr.io/zebernst/nominatim-api:dev .
+docker build -f images/api/Dockerfile --build-arg NOMINATIM_VERSION=5.3.2 -t ghcr.io/zebernst/nominatim-api:dev .
 ```
 
 ## Local builds
 
 ```bash
 # Operator
-docker build -t ghcr.io/zebernst/nominatim-operator:dev -f operator.Dockerfile .
+docker build -t ghcr.io/zebernst/nominatim-operator:dev -f images/operator/Dockerfile .
 
 # API
-docker build -t ghcr.io/zebernst/nominatim-api:dev -f api.Dockerfile .
+docker build -t ghcr.io/zebernst/nominatim-api:dev -f images/api/Dockerfile .
 
 # Worker
-docker build -t ghcr.io/zebernst/nominatim-worker:dev -f worker.Dockerfile .
+docker build -t ghcr.io/zebernst/nominatim-worker:dev -f images/worker/Dockerfile .
 ```
 
 CI (`.github/workflows/release.yaml`) builds and pushes all three to GHCR on pushes to `main` and on version tags.

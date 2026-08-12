@@ -6,10 +6,10 @@
   },
   "enforcement": {
     "package": "github.com/zebernst/nominatim-operator/internal/controller",
-    "command": "make test && ./hack/check-coverage.sh cover.out",
+    "command": "make test && ./hack/check-coverage.sh build/cover.out",
     "blockPRCreation": true,
     "blockTaskCompletion": true,
-    "description": "CI and pre-push MUST fail when internal/controller statement coverage falls below thresholds.statements. Prefer make test (writes cover.out with envtest assets). Raise the ratchet when coverage improves; do not lower it without documenting why."
+    "description": "CI and pre-push MUST fail when internal/controller statement coverage falls below thresholds.statements. Prefer make test (writes build/cover.out with envtest assets). Raise the ratchet when coverage improves; do not lower it without documenting why."
   },
   "exemptions": {
     "notes": "Generated DeepCopy/zz_generated code, e2e packages, api/v1alpha1 type-only packages, and thin main/cmd wiring are excluded from the denominator. Worker bash is covered by bats/shellcheck (nominatim-5et.26), not go cover."

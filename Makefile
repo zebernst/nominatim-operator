@@ -43,11 +43,11 @@ help: ## Display this help.
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./api/..." paths="./cmd/..." paths="./internal/..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./api/..." paths="./cmd/..." paths="./internal/..."
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -59,11 +59,16 @@ vet: ## Run go vet against code.
 
 .PHONY: test
 test: manifests generate fmt vet setup-envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
-	./hack/check-coverage.sh cover.out
+	mkdir -p $(BUILD_DIR)
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile $(COVER_PROFILE)
+	./hack/check-coverage.sh $(COVER_PROFILE)
 
 .PHONY: coverage
 coverage: test ## Alias: run tests and enforce .coverage-thresholds.json.
+
+.PHONY: clean
+clean: ## Remove local build artifacts under build/.
+	rm -rf $(BUILD_DIR)
 
 # Worker bash helpers (bats + shellcheck). Requires bats-core and shellcheck on PATH.
 WORKER_SCRIPTS := $(wildcard images/worker/scripts/*.sh)
@@ -141,7 +146,8 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
-	go build -o bin/manager cmd/main.go
+	mkdir -p $(LOCALBIN)
+	go build -o $(LOCALBIN)/manager cmd/main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
@@ -152,18 +158,21 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 API_IMG ?= ghcr.io/zebernst/nominatim-api:latest
 WORKER_IMG ?= ghcr.io/zebernst/nominatim-worker:latest
+OPERATOR_DOCKERFILE ?= images/operator/Dockerfile
+API_DOCKERFILE ?= images/api/Dockerfile
+WORKER_DOCKERFILE ?= images/worker/Dockerfile
 
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build -t ${IMG} -f operator.Dockerfile .
+	$(CONTAINER_TOOL) build -t ${IMG} -f $(OPERATOR_DOCKERFILE) .
 
 .PHONY: docker-build-api
 docker-build-api: ## Build nominatim-api image.
-	$(CONTAINER_TOOL) build -t ${API_IMG} -f api.Dockerfile .
+	$(CONTAINER_TOOL) build -t ${API_IMG} -f $(API_DOCKERFILE) .
 
 .PHONY: docker-build-worker
 docker-build-worker: ## Build nominatim-worker image.
-	$(CONTAINER_TOOL) build -t ${WORKER_IMG} -f worker.Dockerfile .
+	$(CONTAINER_TOOL) build -t ${WORKER_IMG} -f $(WORKER_DOCKERFILE) .
 
 .PHONY: docker-build-all
 docker-build-all: docker-build docker-build-api docker-build-worker ## Build operator, api, and worker images.
@@ -181,19 +190,20 @@ docker-push: ## Push docker image with the manager.
 PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
 .PHONY: docker-buildx
 docker-buildx: ## Build and push docker image for the manager for cross-platform support
-	# copy operator.Dockerfile and insert --platform=${BUILDPLATFORM} into cross.Dockerfile
-	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' operator.Dockerfile > cross.Dockerfile
+	# copy operator Dockerfile and insert --platform=${BUILDPLATFORM} into build/cross.Dockerfile
+	mkdir -p $(BUILD_DIR)
+	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' $(OPERATOR_DOCKERFILE) > $(BUILD_DIR)/cross.Dockerfile
 	- $(CONTAINER_TOOL) buildx create --name nominatim-operator-builder
 	$(CONTAINER_TOOL) buildx use nominatim-operator-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f cross.Dockerfile .
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f $(BUILD_DIR)/cross.Dockerfile .
 	- $(CONTAINER_TOOL) buildx rm nominatim-operator-builder
-	rm -f cross.Dockerfile
+	rm -f $(BUILD_DIR)/cross.Dockerfile
 
 .PHONY: build-installer
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
-	mkdir -p dist
+	mkdir -p $(BUILD_DIR)/dist
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	$(KUSTOMIZE) build config/default > dist/install.yaml
+	$(KUSTOMIZE) build config/default > $(BUILD_DIR)/dist/install.yaml
 
 ##@ Deployment
 
@@ -220,8 +230,12 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 
 ##@ Dependencies
 
+## Local build output (coverage, binaries, install YAML, ephemeral Dockerfiles)
+BUILD_DIR ?= $(shell pwd)/build
+COVER_PROFILE ?= $(BUILD_DIR)/cover.out
+
 ## Location to install dependencies to
-LOCALBIN ?= $(shell pwd)/bin
+LOCALBIN ?= $(BUILD_DIR)/bin
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
 

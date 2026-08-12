@@ -57,6 +57,8 @@ Prerequisites: Go (see `go.mod`), Docker for image builds, a cluster for e2e (`m
 
 Worker shell tests (bats + shellcheck): `make test-worker-shell` / `make shellcheck-worker`.
 
+Domain vocabulary: [`docs/CONTEXT.md`](docs/CONTEXT.md). Local build artifacts land in `build/` (`make clean` removes them).
+
 ## License
 
 Apache License 2.0

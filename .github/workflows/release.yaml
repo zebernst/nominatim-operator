@@ -41,11 +41,11 @@ jobs:
       matrix:
         include:
           - image: nominatim-operator
-            file: operator.Dockerfile
+            file: images/operator/Dockerfile
           - image: nominatim-api
-            file: api.Dockerfile
+            file: images/api/Dockerfile
           - image: nominatim-worker
-            file: worker.Dockerfile
+            file: images/worker/Dockerfile
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -141,12 +141,12 @@ jobs:
       - name: Package Helm chart
         run: |
           set -euo pipefail
-          mkdir -p dist
+          mkdir -p build/dist
           helm package "${CHART_PATH}" \
             --version "${VERSION}" \
             --app-version "${VERSION}" \
-            --destination dist
-          ls -la dist
+            --destination build/dist
+          ls -la build/dist
 
       - name: Log in to GHCR (Helm)
         run: |
@@ -156,7 +156,7 @@ jobs:
       - name: Push chart to OCI
         run: |
           set -euo pipefail
-          CHART_TGZ="dist/nominatim-operator-${VERSION}.tgz"
+          CHART_TGZ="build/dist/nominatim-operator-${VERSION}.tgz"
           helm push "${CHART_TGZ}" "oci://${REGISTRY}/${CHART_OWNER}/charts"
 
       - name: Log in to GHCR (Cosign)

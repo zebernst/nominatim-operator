@@ -2,18 +2,18 @@
 # Compare Go statement coverage for unit-tested packages against .coverage-thresholds.json.
 # Usage:
 #   make test && ./hack/check-coverage.sh
-#   ./hack/check-coverage.sh cover.out
+#   ./hack/check-coverage.sh build/cover.out
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-PROFILE="${1:-cover.out}"
+PROFILE="${1:-build/cover.out}"
 THRESH_FILE="${COVERAGE_THRESHOLDS_FILE:-.coverage-thresholds.json}"
 
 if [[ ! -f "$PROFILE" ]]; then
   echo "coverage profile not found: $PROFILE" >&2
-  echo "run: make test (writes cover.out) or pass a coverprofile path" >&2
+  echo "run: make test (writes build/cover.out) or pass a coverprofile path" >&2
   exit 1
 fi
 

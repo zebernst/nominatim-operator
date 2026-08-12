@@ -38,11 +38,11 @@ if [ -f .coverage-thresholds.json ]; then
       CMD=""
     fi
     if [ -z "$CMD" ] || [ "$CMD" = "null" ]; then
-      CMD='go test $(go list ./... | grep -v /e2e) -coverprofile=cover.out'
+      CMD='go test $(go list ./... | grep -v /e2e) -coverprofile=build/cover.out'
     fi
     echo "    Running: $CMD"
     eval "$CMD"
-    ./hack/check-coverage.sh cover.out
+    ./hack/check-coverage.sh build/cover.out
   fi
 else
   echo "    · No .coverage-thresholds.json — running make test"

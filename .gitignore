@@ -4,8 +4,14 @@
 *.dll
 *.so
 *.dylib
+
+# Local build output (manager, tools, coverage, install YAML, ephemeral Dockerfiles)
+/build/
+
+# Legacy locations (pre-build/ consolidation)
 bin/*
 cross.Dockerfile
+dist/
 
 # Test binary, built with `go test -c`
 *.test
