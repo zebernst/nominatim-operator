@@ -84,7 +84,7 @@ func (r *NominatimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Persist database status before creating Operations/Jobs that read it from the API.
-	// reconcileBootstrap creates NominatimOperations immediately; without this write the
+	// ensureBootstrapOperation creates NominatimOperations immediately; without this write the
 	// Operation controller can race and build a worker Job with no NOMINATIM_DATABASE_DSN.
 	dbStatus := nom.Status.Database
 	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {

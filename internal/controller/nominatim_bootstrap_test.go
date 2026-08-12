@@ -40,15 +40,15 @@ func nominatimWithRegions(name string, regions ...string) *nominatimv1alpha1.Nom
 	return nom
 }
 
-func TestReconcileBootstrap_NoopWhenNoRegionsDesired(t *testing.T) {
+func TestEnsureBootstrapOperation_NoopWhenNoRegionsDesired(t *testing.T) {
 	scheme := testScheme(t)
 	nom := nominatimWithConnectionSecret("bootstrap-noregions")
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileBootstrap(context.Background(), nom); err != nil {
-		t.Fatalf("reconcileBootstrap: %v", err)
+	if err := r.ensureBootstrapOperation(context.Background(), nom, parentOps(t, r, context.Background(), nom)); err != nil {
+		t.Fatalf("ensureBootstrapOperation: %v", err)
 	}
 
 	ops := &nominatimv1alpha1.NominatimOperationList{}
@@ -60,15 +60,15 @@ func TestReconcileBootstrap_NoopWhenNoRegionsDesired(t *testing.T) {
 	}
 }
 
-func TestReconcileBootstrap_NoopWhenStatusRegionsAlreadyPopulated(t *testing.T) {
+func TestEnsureBootstrapOperation_NoopWhenStatusRegionsAlreadyPopulated(t *testing.T) {
 	scheme := testScheme(t)
 	nom := nominatimWithRegions("bootstrap-already-imported", "europe/monaco")
 	nom.Status.Regions = []nominatimv1alpha1.RegionStatus{{Name: "europe/monaco", Phase: "Imported"}}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileBootstrap(context.Background(), nom); err != nil {
-		t.Fatalf("reconcileBootstrap: %v", err)
+	if err := r.ensureBootstrapOperation(context.Background(), nom, parentOps(t, r, context.Background(), nom)); err != nil {
+		t.Fatalf("ensureBootstrapOperation: %v", err)
 	}
 
 	ops := &nominatimv1alpha1.NominatimOperationList{}
@@ -80,14 +80,14 @@ func TestReconcileBootstrap_NoopWhenStatusRegionsAlreadyPopulated(t *testing.T) 
 	}
 }
 
-func TestReconcileBootstrap_CreatesOperationWhenEmpty(t *testing.T) {
+func TestEnsureBootstrapOperation_CreatesWhenEmpty(t *testing.T) {
 	scheme := testScheme(t)
 	nom := nominatimWithRegions("bootstrap-empty", "europe/monaco", "africa/morocco")
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileBootstrap(context.Background(), nom); err != nil {
-		t.Fatalf("reconcileBootstrap: %v", err)
+	if err := r.ensureBootstrapOperation(context.Background(), nom, parentOps(t, r, context.Background(), nom)); err != nil {
+		t.Fatalf("ensureBootstrapOperation: %v", err)
 	}
 
 	op := &nominatimv1alpha1.NominatimOperation{}
@@ -108,7 +108,7 @@ func TestReconcileBootstrap_CreatesOperationWhenEmpty(t *testing.T) {
 	}
 }
 
-func TestReconcileBootstrap_NoopWhenBootstrapAlreadyPendingOrRunning(t *testing.T) {
+func TestEnsureBootstrapOperation_NoopWhenBootstrapAlreadyActive(t *testing.T) {
 	for _, phase := range []nominatimv1alpha1.NominatimOperationPhase{
 		nominatimv1alpha1.NominatimOperationPhasePending,
 		nominatimv1alpha1.NominatimOperationPhaseRunning,
@@ -128,8 +128,8 @@ func TestReconcileBootstrap_NoopWhenBootstrapAlreadyPendingOrRunning(t *testing.
 			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, existing).Build()
 			r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-			if err := r.reconcileBootstrap(context.Background(), nom); err != nil {
-				t.Fatalf("reconcileBootstrap: %v", err)
+			if err := r.ensureBootstrapOperation(context.Background(), nom, parentOps(t, r, context.Background(), nom)); err != nil {
+				t.Fatalf("ensureBootstrapOperation: %v", err)
 			}
 
 			ops := &nominatimv1alpha1.NominatimOperationList{}
@@ -143,7 +143,7 @@ func TestReconcileBootstrap_NoopWhenBootstrapAlreadyPendingOrRunning(t *testing.
 	}
 }
 
-func TestReconcileBootstrap_NoopWhenBootstrapAlreadyTerminal(t *testing.T) {
+func TestEnsureBootstrapOperation_NoopWhenBootstrapAlreadyTerminal(t *testing.T) {
 	scheme := testScheme(t)
 	nom := nominatimWithRegions("bootstrap-terminal", "europe/monaco")
 	existing := &nominatimv1alpha1.NominatimOperation{
@@ -157,8 +157,8 @@ func TestReconcileBootstrap_NoopWhenBootstrapAlreadyTerminal(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, existing).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileBootstrap(context.Background(), nom); err != nil {
-		t.Fatalf("reconcileBootstrap: %v", err)
+	if err := r.ensureBootstrapOperation(context.Background(), nom, parentOps(t, r, context.Background(), nom)); err != nil {
+		t.Fatalf("ensureBootstrapOperation: %v", err)
 	}
 
 	ops := &nominatimv1alpha1.NominatimOperationList{}
@@ -170,7 +170,7 @@ func TestReconcileBootstrap_NoopWhenBootstrapAlreadyTerminal(t *testing.T) {
 	}
 }
 
-func TestReconcileBootstrap_ErrorsWhenConnectionSecretNameEmpty(t *testing.T) {
+func TestEnsureBootstrapOperation_ErrorsWhenConnectionSecretNameEmpty(t *testing.T) {
 	scheme := testScheme(t)
 	nom := nominatimWithConnectionSecret("bootstrap-nosecret")
 	nom.Spec.Regions = []string{"europe/monaco"}
@@ -178,12 +178,12 @@ func TestReconcileBootstrap_ErrorsWhenConnectionSecretNameEmpty(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileBootstrap(context.Background(), nom); err == nil {
+	if err := r.ensureBootstrapOperation(context.Background(), nom, parentOps(t, r, context.Background(), nom)); err == nil {
 		t.Fatal("expected error when connectionSecretName is empty")
 	}
 }
 
-func TestReconcileBootstrap_IgnoresOperationsForOtherParents(t *testing.T) {
+func TestEnsureBootstrapOperation_IgnoresOperationsForOtherParents(t *testing.T) {
 	scheme := testScheme(t)
 	nom := nominatimWithRegions("bootstrap-other-parent", "europe/monaco")
 	other := &nominatimv1alpha1.NominatimOperation{
@@ -197,8 +197,8 @@ func TestReconcileBootstrap_IgnoresOperationsForOtherParents(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, other).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileBootstrap(context.Background(), nom); err != nil {
-		t.Fatalf("reconcileBootstrap: %v", err)
+	if err := r.ensureBootstrapOperation(context.Background(), nom, parentOps(t, r, context.Background(), nom)); err != nil {
+		t.Fatalf("ensureBootstrapOperation: %v", err)
 	}
 
 	op := &nominatimv1alpha1.NominatimOperation{}
@@ -247,7 +247,7 @@ func TestObserveRegionsFromSucceededOps_BootstrapThenAddThenReimport(t *testing.
 	}
 }
 
-func TestReconcileBootstrap_SyncsStatusRegionsAfterSucceeded(t *testing.T) {
+func TestEnsureBootstrapOperation_NoCreateAfterObservePopulatedRegions(t *testing.T) {
 	scheme := testScheme(t)
 	nom := nominatimWithRegions("bootstrap-succeeded", "europe/monaco", "africa/morocco")
 	succeeded := &nominatimv1alpha1.NominatimOperation{
@@ -278,8 +278,8 @@ func TestReconcileBootstrap_SyncsStatusRegionsAfterSucceeded(t *testing.T) {
 	}
 
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
-	if err := r.reconcileBootstrap(context.Background(), nom); err != nil {
-		t.Fatalf("reconcileBootstrap: %v", err)
+	if err := r.ensureBootstrapOperation(context.Background(), nom, parentOps(t, r, context.Background(), nom)); err != nil {
+		t.Fatalf("ensureBootstrapOperation: %v", err)
 	}
 
 	// No new Bootstrap operation should be created once status.regions is now populated.
@@ -292,7 +292,7 @@ func TestReconcileBootstrap_SyncsStatusRegionsAfterSucceeded(t *testing.T) {
 	}
 }
 
-func TestReconcileBootstrap_SyncFallsBackToParentSpecRegions(t *testing.T) {
+func TestObserveRegions_BootstrapFallsBackToParentSpecRegions(t *testing.T) {
 	nom := nominatimWithRegions("bootstrap-fallback-regions", "europe/monaco")
 	succeeded := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: BootstrapOperationName(nom), Namespace: "default"},
@@ -309,7 +309,7 @@ func TestReconcileBootstrap_SyncFallsBackToParentSpecRegions(t *testing.T) {
 	}
 }
 
-func TestReconcileBootstrap_SyncSkipsSucceededOperationWithNoRegionsAnywhere(t *testing.T) {
+func TestObserveRegions_BootstrapSkipsWhenNoRegionsAnywhere(t *testing.T) {
 	nom := nominatimWithConnectionSecret("bootstrap-no-regions-anywhere")
 	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{ConnectionSecretName: testConnectionSecretName}
 	// nom.Spec.Regions intentionally left empty.
@@ -328,7 +328,7 @@ func TestReconcileBootstrap_SyncSkipsSucceededOperationWithNoRegionsAnywhere(t *
 	}
 }
 
-func TestReconcileBootstrap_SyncIgnoresNonBootstrapOrNonSucceeded(t *testing.T) {
+func TestObserveRegions_IgnoresNonBootstrapOrNonSucceeded(t *testing.T) {
 	nom := nominatimWithRegions("bootstrap-ignore-others", "europe/monaco")
 	running := &nominatimv1alpha1.NominatimOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: BootstrapOperationName(nom), Namespace: "default"},
@@ -353,7 +353,7 @@ func TestReconcileBootstrap_SyncIgnoresNonBootstrapOrNonSucceeded(t *testing.T) 
 	}
 }
 
-func TestReconcileBootstrap_EnsureOnlyDoesNotSyncRegions(t *testing.T) {
+func TestEnsureBootstrapOperation_DoesNotSyncRegions(t *testing.T) {
 	// Observe is a separate module (observeRegionsFromSucceededOps). Bootstrap
 	// reconcile only ensures the Operation exists.
 	scheme := testScheme(t)
@@ -370,23 +370,11 @@ func TestReconcileBootstrap_EnsureOnlyDoesNotSyncRegions(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, succeeded).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileBootstrap(context.Background(), nom); err != nil {
-		t.Fatalf("reconcileBootstrap: %v", err)
+	if err := r.ensureBootstrapOperation(context.Background(), nom, parentOps(t, r, context.Background(), nom)); err != nil {
+		t.Fatalf("ensureBootstrapOperation: %v", err)
 	}
 	if len(nom.Status.Regions) != 0 {
 		t.Fatalf("ensure-only bootstrap must not write status.regions, got %#v", nom.Status.Regions)
-	}
-}
-
-func TestReconcileBootstrap_ListErrorPropagates(t *testing.T) {
-	scheme := testScheme(t)
-	nom := nominatimWithRegions("bootstrap-list-error", "europe/monaco")
-	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
-	fc := &failingListClient{Client: base}
-	r := &NominatimReconciler{Client: fc, Scheme: scheme}
-
-	if err := r.reconcileBootstrap(context.Background(), nom); err == nil {
-		t.Fatal("expected List error to propagate")
 	}
 }
 
@@ -403,25 +391,25 @@ func schemeWithOperationOnly(t *testing.T) *runtime.Scheme {
 	return s
 }
 
-func TestReconcileBootstrap_SetControllerReferenceError(t *testing.T) {
+func TestEnsureBootstrapOperation_SetControllerReferenceError(t *testing.T) {
 	scheme := schemeWithOperationOnly(t)
 	nom := nominatimWithRegions("bootstrap-owner-error", "europe/monaco")
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 	r := &NominatimReconciler{Client: c, Scheme: scheme}
 
-	if err := r.reconcileBootstrap(context.Background(), nom); err == nil {
+	if err := r.ensureBootstrapOperation(context.Background(), nom, parentOps(t, r, context.Background(), nom)); err == nil {
 		t.Fatal("expected SetControllerReference error to propagate")
 	}
 }
 
-func TestReconcileBootstrap_CreateErrorPropagates(t *testing.T) {
+func TestEnsureBootstrapOperation_CreateErrorPropagates(t *testing.T) {
 	scheme := testScheme(t)
 	nom := nominatimWithRegions("bootstrap-create-error", "europe/monaco")
 	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
 	fc := &failingClient{Client: base, failCreate: []failSpec{{kind: "NominatimOperation"}}}
 	r := &NominatimReconciler{Client: fc, Scheme: scheme}
 
-	if err := r.reconcileBootstrap(context.Background(), nom); err == nil {
+	if err := r.ensureBootstrapOperation(context.Background(), nom, parentOps(t, r, context.Background(), nom)); err == nil {
 		t.Fatal("expected Create error to propagate")
 	}
 }
@@ -445,7 +433,7 @@ func TestReconcile_PropagatesBootstrapError(t *testing.T) {
 	}
 	_, err := r.Reconcile(context.Background(), req)
 	if err == nil {
-		t.Fatal("expected Reconcile to propagate reconcileBootstrap error")
+		t.Fatal("expected Reconcile to propagate list/ensure bootstrap error")
 	}
 }
 

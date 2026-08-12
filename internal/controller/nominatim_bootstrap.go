@@ -38,19 +38,6 @@ func BootstrapOperationName(nom *nominatimv1alpha1.Nominatim) string {
 	return nom.Name + bootstrapNameSuffix
 }
 
-// reconcileBootstrap ensures a Bootstrap NominatimOperation exists for an empty
-// instance. Observation of Succeeded ops into status.regions is
-// observeRegionsFromSucceededOps (called from Reconcile before this). It must run
-// after reconcileDatabase (status.database.connectionSecretName known).
-func (r *NominatimReconciler) reconcileBootstrap(ctx context.Context, nom *nominatimv1alpha1.Nominatim) error {
-	ops, err := r.listOperationsForParent(ctx, nom)
-	if err != nil {
-		return fmt.Errorf("list operations for bootstrap reconcile: %w", err)
-	}
-
-	return r.ensureBootstrapOperation(ctx, nom, ops)
-}
-
 // listOperationsForParent lists NominatimOperations in the same namespace whose
 // nominatimRef targets nom.
 func (r *NominatimReconciler) listOperationsForParent(ctx context.Context, nom *nominatimv1alpha1.Nominatim) ([]nominatimv1alpha1.NominatimOperation, error) {
