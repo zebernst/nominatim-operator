@@ -227,6 +227,9 @@ func uiAPIEndpointEnv(nom *nominatimv1alpha1.NominatimInstance) []corev1.EnvVar 
 	return nil
 }
 
+// envNominatimDatabaseDSN is the sealed Nominatim Postgres URI env key for API/worker pods.
+const envNominatimDatabaseDSN = "NOMINATIM_DATABASE_DSN"
+
 // dbEnvVars maps the CNPG/connection-secret conventional keys onto the environment
 // variables consumed by the Nominatim API image. Keys are marked optional since
 // connectionSecretRef (degraded) secrets are not schema-validated by this operator.
@@ -245,7 +248,7 @@ func dbEnvVars(secretName string) []corev1.EnvVar {
 		}
 	}
 	return []corev1.EnvVar{
-		fromKey("NOMINATIM_DATABASE_DSN", "uri"),
+		fromKey(envNominatimDatabaseDSN, "uri"),
 		fromKey("PGHOST", "host"),
 		fromKey("PGPORT", "port"),
 		fromKey("PGDATABASE", "dbname"),

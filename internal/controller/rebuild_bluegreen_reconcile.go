@@ -191,7 +191,6 @@ func (r *NominatimOperationReconciler) reconcileBlueGreenAfterImport(
 	op *nominatimv1alpha1.NominatimOperation,
 	parent *nominatimv1alpha1.NominatimInstance,
 ) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
 	if parent.Status.Rebuild == nil {
 		parent.Status.Rebuild = seedBlueGreenRebuildStatus(parent, op)
 	}
@@ -202,6 +201,39 @@ func (r *NominatimOperationReconciler) reconcileBlueGreenAfterImport(
 		phase = nominatimv1alpha1.RebuildPhaseImporting
 	}
 
+	in := blueGreenInputFrom(op, parent, rb, phase)
+	retired := blueGreenRetiredClusterName(parent)
+	if phase == nominatimv1alpha1.RebuildPhaseGarbageCollect || phase == nominatimv1alpha1.RebuildPhaseRollbackWindow {
+		gone, err := r.clusterGone(ctx, parent.Namespace, retired)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		in.BlueGone = gone
+	}
+
+	out, act := advanceBlueGreen(in)
+	rb.Phase = out.Phase
+	rb.RollbackUntil = out.RollbackUntil
+	if out.Message != "" {
+		rb.Message = out.Message
+	}
+
+	if err := r.applyBlueGreenActions(ctx, parent, rb, act, retired, out); err != nil {
+		return ctrl.Result{}, err
+	}
+	rb = parent.Status.Rebuild
+	if err := r.patchParentRebuildStatus(ctx, parent); err != nil {
+		return ctrl.Result{}, err
+	}
+	return r.syncBlueGreenOperationStatus(ctx, op, rb, out)
+}
+
+func blueGreenInputFrom(
+	op *nominatimv1alpha1.NominatimOperation,
+	parent *nominatimv1alpha1.NominatimInstance,
+	rb *nominatimv1alpha1.RebuildStatus,
+	phase nominatimv1alpha1.RebuildPhase,
+) blueGreenInput {
 	in := blueGreenInput{
 		Phase:           phase,
 		ActiveCluster:   rb.ActiveClusterName,
@@ -221,51 +253,48 @@ func (r *NominatimOperationReconciler) reconcileBlueGreenAfterImport(
 	if in.Failed && in.Message == "" {
 		in.Message = op.Status.Message
 	}
+	return in
+}
 
-	retired := blueGreenRetiredClusterName(parent)
-	if phase == nominatimv1alpha1.RebuildPhaseGarbageCollect || phase == nominatimv1alpha1.RebuildPhaseRollbackWindow {
-		gone, err := r.clusterGone(ctx, parent.Namespace, retired)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		in.BlueGone = gone
-	}
-
-	out, act := advanceBlueGreen(in)
-	rb.Phase = out.Phase
-	rb.RollbackUntil = out.RollbackUntil
-	if out.Message != "" {
-		rb.Message = out.Message
-	}
-
+func (r *NominatimOperationReconciler) applyBlueGreenActions(
+	ctx context.Context,
+	parent *nominatimv1alpha1.NominatimInstance,
+	rb *nominatimv1alpha1.RebuildStatus,
+	act blueGreenActions,
+	retired string,
+	out blueGreenOutput,
+) error {
+	log := logf.FromContext(ctx)
 	if act.CutoverAPI {
 		applyBlueGreenCutover(parent)
 		rb = parent.Status.Rebuild
 		rb.Phase = out.Phase
 		rb.RollbackUntil = out.RollbackUntil
 	}
-
 	if act.GarbageCollectBlue {
 		if err := r.deleteOwnedClusterBundle(ctx, parent, retired); err != nil {
-			return ctrl.Result{}, err
+			return err
 		}
 		log.Info("BlueGreen GC requested for retired blue cluster", "cluster", retired)
 	}
-
 	if act.GarbageCollectGreen {
 		green := rb.PendingClusterName
 		if green == "" {
 			green = BlueGreenClusterName(parent)
 		}
 		if err := r.deleteOwnedClusterBundle(ctx, parent, green); err != nil {
-			return ctrl.Result{}, err
+			return err
 		}
 	}
+	return nil
+}
 
-	if err := r.patchParentRebuildStatus(ctx, parent); err != nil {
-		return ctrl.Result{}, err
-	}
-
+func (r *NominatimOperationReconciler) syncBlueGreenOperationStatus(
+	ctx context.Context,
+	op *nominatimv1alpha1.NominatimOperation,
+	rb *nominatimv1alpha1.RebuildStatus,
+	out blueGreenOutput,
+) (ctrl.Result, error) {
 	switch out.Phase {
 	case nominatimv1alpha1.RebuildPhaseSucceeded:
 		op.Status.Phase = nominatimv1alpha1.NominatimOperationPhaseSucceeded

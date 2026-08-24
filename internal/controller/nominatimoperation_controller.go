@@ -349,7 +349,7 @@ func (r *NominatimOperationReconciler) ensureJob(ctx context.Context, op *nomina
 			if err := r.Delete(ctx, existing, &client.DeleteOptions{PropagationPolicy: &policy}); err != nil {
 				return err
 			}
-			return fmt.Errorf("deleted Job %q missing NOMINATIM_DATABASE_DSN; will recreate", existing.Name)
+			return fmt.Errorf("deleted Job %q missing %s; will recreate", existing.Name, envNominatimDatabaseDSN)
 		}
 		return nil
 	}
@@ -362,7 +362,7 @@ func (r *NominatimOperationReconciler) ensureJob(ctx context.Context, op *nomina
 func jobHasDatabaseDSN(job *batchv1.Job) bool {
 	for _, c := range job.Spec.Template.Spec.Containers {
 		for _, e := range c.Env {
-			if e.Name == "NOMINATIM_DATABASE_DSN" {
+			if e.Name == envNominatimDatabaseDSN {
 				return true
 			}
 		}
