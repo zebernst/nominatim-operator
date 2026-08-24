@@ -53,6 +53,9 @@ jobs:
           go mod tidy
           git diff --exit-code -- go.mod go.sum
 
+      - name: Check chart manager RBAC matches kubebuilder role.yaml
+        run: make check-chart-rbac
+
       - name: Download modules
         run: go mod download
 

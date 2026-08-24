@@ -157,7 +157,7 @@ func TestVolumeClaimName(t *testing.T) {
 	g.Expect(volumeClaimName(nominatimv1alpha1.VolumeSource{ClaimName: "proj"}, "fallback")).To(Equal("proj"))
 	g.Expect(volumeClaimName(nominatimv1alpha1.VolumeSource{
 		VolumeClaimTemplate: &nominatimv1alpha1.VolumeClaimTemplate{
-			Metadata: metav1.ObjectMeta{Name: "from-template"},
+			Metadata: nominatimv1alpha1.EmbeddedObjectMeta{Name: "from-template"},
 		},
 	}, "fallback")).To(Equal("from-template"))
 	g.Expect(volumeClaimName(nominatimv1alpha1.VolumeSource{}, "fallback")).To(Equal("fallback"))

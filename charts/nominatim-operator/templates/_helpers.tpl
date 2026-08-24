@@ -104,73 +104,23 @@ rbac:
       type: ClusterRole
       labels:
         control-plane: controller-manager
-      rules:
-        - apiGroups:
-            - nominatim.zebernst.dev
-          resources:
-            - nominatiminstances
-            - nominatimoperations
-          verbs:
-            - create
-            - delete
-            - get
-            - list
-            - patch
-            - update
-            - watch
-        - apiGroups:
-            - nominatim.zebernst.dev
-          resources:
-            - nominatiminstances/finalizers
-            - nominatimoperations/finalizers
-          verbs:
-            - update
-        - apiGroups:
-            - nominatim.zebernst.dev
-          resources:
-            - nominatiminstances/status
-            - nominatimoperations/status
-          verbs:
-            - get
-            - patch
-            - update
+      # rules from nominatim-operator.managerRoleRules (make manifests)
+      rules: []
     leader-election:
       enabled: {{ .Values.leaderElection.enabled }}
       type: Role
       labels:
         control-plane: controller-manager
       rules:
-        - apiGroups:
-            - ""
-          resources:
-            - configmaps
-          verbs:
-            - get
-            - list
-            - watch
-            - create
-            - update
-            - patch
-            - delete
-        - apiGroups:
-            - coordination.k8s.io
-          resources:
-            - leases
-          verbs:
-            - get
-            - list
-            - watch
-            - create
-            - update
-            - patch
-            - delete
-        - apiGroups:
-            - ""
-          resources:
-            - events
-          verbs:
-            - create
-            - patch
+        - apiGroups: [""]
+          resources: [configmaps]
+          verbs: [get, list, watch, create, update, patch, delete]
+        - apiGroups: [coordination.k8s.io]
+          resources: [leases]
+          verbs: [get, list, watch, create, update, patch, delete]
+        - apiGroups: [""]
+          resources: [events]
+          verbs: [create, patch]
   bindings:
     manager:
       enabled: true
