@@ -175,7 +175,8 @@ func (r *NominatimInstanceReconciler) deleteOwnedUnstructuredIfController(
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(gvk)
 	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: nom.Namespace}, obj)
-	if apierrors.IsNotFound(err) {
+	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+		// Missing object, or CNPG CRDs not installed in this cluster (e.g. smoke e2e).
 		return false, nil
 	}
 	if err != nil {

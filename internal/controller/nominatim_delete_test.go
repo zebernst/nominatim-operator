@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -28,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -379,4 +381,96 @@ func TestDeleteOwnedUnstructuredIfController_NotOwnedOrMissing(t *testing.T) {
 	if err != nil || waiting {
 		t.Fatalf("missing Database should be no-op, waiting=%v err=%v", waiting, err)
 	}
+}
+
+func TestReconcileDelete_RemovesFinalizerWhenCNPGCRDsMissing(t *testing.T) {
+	scheme := testScheme(t)
+	nom := deletingNominatim("no-cnpg-crd")
+	base := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
+	r := &NominatimInstanceReconciler{
+		Client: noMatchCNPGClient{Client: base},
+		Scheme: scheme,
+	}
+
+	res, err := r.reconcileDelete(context.Background(), nom)
+	if err != nil {
+		t.Fatalf("reconcileDelete: %v", err)
+	}
+	if !res.IsZero() {
+		t.Fatalf("expected finalizer removal without CNPG CRDs, got %#v", res)
+	}
+	got := &nominatimv1alpha1.NominatimInstance{}
+	err = base.Get(context.Background(), types.NamespacedName{Name: nom.Name, Namespace: nom.Namespace}, got)
+	if err == nil && controllerutil.ContainsFinalizer(got, nominatimv1alpha1.NominatimInstanceFinalizer) {
+		t.Fatal("finalizer must be removed when CNPG CRDs are absent")
+	}
+	if err != nil && !apierrors.IsNotFound(err) {
+		t.Fatalf("get instance: %v", err)
+	}
+}
+
+func TestReconcileDelete_IdempotentDeletingCondition(t *testing.T) {
+	scheme := testScheme(t)
+	nom := deletingNominatim("del-idem")
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom).WithObjects(nom).Build()
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
+
+	if _, err := r.reconcileDelete(context.Background(), nom); err != nil {
+		t.Fatalf("first reconcileDelete: %v", err)
+	}
+	// Recreate a deleting Instance that already has Deleting=True (second pass early-out).
+	nom2 := deletingNominatim("del-idem2")
+	meta.SetStatusCondition(&nom2.Status.Conditions, metav1.Condition{
+		Type:   nominatimv1alpha1.ConditionDeleting,
+		Status: metav1.ConditionTrue,
+		Reason: "Deleting",
+	})
+	meta.SetStatusCondition(&nom2.Status.Conditions, metav1.Condition{
+		Type:   nominatimv1alpha1.ConditionReady,
+		Status: metav1.ConditionFalse,
+		Reason: "Deleting",
+	})
+	c2 := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(nom2).WithObjects(nom2).Build()
+	r.Client = c2
+	if _, err := r.reconcileDelete(context.Background(), nom2); err != nil {
+		t.Fatalf("second reconcileDelete: %v", err)
+	}
+}
+
+func TestDeleteOwnedUnstructuredIfController_GetError(t *testing.T) {
+	scheme := testScheme(t)
+	nom := deletingNominatim("get-err")
+	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom).Build()
+	r := &NominatimInstanceReconciler{Client: failGetClient{Client: base, err: fmt.Errorf("get boom")}, Scheme: scheme}
+	waiting, err := r.deleteOwnedUnstructuredIfController(context.Background(), nom, CNPGClusterGVK, OwnedCNPGClusterName(nom))
+	if err == nil || waiting {
+		t.Fatalf("expected get error to propagate, waiting=%v err=%v", waiting, err)
+	}
+}
+
+// noMatchCNPGClient simulates a cluster without postgresql.cnpg.io CRDs installed.
+type noMatchCNPGClient struct {
+	client.Client
+}
+
+func (c noMatchCNPGClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if u, ok := obj.(*unstructured.Unstructured); ok {
+		gvk := u.GroupVersionKind()
+		if gvk.Group == CNPGClusterGVK.Group {
+			return &meta.NoKindMatchError{GroupKind: gvk.GroupKind()}
+		}
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
+type failGetClient struct {
+	client.Client
+	err error
+}
+
+func (c failGetClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*unstructured.Unstructured); ok {
+		return c.err
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
 }
