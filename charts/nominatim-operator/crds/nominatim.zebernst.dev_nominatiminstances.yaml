@@ -247,6 +247,21 @@ spec:
                           metadata:
                             description: Metadata for the generated PVC (name/labels/annotations).
                               Name may be operator-derived when empty.
+                            properties:
+                              annotations:
+                                additionalProperties:
+                                  type: string
+                                description: Annotations to set on the generated object.
+                                type: object
+                              labels:
+                                additionalProperties:
+                                  type: string
+                                description: Labels to set on the generated object.
+                                type: object
+                              name:
+                                description: Name of the generated object. May be
+                                  operator-derived when empty.
+                                type: string
                             type: object
                           spec:
                             description: Spec of the PersistentVolumeClaim.
@@ -718,6 +733,21 @@ spec:
                           metadata:
                             description: Metadata for the generated PVC (name/labels/annotations).
                               Name may be operator-derived when empty.
+                            properties:
+                              annotations:
+                                additionalProperties:
+                                  type: string
+                                description: Annotations to set on the generated object.
+                                type: object
+                              labels:
+                                additionalProperties:
+                                  type: string
+                                description: Labels to set on the generated object.
+                                type: object
+                              name:
+                                description: Name of the generated object. May be
+                                  operator-derived when empty.
+                                type: string
                             type: object
                           spec:
                             description: Spec of the PersistentVolumeClaim.
@@ -1026,6 +1056,21 @@ spec:
                           metadata:
                             description: Metadata for the generated PVC (name/labels/annotations).
                               Name may be operator-derived when empty.
+                            properties:
+                              annotations:
+                                additionalProperties:
+                                  type: string
+                                description: Annotations to set on the generated object.
+                                type: object
+                              labels:
+                                additionalProperties:
+                                  type: string
+                                description: Labels to set on the generated object.
+                                type: object
+                              name:
+                                description: Name of the generated object. May be
+                                  operator-derived when empty.
+                                type: string
                             type: object
                           spec:
                             description: Spec of the PersistentVolumeClaim.

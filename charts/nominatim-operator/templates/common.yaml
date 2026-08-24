@@ -18,6 +18,13 @@
   {{- $_ := set $generated "global" (mergeOverwrite (default (dict) $generated.global) .Values.global) -}}
 {{- end -}}
 
+{{- /*
+  Set the manager ClusterRole rules on bjw-s rbac.roles.manager.
+  The source is config/rbac/role.yaml. make manifests writes templates/_manager-role-rules.tpl.
+*/ -}}
+{{- $managerRules := include "nominatim-operator.managerRoleRules" . | fromYamlArray -}}
+{{- $_ := set (index $generated.rbac.roles "manager") "rules" $managerRules -}}
+
 {{- /* Replace Values with generated common-compatible structure (drop convenience-only keys). */ -}}
 {{- $_ := set . "Values" $generated -}}
 

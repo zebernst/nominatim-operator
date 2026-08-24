@@ -44,6 +44,15 @@ help: ## Display this help.
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./api/..." paths="./cmd/..." paths="./internal/..." output:crd:artifacts:config=config/crd/bases
+	$(MAKE) sync-chart-rbac
+
+.PHONY: sync-chart-rbac
+sync-chart-rbac: ## Sync chart manager ClusterRole rules from config/rbac/role.yaml.
+	go run ./hack/sync-chart-manager-rbac.go
+
+.PHONY: check-chart-rbac
+check-chart-rbac: ## Fail if chart manager ClusterRole rules drift from config/rbac/role.yaml.
+	go run ./hack/sync-chart-manager-rbac.go --check
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.

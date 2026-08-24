@@ -189,6 +189,12 @@ Manager binary: command `/manager`, health probe bind address `:8081`
 
 ## Source of truth for RBAC
 
-Manager ClusterRole rules match `config/rbac/role.yaml`. Leader-election Role
-rules match `config/rbac/leader_election_role.yaml`. Regenerate the chart RBAC
-section in `templates/_helpers.tpl` when kubebuilder markers change.
+The file `config/rbac/role.yaml` is the source of the manager ClusterRole rules.
+`make manifests` writes those rules into `templates/_manager-role-rules.tpl`.
+You can also run `make sync-chart-rbac` alone.
+Then `templates/common.yaml` puts the rules into the bjw-s value
+`rbac.roles.manager.rules`.
+CI runs `make check-chart-rbac`. That command fails if the chart rules do not
+match `config/rbac/role.yaml`.
+You edit the leader-election Role rules by hand. Those rules must match
+`config/rbac/leader_election_role.yaml`.
