@@ -253,24 +253,39 @@ var _ = Describe("NominatimInstance Controller", func() {
 			}).Should(BeTrue())
 		})
 
-		It("should block finalizer removal while active operations remain", func() {
+		It("should requeue while child Operations drain before finalizer removal", func() {
 			r := &NominatimInstanceReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 
+			op := &nominatimv1alpha1.NominatimOperation{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       resourceName + "-busy",
+					Namespace:  "default",
+					Finalizers: []string{nominatimv1alpha1.NominatimOperationFinalizer},
+				},
+				Spec: nominatimv1alpha1.NominatimOperationSpec{
+					Type:                 nominatimv1alpha1.NominatimOperationBootstrap,
+					NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: resourceName},
+				},
+			}
+			Expect(k8sClient.Create(ctx, op)).To(Succeed())
+
 			nom := &nominatimv1alpha1.NominatimInstance{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, nom)).To(Succeed())
-			nom.Status.ActiveOperationRefs = []corev1.ObjectReference{{Name: "op-busy"}}
-			Expect(k8sClient.Status().Update(ctx, nom)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, nom)).To(Succeed())
 			Expect(k8sClient.Get(ctx, typeNamespacedName, nom)).To(Succeed())
-			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
-			Expect(err).To(HaveOccurred())
-			Expect(controllerutil.ContainsFinalizer(nom, nominatimv1alpha1.NominatimInstanceFinalizer)).To(BeTrue())
-			// Clear so AfterEach can delete.
+			res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.RequeueAfter).To(BeNumerically(">", 0))
 			Expect(k8sClient.Get(ctx, typeNamespacedName, nom)).To(Succeed())
-			nom.Status.ActiveOperationRefs = nil
-			Expect(k8sClient.Status().Update(ctx, nom)).To(Succeed())
+			Expect(controllerutil.ContainsFinalizer(nom, nominatimv1alpha1.NominatimInstanceFinalizer)).To(BeTrue())
+
+			// Clear Operation so AfterEach can finish Instance deletion.
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: op.Name, Namespace: op.Namespace}, op)).To(Succeed())
+			op.Finalizers = nil
+			Expect(k8sClient.Update(ctx, op)).To(Succeed())
+			_ = k8sClient.Delete(ctx, op)
 		})
 	})
 

@@ -84,6 +84,21 @@ Default probes use `GET /status`. Override via `spec.api.podSpec` if needed.
 
 The Operation sample spells this out; chart README repeats the Flux warning.
 
+## Deleting an instance
+
+Delete the `NominatimInstance` and wait until it is **gone** before deleting the namespace (or other shared resources).
+
+While the Instance is terminating the operator:
+
+1. Sets `Deleting=True` and refuses new Operation work
+2. Deletes child `NominatimOperation`s (and their Jobs)
+3. Deletes operator-owned CNPG `Database` then `Cluster` (from `spec.database.cluster`) and waits until they disappear — this is what holds the finalizer on slow storage (for example Rook/RBD)
+4. Removes `nominatim.zebernst.dev/finalizer`
+
+`spec.project.volume.claimName` / `spec.flatnode.volume.claimName` PVCs are **not** deleted with the Instance. Clean those up yourself (or leave them for the next install). Attached `clusterRef` Clusters are also left alone.
+
+Deleting the namespace while the Instance finalizer is still waiting on volume detach is safe for correctness, but the namespace stays `Terminating` until those PVCs finish — prefer waiting for the Instance to disappear first.
+
 ## CNPG and Gateway prerequisites
 
 Install CloudNativePG CRDs before creating instances that use `database.cluster` or `database.clusterRef`. Install Gateway API CRDs before using routes. The operator chart does not install those third-party CRDs.

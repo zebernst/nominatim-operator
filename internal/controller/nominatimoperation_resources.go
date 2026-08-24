@@ -44,6 +44,7 @@ const (
 
 	reasonConflict            = "Conflict"
 	reasonParentNotFound      = "ParentNotFound"
+	reasonParentDeleting      = "ParentDeleting"
 	reasonNotImplemented      = "NotImplemented"
 	reasonRegionsRequired     = "RegionsRequired"
 	reasonBootstrapIncomplete = "BootstrapIncomplete"

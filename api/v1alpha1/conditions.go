@@ -25,6 +25,9 @@ const (
 	// ConditionImportConfigDrift is True when import-time Nominatim settings in spec
 	// differ from those sealed at Bootstrap (requires Rebuild to apply).
 	ConditionImportConfigDrift = "ImportConfigDrift"
+	// ConditionDeleting is True while the Instance finalizer is draining Operations
+	// and waiting for owned CNPG resources before removal.
+	ConditionDeleting = "Deleting"
 )
 
 // NominatimInstanceFinalizer is added while the operator manages the instance.
