@@ -12,6 +12,12 @@ Nominatim needs Postgres (almost always [CloudNativePG](https://cloudnative-pg.i
 
 Owned-cluster backup knobs on `NominatimInstance` are **intentionally deferred**. If you need backup/restore today, author a CNPG Cluster with backup configured and attach it with `clusterRef`.
 
+## Rebuild strategies
+
+`spec.database.rebuildStrategy` defaults to `InPlace` (wipe the live application database). Set `BlueGreen` only on owned clusters (`database.cluster`) when you can afford ~2× storage during the swap and want the API to keep serving while a sibling Cluster imports.
+
+For `clusterRef`, BlueGreen is not automated: create a second CNPG Cluster, run a Rebuild/Bootstrap-style import against it offline, then retarget `clusterRef` (and its connection Secret) when ready.
+
 ## Example: backup-enabled Cluster + clusterRef
 
 Hand-author a CNPG Cluster (backup stanza is illustrative — match your CNPG version and object store):

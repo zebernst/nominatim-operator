@@ -694,6 +694,15 @@ spec:
                         description: Runtime profile for steady-state API serving.
                         type: object
                     type: object
+                  rebuildStrategy:
+                    default: InPlace
+                    description: |-
+                      RebuildStrategy selects InPlace (default) or BlueGreen for Rebuild Operations.
+                      BlueGreen is only supported when this instance owns a CNPG Cluster (spec.database.cluster).
+                    enum:
+                    - InPlace
+                    - BlueGreen
+                    type: string
                 type: object
                 x-kubernetes-validations:
                 - message: database requires exactly one of cluster, clusterRef, or
@@ -1516,8 +1525,9 @@ spec:
                   mode.
                 properties:
                   clusterName:
-                    description: ClusterName is the CNPG Cluster name when managing
-                      or attached (empty in degraded mode).
+                    description: |-
+                      ClusterName is the live CNPG Cluster name when managing or attached (empty in degraded mode).
+                      After a BlueGreen Rebuild cutover this may remain a generation-suffixed name (e.g. {name}-pg-bg).
                     type: string
                   connectionSecretName:
                     description: ConnectionSecretName is the Secret name API/worker
@@ -1553,6 +1563,59 @@ spec:
                   tokenizer:
                     description: Tokenizer sealed at Bootstrap (empty means image
                       default was used).
+                    type: string
+                type: object
+              rebuild:
+                description: Rebuild observes BlueGreen Rebuild swap progress (empty
+                  when idle / InPlace).
+                properties:
+                  activeClusterName:
+                    description: ActiveClusterName is the CNPG Cluster currently intended
+                      for API traffic.
+                    type: string
+                  activeConnectionSecretName:
+                    description: ActiveConnectionSecretName is the Secret the API
+                      should use for Postgres.
+                    type: string
+                  message:
+                    description: Message is a human-readable progress or failure note.
+                    type: string
+                  operationName:
+                    description: OperationName is the NominatimOperation driving this
+                      swap.
+                    type: string
+                  pendingClusterName:
+                    description: PendingClusterName is the green CNPG Cluster under
+                      construction (or awaiting GC of blue).
+                    type: string
+                  pendingConnectionSecretName:
+                    description: PendingConnectionSecretName is the green Cluster
+                      application Secret.
+                    type: string
+                  pendingFlatnodePVCName:
+                    description: PendingFlatnodePVCName is the green flatnode PVC
+                      when spec.flatnode is set.
+                    type: string
+                  pendingProjectPVCName:
+                    description: PendingProjectPVCName is the green project directory
+                      PVC.
+                    type: string
+                  phase:
+                    description: Phase is the current BlueGreen swap phase.
+                    enum:
+                    - Provisioning
+                    - Importing
+                    - ReadyToCutover
+                    - Cutover
+                    - RollbackWindow
+                    - GarbageCollect
+                    - Succeeded
+                    - Failed
+                    type: string
+                  rollbackUntil:
+                    description: RollbackUntil is when retired blue resources may
+                      be garbage-collected.
+                    format: date-time
                     type: string
                 type: object
               regions:

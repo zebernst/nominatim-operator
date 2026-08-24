@@ -48,14 +48,27 @@ var CNPGDatabaseGVK = schema.GroupVersionKind{
 }
 
 // OwnedCNPGClusterName is the default name for a Cluster created from spec.database.cluster.
+// After a BlueGreen cutover the live name may differ — prefer LiveOwnedCNPGClusterName.
 func OwnedCNPGClusterName(nom *nominatimv1alpha1.NominatimInstance) string {
 	return nom.Name + "-pg"
 }
 
-// OwnedCNPGDatabaseName is the owned Database CR that declares Nominatim extensions on the
-// application database created by Cluster bootstrap.initdb.
+// LiveOwnedCNPGClusterName is the Cluster the API/worker currently use (status when set).
+func LiveOwnedCNPGClusterName(nom *nominatimv1alpha1.NominatimInstance) string {
+	if nom != nil && nom.Status.Database.ClusterName != "" {
+		return nom.Status.Database.ClusterName
+	}
+	return OwnedCNPGClusterName(nom)
+}
+
+// CNPGDatabaseNameForCluster is the owned Database CR name for a given CNPG Cluster.
+func CNPGDatabaseNameForCluster(clusterName string) string {
+	return clusterName + "-nominatim"
+}
+
+// OwnedCNPGDatabaseName is the owned Database CR for the live Cluster (status-aware).
 func OwnedCNPGDatabaseName(nom *nominatimv1alpha1.NominatimInstance) string {
-	return OwnedCNPGClusterName(nom) + "-nominatim"
+	return CNPGDatabaseNameForCluster(LiveOwnedCNPGClusterName(nom))
 }
 
 // CNPGAppSecretName is the conventional CNPG application-user Secret for a Cluster.
@@ -143,8 +156,32 @@ func (r *NominatimInstanceReconciler) reconcileDatabaseClusterRef(ctx context.Co
 }
 
 func (r *NominatimInstanceReconciler) reconcileDatabaseClusterCreate(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) error {
+	clusterName := LiveOwnedCNPGClusterName(nom)
+
+	if err := ensureOwnedCNPGCluster(ctx, r.Client, r.Scheme, nom, clusterName); err != nil {
+		return err
+	}
+
+	if err := r.reconcileOwnedCNPGDatabase(ctx, nom, clusterName); err != nil {
+		return err
+	}
+
+	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{
+		Mode:                 nominatimv1alpha1.DatabaseModeClusterManaged,
+		ClusterName:          clusterName,
+		ConnectionSecretName: CNPGAppSecretName(clusterName),
+		Degraded:             false,
+	}
+	return nil
+}
+
+// ensureOwnedCNPGCluster CreateOrUpdates an owned CNPG Cluster at clusterName using
+// spec.database.cluster as the instance-tune template (PostGIS image, initdb, www-data role).
+func ensureOwnedCNPGCluster(ctx context.Context, c client.Client, scheme *runtime.Scheme, nom *nominatimv1alpha1.NominatimInstance, clusterName string) error {
 	create := nom.Spec.Database.Cluster
-	clusterName := OwnedCNPGClusterName(nom)
+	if create == nil {
+		return fmt.Errorf("ensureOwnedCNPGCluster %q: spec.database.cluster is required", clusterName)
+	}
 
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		cluster := &unstructured.Unstructured{}
@@ -152,8 +189,8 @@ func (r *NominatimInstanceReconciler) reconcileDatabaseClusterCreate(ctx context
 		cluster.SetName(clusterName)
 		cluster.SetNamespace(nom.Namespace)
 
-		_, err := controllerutil.CreateOrUpdate(ctx, r.Client, cluster, func() error {
-			if err := controllerutil.SetControllerReference(nom, cluster, r.Scheme); err != nil {
+		_, err := controllerutil.CreateOrUpdate(ctx, c, cluster, func() error {
+			if err := controllerutil.SetControllerReference(nom, cluster, scheme); err != nil {
 				return err
 			}
 			instances := int64(1)
@@ -204,17 +241,6 @@ func (r *NominatimInstanceReconciler) reconcileDatabaseClusterCreate(ctx context
 	})
 	if err != nil {
 		return fmt.Errorf("reconcile owned CNPG Cluster %q: %w", clusterName, err)
-	}
-
-	if err := r.reconcileOwnedCNPGDatabase(ctx, nom, clusterName); err != nil {
-		return err
-	}
-
-	nom.Status.Database = nominatimv1alpha1.DatabaseStatus{
-		Mode:                 nominatimv1alpha1.DatabaseModeClusterManaged,
-		ClusterName:          clusterName,
-		ConnectionSecretName: CNPGAppSecretName(clusterName),
-		Degraded:             false,
 	}
 	return nil
 }
@@ -329,10 +355,10 @@ func hasPendingRebuildDatabaseReset(ctx context.Context, c client.Client, nom *n
 	return false, nil
 }
 
-// ensureOwnedCNPGDatabase CreateOrUpdates the owned CNPG Database CR for nom.
-// Used by the NominatimInstance reconciler and by Rebuild database reset.
+// ensureOwnedCNPGDatabase CreateOrUpdates the owned CNPG Database CR for clusterName.
+// Used by the NominatimInstance reconciler, Rebuild database reset, and BlueGreen provision.
 func ensureOwnedCNPGDatabase(ctx context.Context, c client.Client, scheme *runtime.Scheme, nom *nominatimv1alpha1.NominatimInstance, clusterName string) error {
-	dbName := OwnedCNPGDatabaseName(nom)
+	dbName := CNPGDatabaseNameForCluster(clusterName)
 
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		db := &unstructured.Unstructured{}

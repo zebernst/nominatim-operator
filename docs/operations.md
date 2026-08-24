@@ -12,7 +12,7 @@ Sample: [`config/samples/nominatim_v1alpha1_nominatimoperation.yaml`](../config/
 |------|----------------|
 | **Bootstrap** | First import from `spec.regions` (or PBF). Controller creates this when the instance is empty. Multi-region Bootstrap uses one `nominatim import` with multiple `--osm-file` flags — not `add-data`. |
 | **AddRegions** | Import regions that are desired but not yet in `status.regions`, without wiping the database. |
-| **Rebuild** | Wipe and rebuild (confirm env on the Job). Operator resets an owned CNPG Database first so extensions reinstall on an empty DB. Always scales the API down for the duration. |
+| **Rebuild** | Wipe and rebuild (confirm env on the Job). Default **InPlace** resets an owned CNPG Database on the live Cluster and scales the API down. Optional **BlueGreen** (`spec.database.rebuildStrategy`) builds a sibling Cluster while the API keeps serving, then cuts over the connection Secret (owned-cluster mode only). |
 | **Update** | Apply Geofabrik/pyosmium diffs for imported regions. |
 | **CatchUp** | Loop Update until idle. |
 | **Refresh** | `nominatim refresh` admin tasks (postcodes, word counts, functions, importance by default). |
@@ -33,7 +33,8 @@ Worker scripts live under `images/worker/scripts/`. Image packaging: [`images/RE
 ## Serving during Operations
 
 - **Bootstrap** — API/UI wait until import is reflected on status (region-based installs).
-- **Rebuild** — API is always scaled down until the Operation finishes.
+- **Rebuild (InPlace, default)** — API is scaled down until the Operation finishes (DROP DATABASE cannot run with open connections).
+- **Rebuild (BlueGreen)** — API stays up on the live Cluster while import runs on a sibling; traffic cuts over when green is healthy.
 - **AddRegions / Update / CatchUp** — controlled by `spec.api.suspendDuringOperations` (`Never` keeps the API up).
 - **Migrate** — prefer suspending serving; upstream advises not serving during upgrades.
 - **Freeze / Refresh** — serving usually continues; Refresh must not run in parallel with Update/CatchUp/AddRegions (upstream Nominatim constraint).

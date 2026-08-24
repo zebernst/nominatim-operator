@@ -47,6 +47,7 @@ const (
 	reasonNotImplemented      = "NotImplemented"
 	reasonRegionsRequired     = "RegionsRequired"
 	reasonBootstrapIncomplete = "BootstrapIncomplete"
+	reasonUnsupportedRebuild  = "UnsupportedRebuildStrategy"
 )
 
 // isOperationTypeImplemented reports whether the worker entrypoint can run this type.
@@ -330,14 +331,29 @@ func buildOperationJob(op *nominatimv1alpha1.NominatimOperation, parent *nominat
 		}
 	}
 
-	if parent.Status.Database.ConnectionSecretName != "" {
-		env = append(env, dbEnvVars(parent.Status.Database.ConnectionSecretName)...)
+	secretName := parent.Status.Database.ConnectionSecretName
+	if op.Spec.Type == nominatimv1alpha1.NominatimOperationRebuild && usesBlueGreenRebuild(parent) {
+		secretName = blueGreenJobConnectionSecret(parent)
+		projectClaim = BlueGreenProjectPVCName(parent)
+		if parent.Status.Rebuild != nil && parent.Status.Rebuild.PendingProjectPVCName != "" {
+			projectClaim = parent.Status.Rebuild.PendingProjectPVCName
+		}
+		volumes[0].VolumeSource.PersistentVolumeClaim.ClaimName = projectClaim
+	}
+	if secretName != "" {
+		env = append(env, dbEnvVars(secretName)...)
 	}
 	env = append(env, effectiveNominatimConfigEnv(parent)...)
 	env = append(env, effectiveAuxDataEnv(parent)...)
 
 	if parent.Spec.Flatnode != nil {
 		flatClaim := volumeClaimName(parent.Spec.Flatnode.Volume, parent.Name+"-flatnode")
+		if op.Spec.Type == nominatimv1alpha1.NominatimOperationRebuild && usesBlueGreenRebuild(parent) {
+			flatClaim = BlueGreenFlatnodePVCName(parent)
+			if parent.Status.Rebuild != nil && parent.Status.Rebuild.PendingFlatnodePVCName != "" {
+				flatClaim = parent.Status.Rebuild.PendingFlatnodePVCName
+			}
+		}
 		volumes = append(volumes, corev1.Volume{
 			Name: flatnodeVolumeName,
 			VolumeSource: corev1.VolumeSource{

@@ -98,6 +98,13 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return ctrl.Result{}, err
 	}
 
+	if op.Spec.Type == nominatimv1alpha1.NominatimOperationRebuild &&
+		usesBlueGreenRebuild(parent) && !blueGreenRebuildAllowed(parent) {
+		return ctrl.Result{}, r.failOperation(ctx, op, reasonUnsupportedRebuild,
+			"rebuildStrategy=BlueGreen requires an owned CNPG Cluster (spec.database.cluster); "+
+				"for clusterRef, provision a second Cluster manually and retarget the ref")
+	}
+
 	peers := &nominatimv1alpha1.NominatimOperationList{}
 	if err := r.List(ctx, peers, client.InNamespace(op.Namespace)); err != nil {
 		return ctrl.Result{}, err
@@ -132,6 +139,14 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	if err := r.syncStatusFromJob(ctx, op); err != nil {
 		return ctrl.Result{}, err
+	}
+
+	// BlueGreen: Job success is only the import step — keep the Operation Running through
+	// cutover, rollback window, and blue GC. Job failure GCs the green sibling.
+	if op.Spec.Type == nominatimv1alpha1.NominatimOperationRebuild && usesBlueGreenRebuild(parent) &&
+		(op.Status.Phase == nominatimv1alpha1.NominatimOperationPhaseSucceeded ||
+			op.Status.Phase == nominatimv1alpha1.NominatimOperationPhaseFailed) {
+		return r.reconcileBlueGreenAfterImport(ctx, op, parent)
 	}
 
 	if err := r.syncParentSideEffects(ctx, op); err != nil {
@@ -195,9 +210,27 @@ func (r *NominatimOperationReconciler) waitForJobPrerequisites(
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, true, nil
 	}
 
+	secretName := parent.Status.Database.ConnectionSecretName
+	if op.Spec.Type == nominatimv1alpha1.NominatimOperationRebuild && usesBlueGreenRebuild(parent) {
+		ready, err := r.ensureBlueGreenPending(ctx, op, parent)
+		if err != nil {
+			return ctrl.Result{}, false, err
+		}
+		if !ready {
+			log.Info("waiting for BlueGreen pending Cluster/Database/Secret before Rebuild Job",
+				"nominatim", parent.Name, "pending", BlueGreenClusterName(parent))
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, true, nil
+		}
+		secretName = blueGreenJobConnectionSecret(parent)
+		if parent.Status.Rebuild != nil {
+			parent.Status.Rebuild.Phase = nominatimv1alpha1.RebuildPhaseImporting
+			_ = r.patchParentRebuildStatus(ctx, parent)
+		}
+	}
+
 	secret := &corev1.Secret{}
 	secretKey := types.NamespacedName{
-		Name:      parent.Status.Database.ConnectionSecretName,
+		Name:      secretName,
 		Namespace: parent.Namespace,
 	}
 	if err := r.Get(ctx, secretKey, secret); err != nil {
@@ -211,12 +244,19 @@ func (r *NominatimOperationReconciler) waitForJobPrerequisites(
 
 	// Rebuild reset must run before cnpgClusterReadyForJobs: after the drop the owned
 	// Database is absent / not-applied, and the Operation (not readiness gating) recreates it.
+	// BlueGreen skips this (sibling Cluster); ensureRebuildDatabaseReset is a no-op there.
 	if ready, err := r.ensureRebuildDatabaseReset(ctx, op, parent); err != nil {
 		return ctrl.Result{}, false, err
 	} else if !ready {
 		log.Info("waiting for owned CNPG Database drop/recreate before Rebuild Job",
 			"nominatim", parent.Name, "database", OwnedCNPGDatabaseName(parent))
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, true, nil
+	}
+
+	if op.Spec.Type == nominatimv1alpha1.NominatimOperationRebuild && usesBlueGreenRebuild(parent) {
+		// Pending readiness already gated above; do not also require blue Cluster readiness
+		// beyond the live connection Secret (API keeps serving on blue).
+		return ctrl.Result{}, false, nil
 	}
 
 	if ready, err := r.cnpgClusterReadyForJobs(ctx, parent); err != nil {
@@ -423,6 +463,10 @@ func (r *NominatimOperationReconciler) ensureRebuildDatabaseReset(
 	parent *nominatimv1alpha1.NominatimInstance,
 ) (bool, error) {
 	if op.Spec.Type != nominatimv1alpha1.NominatimOperationRebuild {
+		return true, nil
+	}
+	if usesBlueGreenRebuild(parent) {
+		// BlueGreen imports onto a sibling cluster; never drop the live Database.
 		return true, nil
 	}
 	owned := parent.Spec.Database.Cluster != nil ||

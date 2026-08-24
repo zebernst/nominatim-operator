@@ -499,7 +499,7 @@ func TestShouldSuspendAPI_ImpactMatrix(t *testing.T) {
 }
 
 // Rebuild drops the application database; open API connections block CNPG reclaim=delete.
-// Even suspendDuringOperations=Never must quiesce the API while a Rebuild is active.
+// Even suspendDuringOperations=Never must quiesce the API while an InPlace Rebuild is active.
 func TestShouldSuspendAPI_RebuildAlwaysSuspendsEvenWithNever(t *testing.T) {
 	scheme := testScheme(t)
 	nom := baseNominatim("suspend-rebuild")
@@ -519,7 +519,36 @@ func TestShouldSuspendAPI_RebuildAlwaysSuspendsEvenWithNever(t *testing.T) {
 		t.Fatalf("shouldSuspendAPI: %v", err)
 	}
 	if !got {
-		t.Fatal("active Rebuild must suspend the API even when suspendDuringOperations=Never")
+		t.Fatal("active InPlace Rebuild must suspend the API even when suspendDuringOperations=Never")
+	}
+}
+
+// BlueGreen Rebuild imports onto a sibling cluster; the live API must keep serving.
+func TestShouldSuspendAPI_BlueGreenRebuildDoesNotForceSuspend(t *testing.T) {
+	scheme := testScheme(t)
+	nom := baseNominatim("suspend-bg")
+	instances := int32(1)
+	nom.Spec.Database = nominatimv1alpha1.DatabaseSpec{
+		Cluster:         &nominatimv1alpha1.DatabaseClusterCreate{Instances: &instances},
+		RebuildStrategy: nominatimv1alpha1.RebuildStrategyBlueGreen,
+	}
+	op := &nominatimv1alpha1.NominatimOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "op-bg", Namespace: "default"},
+		Spec: nominatimv1alpha1.NominatimOperationSpec{
+			Type:                 nominatimv1alpha1.NominatimOperationRebuild,
+			NominatimInstanceRef: nominatimv1alpha1.LocalObjectReference{Name: nom.Name},
+		},
+	}
+	nom.Status.ActiveOperationRefs = []corev1.ObjectReference{{Name: "op-bg"}}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nom, op).Build()
+	r := &NominatimInstanceReconciler{Client: c, Scheme: scheme}
+
+	got, err := r.shouldSuspendAPI(context.Background(), nom, nominatimv1alpha1.OperationImpactNever)
+	if err != nil {
+		t.Fatalf("shouldSuspendAPI: %v", err)
+	}
+	if got {
+		t.Fatal("BlueGreen Rebuild must not force-suspend the API when suspendDuringOperations=Never")
 	}
 }
 

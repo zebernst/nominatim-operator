@@ -338,9 +338,10 @@ func operationImpactMatches(impact nominatimv1alpha1.OperationImpact, opType nom
 // each NominatimOperation to inspect its Type. Missing operations (already completed and
 // pruned) are skipped rather than treated as errors.
 //
-// Rebuild always suspends the API regardless of suspendDuringOperations: the Operation
-// drops the owned CNPG Database (reclaim=delete) before the worker Job starts, and open
-// API connections block DROP DATABASE indefinitely.
+// InPlace Rebuild always suspends the API regardless of suspendDuringOperations: the
+// Operation drops the owned CNPG Database (reclaim=delete) before the worker Job starts,
+// and open API connections block DROP DATABASE indefinitely. BlueGreen Rebuild keeps the
+// API serving on the live cluster while import runs on the sibling.
 func (r *NominatimInstanceReconciler) shouldSuspendAPI(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance, impact nominatimv1alpha1.OperationImpact) (bool, error) {
 	if impact == "" {
 		impact = nominatimv1alpha1.OperationImpactNever
@@ -354,7 +355,7 @@ func (r *NominatimInstanceReconciler) shouldSuspendAPI(ctx context.Context, nom 
 		if err != nil {
 			return false, fmt.Errorf("get active operation %q: %w", ref.Name, err)
 		}
-		if op.Spec.Type == nominatimv1alpha1.NominatimOperationRebuild {
+		if op.Spec.Type == nominatimv1alpha1.NominatimOperationRebuild && !usesBlueGreenRebuild(nom) {
 			return true, nil
 		}
 		if impact == nominatimv1alpha1.OperationImpactNever {

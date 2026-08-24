@@ -199,6 +199,79 @@ type PostgresProfiles struct {
 	Runtime map[string]string `json:"runtime,omitempty"`
 }
 
+// RebuildStrategy selects how Rebuild Operations reconstruct the NominatimDatabase.
+// +kubebuilder:validation:Enum=InPlace;BlueGreen
+type RebuildStrategy string
+
+const (
+	// RebuildStrategyInPlace drops and recreates the owned application database on the
+	// live CNPG Cluster (default). The API is quiesced for the duration.
+	RebuildStrategyInPlace RebuildStrategy = "InPlace"
+	// RebuildStrategyBlueGreen provisions a parallel owned CNPG Cluster (+ project volume),
+	// imports there, then retargets the API connection. ClusterManaged only; rejected for
+	// clusterRef / connectionSecretRef. Keeps the API serving during import.
+	RebuildStrategyBlueGreen RebuildStrategy = "BlueGreen"
+)
+
+// RebuildPhase is the observed BlueGreen Rebuild swap phase on NominatimInstance status.
+// +kubebuilder:validation:Enum=Provisioning;Importing;ReadyToCutover;Cutover;RollbackWindow;GarbageCollect;Succeeded;Failed
+type RebuildPhase string
+
+const (
+	RebuildPhaseProvisioning   RebuildPhase = "Provisioning"
+	RebuildPhaseImporting      RebuildPhase = "Importing"
+	RebuildPhaseReadyToCutover RebuildPhase = "ReadyToCutover"
+	RebuildPhaseCutover        RebuildPhase = "Cutover"
+	RebuildPhaseRollbackWindow RebuildPhase = "RollbackWindow"
+	RebuildPhaseGarbageCollect RebuildPhase = "GarbageCollect"
+	RebuildPhaseSucceeded      RebuildPhase = "Succeeded"
+	RebuildPhaseFailed         RebuildPhase = "Failed"
+)
+
+// RebuildStatus observes an in-flight or recently completed BlueGreen Rebuild swap.
+// Cleared when idle (no active BlueGreen work and terminal state has been observed).
+type RebuildStatus struct {
+	// Phase is the current BlueGreen swap phase.
+	// +optional
+	Phase RebuildPhase `json:"phase,omitempty"`
+
+	// OperationName is the NominatimOperation driving this swap.
+	// +optional
+	OperationName string `json:"operationName,omitempty"`
+
+	// ActiveClusterName is the CNPG Cluster currently intended for API traffic.
+	// +optional
+	ActiveClusterName string `json:"activeClusterName,omitempty"`
+
+	// PendingClusterName is the green CNPG Cluster under construction (or awaiting GC of blue).
+	// +optional
+	PendingClusterName string `json:"pendingClusterName,omitempty"`
+
+	// ActiveConnectionSecretName is the Secret the API should use for Postgres.
+	// +optional
+	ActiveConnectionSecretName string `json:"activeConnectionSecretName,omitempty"`
+
+	// PendingConnectionSecretName is the green Cluster application Secret.
+	// +optional
+	PendingConnectionSecretName string `json:"pendingConnectionSecretName,omitempty"`
+
+	// PendingProjectPVCName is the green project directory PVC.
+	// +optional
+	PendingProjectPVCName string `json:"pendingProjectPVCName,omitempty"`
+
+	// PendingFlatnodePVCName is the green flatnode PVC when spec.flatnode is set.
+	// +optional
+	PendingFlatnodePVCName string `json:"pendingFlatnodePVCName,omitempty"`
+
+	// RollbackUntil is when retired blue resources may be garbage-collected.
+	// +optional
+	RollbackUntil *metav1.Time `json:"rollbackUntil,omitempty"`
+
+	// Message is a human-readable progress or failure note.
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
 // DatabaseSpec attaches or creates Postgres for this NominatimInstance.
 // Exactly one of Cluster, ClusterRef, or ConnectionSecretRef must be set.
 // +kubebuilder:validation:XValidation:rule="(has(self.cluster) ? 1 : 0) + (has(self.clusterRef) ? 1 : 0) + (has(self.connectionSecretRef) ? 1 : 0) == 1",message="database requires exactly one of cluster, clusterRef, or connectionSecretRef"
@@ -226,6 +299,20 @@ type DatabaseSpec struct {
 	// +optional
 	// +kubebuilder:default="WriteHeavy"
 	PauseBackupsDuringOperations OperationImpact `json:"pauseBackupsDuringOperations,omitempty"`
+
+	// RebuildStrategy selects InPlace (default) or BlueGreen for Rebuild Operations.
+	// BlueGreen is only supported when this instance owns a CNPG Cluster (spec.database.cluster).
+	// +optional
+	// +kubebuilder:default="InPlace"
+	RebuildStrategy RebuildStrategy `json:"rebuildStrategy,omitempty"`
+}
+
+// EffectiveRebuildStrategy returns RebuildStrategyInPlace when unset.
+func (s DatabaseSpec) EffectiveRebuildStrategy() RebuildStrategy {
+	if s.RebuildStrategy == "" {
+		return RebuildStrategyInPlace
+	}
+	return s.RebuildStrategy
 }
 
 // UpdatesSpec schedules automatic Update NominatimOperations (no CronJob in v1).
@@ -556,7 +643,8 @@ type DatabaseStatus struct {
 	// +optional
 	ConnectionSecretName string `json:"connectionSecretName,omitempty"`
 
-	// ClusterName is the CNPG Cluster name when managing or attached (empty in degraded mode).
+	// ClusterName is the live CNPG Cluster name when managing or attached (empty in degraded mode).
+	// After a BlueGreen Rebuild cutover this may remain a generation-suffixed name (e.g. {name}-pg-bg).
 	// +optional
 	ClusterName string `json:"clusterName,omitempty"`
 
@@ -582,6 +670,10 @@ type NominatimInstanceStatus struct {
 	// Database reports connection secret and CNPG attachment mode.
 	// +optional
 	Database DatabaseStatus `json:"database,omitempty"`
+
+	// Rebuild observes BlueGreen Rebuild swap progress (empty when idle / InPlace).
+	// +optional
+	Rebuild *RebuildStatus `json:"rebuild,omitempty"`
 
 	// ObservedGeneration is the last reconciled generation.
 	// +optional
