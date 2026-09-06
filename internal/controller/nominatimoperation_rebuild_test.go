@@ -207,6 +207,26 @@ func TestEnsureRebuildDatabaseReset_SkipsNonRebuild(t *testing.T) {
 	}
 }
 
+func TestEnsureRebuildDatabaseReset_SkipsBlueGreenStrategy(t *testing.T) {
+	parent := rebuildParent("bg-skip")
+	parent.Spec.Database.RebuildStrategy = nominatimv1alpha1.RebuildStrategyBlueGreen
+	db := newOwnedCNPGDatabase(parent, rebuildTestUIDOld, true)
+	scheme := testScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(parent, db, readyOwnedCNPGCluster(parent)).Build()
+	r := &NominatimOperationReconciler{Client: c, Scheme: scheme}
+	op := rebuildOp("op-bg", parent, nil)
+
+	ready, err := r.ensureRebuildDatabaseReset(context.Background(), op, parent)
+	if err != nil || !ready {
+		t.Fatalf("ready=%v err=%v want ready=true (BlueGreen must not drop the live Database)", ready, err)
+	}
+	getOwnedCNPGDatabase(t, c, parent) // still present with same UID
+	got := getOwnedCNPGDatabase(t, c, parent)
+	if string(got.GetUID()) != rebuildTestUIDOld {
+		t.Fatalf("Database UID=%q want %q (must not recreate)", got.GetUID(), rebuildTestUIDOld)
+	}
+}
+
 func TestEnsureRebuildDatabaseReset_SkipsNonOwnedCluster(t *testing.T) {
 	r := &NominatimOperationReconciler{}
 	op := &nominatimv1alpha1.NominatimOperation{

@@ -65,10 +65,17 @@ Production installs that need CNPG backup should use **`clusterRef`** and author
 
 `pauseBackupsDuringOperations` (default `WriteHeavy`) pauses continuous backup around write-heavy Operations when the instance is CNPG-attached.
 
+`rebuildStrategy` (default `InPlace`) selects how Rebuild works:
+
+| Value | Behavior |
+|-------|----------|
+| `InPlace` | Drop/recreate the owned application Database on the live Cluster; API quiesced |
+| `BlueGreen` | Parallel owned Cluster + project volume, then cut over the API Secret (**`database.cluster` only**). Rejected for `clusterRef` / `connectionSecretRef` — for attached clusters, provision a second Cluster yourself and retarget `clusterRef` |
+
 ## API and UI
 
 - `spec.api.replicas` — may be >1 (stateless serving).
-- `spec.api.suspendDuringOperations` — whether to scale the API down during day-2 write work (`Never` keeps it up for AddRegions/Update; Rebuild always quiesces the API).
+- `spec.api.suspendDuringOperations` — whether to scale the API down during day-2 write work (`Never` keeps it up for AddRegions/Update). **InPlace** Rebuild always quiesces the API; **BlueGreen** Rebuild does not force-suspend.
 - `spec.api.route` / `spec.ui.route` — Gateway API HTTPRoute parentRefs/hostnames (requires Gateway API CRDs).
 - Omit `spec.ui`, or set `spec.ui.enabled: false`, for API/database-only.
 

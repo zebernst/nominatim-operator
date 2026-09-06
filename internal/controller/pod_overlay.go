@@ -34,7 +34,7 @@ var operatorReservedEnvExact = map[string]struct{}{
 	"PROJECT_DIR":               {},
 	"IMPORT_STAGING":            {},
 	"PBF_URL":                   {},
-	"NOMINATIM_DATABASE_DSN":    {},
+	envNominatimDatabaseDSN:     {},
 	"NOMINATIM_FLATNODE_FILE":   {},
 	"NOMINATIM_REBUILD_CONFIRM": {},
 	"NOMINATIM_REGIONS":         {},
