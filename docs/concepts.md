@@ -37,6 +37,8 @@ After successful write operations, a short operator-owned probe Job reads sequen
 | Staging PVC | Per-operation downloads (extracts, aux data) |
 | API workdir | emptyDir only |
 
+`claimName` volumes are **caller-owned**: the operator mounts them but does not create or delete them. `volumeClaimTemplate` PVCs are owned by the Instance and go away with it. See [Configuration](configuration.md#deleting-an-instance).
+
 ## Postgres attachment
 
 Exactly one of:

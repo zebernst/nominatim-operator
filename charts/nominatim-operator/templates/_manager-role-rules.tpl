@@ -105,16 +105,6 @@ Regenerate: make manifests
   - postgresql.cnpg.io
   resources:
   - clusters
-  verbs:
-  - create
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - postgresql.cnpg.io
-  resources:
   - databases
   verbs:
   - create

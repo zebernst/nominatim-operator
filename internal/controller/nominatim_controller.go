@@ -52,8 +52,8 @@ type NominatimInstanceReconciler struct {
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatiminstances,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatiminstances/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatiminstances/finalizers,verbs=update
-// +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatimoperations,verbs=get;list;watch;create;update;patch
-// +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=nominatim.zebernst.dev,resources=nominatimoperations,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=databases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
@@ -147,21 +147,6 @@ func (r *NominatimInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	return updateResult, nil
-}
-
-func (r *NominatimInstanceReconciler) reconcileDelete(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) (ctrl.Result, error) {
-	if !controllerutil.ContainsFinalizer(nom, nominatimv1alpha1.NominatimInstanceFinalizer) {
-		return ctrl.Result{}, nil
-	}
-	// Stub: block deletion while active operations are referenced; later tasks drain Jobs.
-	if len(nom.Status.ActiveOperationRefs) > 0 {
-		return ctrl.Result{}, fmt.Errorf("cannot remove finalizer while %d active operation(s) remain", len(nom.Status.ActiveOperationRefs))
-	}
-	controllerutil.RemoveFinalizer(nom, nominatimv1alpha1.NominatimInstanceFinalizer)
-	if err := r.Update(ctx, nom); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{}, nil
 }
 
 func (r *NominatimInstanceReconciler) syncStatus(ctx context.Context, nom *nominatimv1alpha1.NominatimInstance) error {

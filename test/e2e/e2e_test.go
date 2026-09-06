@@ -290,7 +290,8 @@ var _ = Describe("Manager", Ordered, func() {
 		AfterAll(func() {
 			By("deleting NominatimInstance smoke fixtures")
 			fixture := filepath.Join("test", "e2e", "testdata", "nominatim-smoke.yaml")
-			cmd := exec.Command("kubectl", "delete", "-f", fixture, "--ignore-not-found=true")
+			// Timeout so a stuck Instance finalizer cannot hold the suite for the full 40m.
+			cmd := exec.Command("kubectl", "delete", "-f", fixture, "--ignore-not-found=true", "--timeout=2m")
 			_, _ = utils.Run(cmd)
 			cmd = exec.Command("kubectl", "delete", "ns", appNamespace, "--ignore-not-found=true", "--wait=false")
 			_, _ = utils.Run(cmd)

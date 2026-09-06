@@ -93,6 +93,10 @@ func (r *NominatimOperationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		}
 		return ctrl.Result{}, err
 	}
+	if !parent.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, r.failOperation(ctx, op, reasonParentDeleting,
+			fmt.Sprintf("NominatimInstance %q is deleting; refusing new Operation work", parent.Name))
+	}
 
 	if err := r.ensureOperationOwnerRef(ctx, op, parent); err != nil {
 		return ctrl.Result{}, err
