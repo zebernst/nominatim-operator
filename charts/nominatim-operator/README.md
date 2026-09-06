@@ -80,7 +80,7 @@ spec:
   chart:
     spec:
       chart: nominatim-operator
-      version: "0.1.1" # x-release-please-version
+      version: "1.0.0" # x-release-please-version
       sourceRef:
         kind: HelmRepository
         name: zebernst-charts
